@@ -73,39 +73,15 @@ Use `start.bat` to launch everything together:
 start.bat
 ```
 
-## Recommended Models
+## Model Auto-Detection
 
-### Text (Ollama)
+The app automatically detects all installed models across all backends — no manual configuration needed:
 
-| Model | Size | VRAM | Best For |
-|-------|------|------|----------|
-| Llama 3.1 8B Abliterated | 5.7 GB | 6 GB | Fast all-rounder |
-| Qwen3 8B Abliterated | 5.2 GB | 6 GB | Coding |
-| Mistral Nemo 12B Abliterated | 6.8 GB | 8 GB | Multilingual |
-| DeepSeek R1 8B Abliterated | 5 GB | 6 GB | Reasoning |
-| Qwen3 14B Abliterated | 9 GB | 12 GB | High intelligence |
+- **Text models** — Auto-detected from Ollama. On first launch, the app scans your hardware and recommends the best uncensored models for your system.
+- **Image models** — Auto-detected from ComfyUI's `models/checkpoints` folder. Drop any checkpoint in there and it shows up instantly.
+- **Video models** — Auto-detected from ComfyUI. The app identifies your video backend (Wan 2.1/2.2 or AnimateDiff) and lists available models automatically.
 
-### Image (ComfyUI)
-
-| Model | VRAM | Notes |
-|-------|------|-------|
-| Juggernaut XL V9 | 8 GB | Best photorealistic |
-| FLUX.1 Schnell | 10-12 GB | State-of-the-art |
-| Pony Diffusion V6 XL | 8 GB | Anime/stylized |
-
-### Video (ComfyUI)
-
-The app auto-detects your video backend (Wan 2.1/2.2 or AnimateDiff).
-
-| Model | VRAM | Output | Notes |
-|-------|------|--------|-------|
-| Wan 2.1 T2V 1.3B | 8-10 GB | 480p WEBP | Built-in nodes, no extras needed |
-| Wan 2.2 T2V 14B (FP8) | 10-12 GB | 480-720p | Higher quality, quantized |
-| AnimateDiff v3 + SD1.5 | 6-8 GB | MP4 | Requires AnimateDiff custom nodes |
-
-**Wan setup:** Place models in ComfyUI's `models/diffusion_models/`, `models/text_encoders/`, and `models/vae/` folders.
-
-**AnimateDiff setup:** Install [ComfyUI-AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) and [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) via ComfyUI Manager.
+Just install models in the standard locations and the app picks them up.
 
 ## Configuration
 
