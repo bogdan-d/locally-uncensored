@@ -93,6 +93,20 @@ start.bat
 | FLUX.1 Schnell | 10-12 GB | State-of-the-art |
 | Pony Diffusion V6 XL | 8 GB | Anime/stylized |
 
+### Video (ComfyUI)
+
+The app auto-detects your video backend (Wan 2.1/2.2 or AnimateDiff).
+
+| Model | VRAM | Output | Notes |
+|-------|------|--------|-------|
+| Wan 2.1 T2V 1.3B | 8-10 GB | 480p WEBP | Built-in nodes, no extras needed |
+| Wan 2.2 T2V 14B (FP8) | 10-12 GB | 480-720p | Higher quality, quantized |
+| AnimateDiff v3 + SD1.5 | 6-8 GB | MP4 | Requires AnimateDiff custom nodes |
+
+**Wan setup:** Place models in ComfyUI's `models/diffusion_models/`, `models/text_encoders/`, and `models/vae/` folders.
+
+**AnimateDiff setup:** Install [ComfyUI-AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) and [ComfyUI-VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) via ComfyUI Manager.
+
 ## Configuration
 
 ### Environment Variables

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Image, Video, WifiOff, Play, Loader2, CheckCircle } from 'lucide-react'
+import { Image, Video, WifiOff, Play, Loader2, CheckCircle, AlertTriangle } from 'lucide-react'
 import { useCreate } from '../../hooks/useCreate'
 import { useCreateStore } from '../../stores/createStore'
 import { PromptInput } from './PromptInput'
@@ -8,7 +8,7 @@ import { OutputDisplay } from './OutputDisplay'
 import { Gallery } from './Gallery'
 
 export function CreateView() {
-  const { connected, checkpoints, samplerList, checkConnection, fetchModels, generate, cancel } = useCreate()
+  const { connected, checkpoints, videoModels, samplerList, videoBackend, checkConnection, fetchModels, generate, cancel } = useCreate()
   const { mode, setMode } = useCreateStore()
 
   const [starting, setStarting] = useState(false)
@@ -108,6 +108,19 @@ export function CreateView() {
               </button>
             </div>
 
+            {mode === 'video' && videoBackend === 'none' && connected === true && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-50 dark:bg-yellow-500/10 border border-yellow-200 dark:border-yellow-500/20 text-yellow-700 dark:text-yellow-400 text-xs">
+                <AlertTriangle size={14} />
+                <span>No video nodes detected. Install Wan 2.1 models or AnimateDiff in ComfyUI for video generation.</span>
+              </div>
+            )}
+
+            {mode === 'video' && videoBackend !== 'none' && connected === true && (
+              <div className="text-xs text-gray-400">
+                Video backend: <span className="text-gray-300 font-medium">{videoBackend === 'wan' ? 'Wan 2.1/2.2' : 'AnimateDiff'}</span>
+              </div>
+            )}
+
             <PromptInput onGenerate={generate} onCancel={cancel} />
           </div>
 
@@ -121,7 +134,7 @@ export function CreateView() {
         {/* Parameter sidebar */}
         <div className="w-64 border-l border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-[#1a1a1a] p-4 overflow-y-auto scrollbar-thin hidden lg:block">
           <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-4">Parameters</h3>
-          <ParamPanel checkpoints={checkpoints} samplerList={samplerList} />
+          <ParamPanel checkpoints={checkpoints} videoModels={videoModels} samplerList={samplerList} />
         </div>
       </div>
     </div>

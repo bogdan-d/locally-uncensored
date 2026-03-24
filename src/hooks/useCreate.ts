@@ -3,12 +3,15 @@ import { v4 as uuid } from 'uuid'
 import {
   checkComfyConnection,
   getCheckpoints,
+  getDiffusionModels,
   getSamplers,
+  detectVideoBackend,
   submitWorkflow,
   getHistory,
   buildTxt2ImgWorkflow,
   buildTxt2VidWorkflow,
   type ComfyUIOutput,
+  type VideoBackend,
 } from '../api/comfyui'
 import { useCreateStore, type GalleryItem } from '../stores/createStore'
 
@@ -16,7 +19,9 @@ export function useCreate() {
   const store = useCreateStore()
   const [connected, setConnected] = useState<boolean | null>(null)
   const [checkpoints, setCheckpoints] = useState<string[]>([])
+  const [videoModels, setVideoModels] = useState<string[]>([])
   const [samplerList, setSamplerList] = useState<string[]>([])
+  const [videoBackend, setVideoBackend] = useState<VideoBackend>('none')
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const checkConnection = useCallback(async () => {
@@ -26,9 +31,17 @@ export function useCreate() {
   }, [])
 
   const fetchModels = useCallback(async () => {
-    const [ckpts, samplers] = await Promise.all([getCheckpoints(), getSamplers()])
+    const [ckpts, diffModels, samplers, vBackend] = await Promise.all([
+      getCheckpoints(),
+      getDiffusionModels(),
+      getSamplers(),
+      detectVideoBackend(),
+    ])
     setCheckpoints(ckpts)
+    setVideoModels(diffModels)
     setSamplerList(samplers)
+    setVideoBackend(vBackend)
+
     if (ckpts.length > 0 && !store.model) {
       store.setModel(ckpts[0])
     }
@@ -48,7 +61,7 @@ export function useCreate() {
 
     try {
       const workflow = mode === 'video'
-        ? buildTxt2VidWorkflow({ prompt, negativePrompt, model, sampler, steps, cfgScale, width, height, seed, frames, fps })
+        ? buildTxt2VidWorkflow({ prompt, negativePrompt, model, sampler, steps, cfgScale, width, height, seed, frames, fps }, videoBackend)
         : buildTxt2ImgWorkflow({ prompt, negativePrompt, model, sampler, steps, cfgScale, width, height, seed })
 
       const promptId = await submitWorkflow(workflow)
@@ -57,7 +70,7 @@ export function useCreate() {
       // Poll for completion
       await new Promise<void>((resolve, reject) => {
         let attempts = 0
-        const maxAttempts = 600 // 10 minutes at 1s intervals
+        const maxAttempts = 1200 // 20 minutes for video (can be slow)
 
         pollRef.current = setInterval(async () => {
           attempts++
@@ -78,17 +91,21 @@ export function useCreate() {
               clearInterval(pollRef.current!)
               setProgress(100)
 
-              // Extract outputs
+              // Extract outputs — check images, gifs, and videos
               const outputs = history.outputs || {}
               for (const nodeId of Object.keys(outputs)) {
                 const nodeOutput = outputs[nodeId]
-                const images: ComfyUIOutput[] = nodeOutput.images || nodeOutput.gifs || []
-                for (const img of images) {
+                const files: ComfyUIOutput[] = [
+                  ...(nodeOutput.images || []),
+                  ...(nodeOutput.gifs || []),
+                  ...(nodeOutput.videos || []),
+                ]
+                for (const file of files) {
                   const galleryItem: GalleryItem = {
                     id: uuid(),
                     type: mode,
-                    filename: img.filename,
-                    subfolder: img.subfolder || '',
+                    filename: file.filename,
+                    subfolder: file.subfolder || '',
                     prompt,
                     negativePrompt,
                     model,
@@ -120,7 +137,7 @@ export function useCreate() {
       setCurrentPromptId(null)
       if (pollRef.current) clearInterval(pollRef.current)
     }
-  }, [])
+  }, [videoBackend])
 
   const cancel = useCallback(() => {
     if (pollRef.current) {
@@ -134,7 +151,9 @@ export function useCreate() {
   return {
     connected,
     checkpoints,
+    videoModels,
     samplerList,
+    videoBackend,
     checkConnection,
     fetchModels,
     generate,
