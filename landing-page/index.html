@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Locally Uncensored — All-in-One Local AI App | Chat, Images, Video</title>
+<meta name="description" content="The only local AI app that does Chat + Image Generation + Video Generation in one beautiful UI. Open source, 100% offline, no Docker needed. Powered by Ollama & ComfyUI.">
+<meta name="keywords" content="local ai app, ollama frontend, uncensored ai, comfyui frontend, self-hosted ai, offline ai, local llm, stable diffusion ui, ai chat, image generation, video generation">
+<meta property="og:title" content="Locally Uncensored — Chat. Images. Video. All Local.">
+<meta property="og:description" content="The only open-source local AI app combining Chat + Image Gen + Video Gen in one beautiful UI.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://purpledoubled.github.io/locally-uncensored">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="../public/favicon.svg">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a1a;color:#e0e0f0;overflow-x:hidden}
+a{color:#a78bfa;text-decoration:none}
+a:hover{color:#c4b5fd}
+
+/* Nav */
+nav{position:fixed;top:0;width:100%;padding:1rem 2rem;display:flex;justify-content:space-between;align-items:center;background:rgba(10,10,26,0.85);backdrop-filter:blur(20px);z-index:100;border-bottom:1px solid rgba(255,255,255,0.05)}
+nav .logo{font-size:1.3rem;font-weight:700;background:linear-gradient(135deg,#a78bfa,#6d28d9);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+nav ul{list-style:none;display:flex;gap:2rem}
+nav ul li a{color:#9ca3af;font-size:.9rem;transition:.2s}
+nav ul li a:hover{color:#fff}
+.gh-btn{display:inline-flex;align-items:center;gap:.5rem;background:#1f1f3a;padding:.5rem 1rem;border-radius:8px;font-size:.85rem;color:#e0e0f0;border:1px solid rgba(255,255,255,0.1);transition:.2s}
+.gh-btn:hover{background:#2a2a4a;border-color:#a78bfa}
+
+/* Hero */
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:8rem 2rem 4rem;background:radial-gradient(ellipse at 50% 0%,rgba(109,40,217,0.15),transparent 70%)}
+.hero h1{font-size:clamp(2.5rem,6vw,4.5rem);font-weight:800;margin-bottom:1rem;background:linear-gradient(135deg,#fff,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.hero .tagline{font-size:clamp(1.1rem,2.5vw,1.5rem);color:#9ca3af;margin-bottom:2rem;letter-spacing:.5px}
+.hero .tagline span{color:#a78bfa}
+.hero-cta{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center;margin-bottom:3rem}
+.btn{padding:.8rem 2rem;border-radius:10px;font-size:1rem;font-weight:600;cursor:pointer;transition:.2s;border:none}
+.btn-primary{background:linear-gradient(135deg,#7c3aed,#a78bfa);color:#fff}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 30px rgba(124,58,237,0.4)}
+.btn-secondary{background:rgba(255,255,255,0.05);color:#e0e0f0;border:1px solid rgba(255,255,255,0.15)}
+.btn-secondary:hover{background:rgba(255,255,255,0.1)}
+
+/* Screenshots */
+.screenshots{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;max-width:1000px;margin:0 auto;padding:0 1rem}
+.screenshots img{width:100%;border-radius:12px;border:1px solid rgba(255,255,255,0.08);transition:.3s;cursor:pointer}
+.screenshots img:hover{transform:scale(1.03);border-color:rgba(167,139,250,0.3)}
+
+/* Section */
+section{padding:6rem 2rem}
+.section-title{text-align:center;font-size:2.2rem;font-weight:700;margin-bottom:.8rem}
+.section-sub{text-align:center;color:#9ca3af;margin-bottom:3rem;font-size:1.1rem}
+
+/* Features */
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1.5rem;max-width:1100px;margin:0 auto}
+.feature-card{background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:16px;padding:2rem;transition:.3s}
+.feature-card:hover{background:rgba(255,255,255,0.06);border-color:rgba(167,139,250,0.2);transform:translateY(-4px)}
+.feature-card .icon{font-size:2rem;margin-bottom:1rem}
+.feature-card h3{font-size:1.15rem;margin-bottom:.5rem}
+.feature-card p{color:#9ca3af;font-size:.9rem;line-height:1.6}
+
+/* Comparison */
+.compare-wrap{max-width:900px;margin:0 auto;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.95rem}
+th{background:rgba(124,58,237,0.15);padding:1rem;text-align:left;font-weight:600;border-bottom:1px solid rgba(255,255,255,0.1)}
+td{padding:.8rem 1rem;border-bottom:1px solid rgba(255,255,255,0.04)}
+tr:hover{background:rgba(255,255,255,0.02)}
+td:first-child{font-weight:500}
+.yes{color:#22c55e}
+.no{color:#ef4444}
+.maybe{color:#eab308}
+
+/* Get Started */
+.get-started{max-width:700px;margin:0 auto;text-align:center}
+.install-tabs{display:flex;justify-content:center;gap:1rem;margin-bottom:1.5rem}
+.tab{padding:.6rem 1.5rem;border-radius:8px;cursor:pointer;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);color:#9ca3af;transition:.2s}
+.tab.active{background:rgba(124,58,237,0.2);border-color:#7c3aed;color:#fff}
+.code-block{background:#111128;border-radius:12px;padding:1.5rem;text-align:left;font-family:'Fira Code',monospace;font-size:.9rem;color:#a78bfa;border:1px solid rgba(255,255,255,0.06);display:none}
+.code-block.active{display:block}
+.code-block .comment{color:#555}
+
+/* Footer */
+footer{text-align:center;padding:3rem 2rem;border-top:1px solid rgba(255,255,255,0.05);color:#666;font-size:.85rem}
+footer a{color:#9ca3af}
+footer .links{display:flex;justify-content:center;gap:2rem;margin-bottom:1rem}
+
+/* Animations */
+.fade-in{opacity:0;transform:translateY(30px);transition:opacity .6s,transform .6s}
+.fade-in.visible{opacity:1;transform:translateY(0)}
+
+/* Mobile */
+@media(max-width:768px){
+  nav ul{display:none}
+  .screenshots{grid-template-columns:1fr}
+  .hero h1{font-size:2.2rem}
+  .features{grid-template-columns:1fr}
+  table{font-size:.8rem}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="logo">🔓 Locally Uncensored</div>
+  <ul>
+    <li><a href="#features">Features</a></li>
+    <li><a href="#compare">Compare</a></li>
+    <li><a href="#start">Get Started</a></li>
+  </ul>
+  <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="gh-btn" target="_blank">⭐ Star on GitHub</a>
+</nav>
+
+<section class="hero">
+  <h1>Locally Uncensored</h1>
+  <p class="tagline"><span>Chat.</span> <span>Images.</span> <span>Video.</span> All Local. All Yours.</p>
+  <div class="hero-cta">
+    <a href="#start" class="btn btn-primary">Get Started</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="btn btn-secondary" target="_blank">View on GitHub</a>
+  </div>
+  <div class="screenshots">
+    <img src="../docs/screenshots/marketing_03_chat_personas.png" alt="AI Chat with Personas" loading="lazy">
+    <img src="../docs/screenshots/marketing_06_create_view.png" alt="Image & Video Generation" loading="lazy">
+    <img src="../docs/screenshots/marketing_07_model_manager.png" alt="Model Manager" loading="lazy">
+  </div>
+</section>
+
+<section id="features" class="fade-in">
+  <h2 class="section-title">Everything You Need. One App.</h2>
+  <p class="section-sub">No more juggling Ollama, ComfyUI, and five browser tabs.</p>
+  <div class="features">
+    <div class="feature-card">
+      <div class="icon">💬</div>
+      <h3>Uncensored AI Chat</h3>
+      <p>Run abliterated models via Ollama with zero restrictions. Say what you want, get real answers.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🎨</div>
+      <h3>Image Generation</h3>
+      <p>Text-to-image via ComfyUI. SDXL, FLUX, Pony — full parameter control, no cloud needed.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🎬</div>
+      <h3>Video Generation</h3>
+      <p>Create videos with Wan 2.1/2.2 and AnimateDiff. All running on your hardware.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🎭</div>
+      <h3>25+ Personas</h3>
+      <p>From Helpful Assistant to Roast Master. Ready out of the box, no prompt engineering needed.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">🧠</div>
+      <h3>Model Manager</h3>
+      <p>Browse, install, and switch models with one click. Auto-detects everything you have installed.</p>
+    </div>
+    <div class="feature-card">
+      <div class="icon">⚡</div>
+      <h3>One-Click Setup</h3>
+      <p>Run setup.bat (Windows) or setup.sh (Linux/Mac). No Docker, no Terminal wizardry.</p>
+    </div>
+  </div>
+</section>
+
+<section id="compare" class="fade-in">
+  <h2 class="section-title">How It Compares</h2>
+  <p class="section-sub">The only app that does all three — locally.</p>
+  <div class="compare-wrap">
+    <table>
+      <tr><th>Feature</th><th>Locally Uncensored</th><th>Open WebUI</th><th>LM Studio</th><th>SillyTavern</th></tr>
+      <tr><td>AI Chat</td><td class="yes">✅</td><td class="yes">✅</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+      <tr><td>Image Generation</td><td class="yes">✅</td><td class="no">❌</td><td class="no">❌</td><td class="no">❌</td></tr>
+      <tr><td>Video Generation</td><td class="yes">✅</td><td class="no">❌</td><td class="no">❌</td><td class="no">❌</td></tr>
+      <tr><td>Uncensored by Default</td><td class="yes">✅</td><td class="no">❌</td><td class="no">❌</td><td class="maybe">⚠️</td></tr>
+      <tr><td>One-Click Setup</td><td class="yes">✅</td><td class="no">❌ Docker</td><td class="yes">✅</td><td class="no">❌ Node.js</td></tr>
+      <tr><td>25+ Built-in Personas</td><td class="yes">✅</td><td class="no">❌</td><td class="no">❌</td><td class="maybe">⚠️ manual</td></tr>
+      <tr><td>Open Source</td><td class="yes">✅</td><td class="yes">✅</td><td class="no">❌</td><td class="yes">✅</td></tr>
+      <tr><td>No Docker Required</td><td class="yes">✅</td><td class="no">❌</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+      <tr><td>100% Offline</td><td class="yes">✅</td><td class="yes">✅</td><td class="yes">✅</td><td class="yes">✅</td></tr>
+    </table>
+  </div>
+</section>
+
+<section id="start" class="fade-in">
+  <h2 class="section-title">Get Started in 60 Seconds</h2>
+  <p class="section-sub">Clone, run, done.</p>
+  <div class="get-started">
+    <div class="install-tabs">
+      <div class="tab active" onclick="switchTab('win')">Windows</div>
+      <div class="tab" onclick="switchTab('linux')">Linux / macOS</div>
+    </div>
+    <div class="code-block active" id="tab-win">
+      <span class="comment"># Clone and run</span><br>
+      git clone https://github.com/PurpleDoubleD/locally-uncensored.git<br>
+      cd locally-uncensored<br>
+      setup.bat
+    </div>
+    <div class="code-block" id="tab-linux">
+      <span class="comment"># Clone and run</span><br>
+      git clone https://github.com/PurpleDoubleD/locally-uncensored.git<br>
+      cd locally-uncensored<br>
+      chmod +x setup.sh && ./setup.sh
+    </div>
+    <p style="margin-top:1.5rem;color:#9ca3af;font-size:.9rem">The setup script installs Node.js, Ollama, downloads a recommended AI model, and launches the app.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="links">
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" target="_blank">GitHub</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54" target="_blank">Reddit</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions" target="_blank">Discussions</a>
+  </div>
+  <p>MIT License · Built with privacy in mind · Your data stays on your machine 🔒</p>
+</footer>
+
+<script>
+function switchTab(t){
+  document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
+  document.querySelectorAll('.code-block').forEach(e=>e.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('tab-'+t).classList.add('active');
+}
+const obs=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting)e.target.classList.add('visible')})},{threshold:.1});
+document.querySelectorAll('.fade-in').forEach(e=>obs.observe(e));
+document.querySelectorAll('nav a[href^="#"]').forEach(a=>{a.addEventListener('click',e=>{e.preventDefault();document.querySelector(a.getAttribute('href')).scrollIntoView({behavior:'smooth'})})});
+</script>
+
+</body>
+</html>
