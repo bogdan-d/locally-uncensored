@@ -1,7 +1,8 @@
 import { useCreateStore } from '../../stores/createStore'
 import { SliderControl } from '../settings/SliderControl'
-import { Dice5, Info } from 'lucide-react'
+import { Dice5, Info, AlertTriangle } from 'lucide-react'
 import type { ClassifiedModel, ModelType } from '../../api/comfyui'
+import { snapToVideoGrid } from '../../api/comfyui'
 
 interface Props {
   imageModels: ClassifiedModel[]
@@ -20,14 +21,15 @@ const IMG_SIZE_PRESETS = [
 ]
 
 const VID_SIZE_PRESETS = [
-  { label: '480p', w: 832, h: 480 },
+  { label: '480p', w: 848, h: 480 },
+  { label: '640x480', w: 640, h: 480 },
   { label: '512', w: 512, h: 512 },
-  { label: '768x480', w: 768, h: 480 },
-  { label: '480x768', w: 480, h: 768 },
+  { label: '480x848', w: 480, h: 848 },
 ]
 
 const TYPE_BADGE: Record<ModelType, { label: string; color: string }> = {
   flux: { label: 'FLUX', color: 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300' },
+  flux2: { label: 'FLUX 2', color: 'bg-purple-100 dark:bg-purple-500/20 text-purple-700 dark:text-purple-300' },
   sdxl: { label: 'SDXL', color: 'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300' },
   sd15: { label: 'SD 1.5', color: 'bg-green-100 dark:bg-green-500/20 text-green-700 dark:text-green-300' },
   wan: { label: 'Wan', color: 'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300' },
@@ -169,12 +171,28 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
       {/* Video-specific params */}
       {isVideo && (
         <>
-          <SliderControl label="Frames" value={store.frames} min={8} max={81} step={1} onChange={store.setFrames} />
+          <SliderControl label="Frames" value={store.frames} min={1} max={81} step={4} onChange={store.setFrames} />
           <SliderControl label="FPS" value={store.fps} min={4} max={30} step={1} onChange={store.setFps} />
           <div className="flex items-center gap-1 text-xs text-gray-400">
             <Info size={12} />
             <span>Duration: ~{videoDuration}s ({store.frames} frames at {store.fps} fps)</span>
           </div>
+          {(store.width % 16 !== 0 || store.height % 16 !== 0) && (
+            <button
+              onClick={() => {
+                const snapped = snapToVideoGrid(store.width, store.height)
+                store.setSize(snapped.width, snapped.height)
+              }}
+              className="flex items-center gap-1 text-xs text-yellow-600 dark:text-yellow-400 hover:underline"
+            >
+              <AlertTriangle size={12} /> Size must be multiple of 16 — click to fix ({snapToVideoGrid(store.width, store.height).width}x{snapToVideoGrid(store.width, store.height).height})
+            </button>
+          )}
+          {store.frames > 40 && (
+            <div className="flex items-center gap-1 text-xs text-orange-500">
+              <AlertTriangle size={12} /> High frame count — may need 10+ GB VRAM
+            </div>
+          )}
         </>
       )}
     </div>

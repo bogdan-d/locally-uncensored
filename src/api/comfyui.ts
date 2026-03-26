@@ -25,7 +25,7 @@ export interface ComfyUIOutput {
   type: string
 }
 
-export type ModelType = 'flux' | 'sdxl' | 'sd15' | 'wan' | 'hunyuan' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'sdxl' | 'sd15' | 'wan' | 'hunyuan' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -38,6 +38,7 @@ export interface ClassifiedModel {
 
 function classifyModel(name: string): ModelType {
   const lower = name.toLowerCase()
+  if (lower.includes('flux-2') || lower.includes('flux2')) return 'flux2'
   if (lower.includes('flux')) return 'flux'
   if (lower.includes('wan')) return 'wan'
   if (lower.includes('hunyuan')) return 'hunyuan'
@@ -47,7 +48,7 @@ function classifyModel(name: string): ModelType {
 }
 
 function isImageModelType(type: ModelType): boolean {
-  return type === 'flux' || type === 'sdxl' || type === 'sd15' || type === 'unknown'
+  return type === 'flux' || type === 'flux2' || type === 'sdxl' || type === 'sd15' || type === 'unknown'
 }
 
 function isVideoModelType(type: ModelType): boolean {
@@ -60,6 +61,18 @@ export async function checkComfyConnection(): Promise<boolean> {
   try {
     const res = await fetch('/comfyui/system_stats', { signal: AbortSignal.timeout(5000) })
     return res.ok
+  } catch {
+    return false
+  }
+}
+
+// Check if a specific node exists in ComfyUI (lightweight, single node check)
+async function nodeExists(nodeName: string): Promise<boolean> {
+  try {
+    const res = await fetch(`/comfyui/object_info/${nodeName}`, { signal: AbortSignal.timeout(3000) })
+    if (!res.ok) return false
+    const data = await res.json()
+    return !!(data && data[nodeName])
   } catch {
     return false
   }
@@ -181,20 +194,29 @@ export async function getVideoModels(): Promise<ClassifiedModel[]> {
   return result
 }
 
-// ─── Detect Video Backend (checks BOTH nodes AND models) ───
+// ─── Detect Video Backend (checks individual nodes + models — no full object_info fetch) ───
 
 export async function detectVideoBackend(): Promise<VideoBackend> {
   try {
-    const [nodeRes, videoModels] = await Promise.all([
-      fetch('/comfyui/object_info').then(r => r.ok ? r.json() : {}),
+    // Check Wan/Hunyuan: need specific nodes AND actual video models
+    const [hasWanLatent, hasUNET, hasCLIP, hasVAE, videoModels] = await Promise.all([
+      nodeExists('EmptyHunyuanLatentVideo'),
+      nodeExists('UNETLoader'),
+      nodeExists('CLIPLoader'),
+      nodeExists('VAELoader'),
       getVideoModels(),
     ])
 
-    const hasWanNodes = !!(nodeRes['EmptyHunyuanLatentVideo'] && nodeRes['UNETLoader'] && nodeRes['CLIPLoader'] && nodeRes['VAELoader'])
-    const hasWanModels = videoModels.length > 0
-    if (hasWanNodes && hasWanModels) return 'wan'
+    if (hasWanLatent && hasUNET && hasCLIP && hasVAE && videoModels.length > 0) {
+      return 'wan'
+    }
 
-    if (nodeRes['ADE_LoadAnimateDiffModel'] && nodeRes['ADE_UseEvolvedSampling']) return 'animatediff'
+    // Check AnimateDiff: need custom extension nodes
+    const [hasADELoad, hasADESampling] = await Promise.all([
+      nodeExists('ADE_LoadAnimateDiffModel'),
+      nodeExists('ADE_UseEvolvedSampling'),
+    ])
+    if (hasADELoad && hasADESampling) return 'animatediff'
   } catch (err) {
     console.warn('[ComfyUI] Failed to detect video backend:', err)
   }
@@ -208,18 +230,41 @@ async function findMatchingVAE(modelType: ModelType): Promise<string> {
   if (vaes.length === 0) throw new Error('No VAE models found in ComfyUI. Add a VAE to models/vae/')
   const lower = (s: string) => s.toLowerCase()
 
-  if (modelType === 'flux') {
-    return vaes.find(v => lower(v).includes('flux')) ?? vaes[0]
+  // Try to find a matching VAE by model type keywords
+  if (modelType === 'flux' || modelType === 'flux2') {
+    const match = vaes.find(v => lower(v).includes('flux'))
+    if (match) return match
   }
-  if (modelType === 'wan' || modelType === 'hunyuan') {
-    return vaes.find(v => lower(v).includes('wan') || lower(v).includes('hunyuan')) ?? vaes[0]
+  if (modelType === 'wan') {
+    const match = vaes.find(v => lower(v).includes('wan'))
+    if (match) return match
   }
+  if (modelType === 'hunyuan') {
+    const match = vaes.find(v => lower(v).includes('hunyuan') || lower(v).includes('wan'))
+    if (match) return match
+  }
+
+  // Fallback: first available VAE
+  console.warn(`[ComfyUI] No ${modelType}-specific VAE found, using fallback: ${vaes[0]}`)
   return vaes[0]
 }
 
 async function findMatchingCLIP(modelType: ModelType): Promise<string> {
   const clips = await getCLIPModels()
-  if (clips.length === 0) throw new Error('No CLIP/text encoder models found. Add one to models/clip/ or models/text_encoders/')
+  if (clips.length === 0) throw new Error('No CLIP/text encoder models found. Add one to models/text_encoders/')
+  const lower = (s: string) => s.toLowerCase()
+
+  // Try to find a matching CLIP by model type
+  if (modelType === 'wan' || modelType === 'hunyuan') {
+    const match = clips.find(c => lower(c).includes('umt5') || lower(c).includes('wan') || lower(c).includes('t5'))
+    if (match) return match
+  }
+  if (modelType === 'flux' || modelType === 'flux2') {
+    const match = clips.find(c => lower(c).includes('t5') || lower(c).includes('clip'))
+    if (match) return match
+  }
+
+  console.warn(`[ComfyUI] No ${modelType}-specific CLIP found, using fallback: ${clips[0]}`)
   return clips[0]
 }
 
@@ -276,8 +321,26 @@ function validateParams(params: GenerateParams) {
   if (params.steps < 1 || params.steps > 200) throw new Error('Steps must be 1-200')
 }
 
+function validateVideoParams(params: VideoParams) {
+  validateParams(params)
+  if (params.frames < 1 || params.frames > 256) throw new Error('Frames must be 1-256')
+  if (params.fps < 1 || params.fps > 60) throw new Error('FPS must be 1-60')
+  // Wan requires width/height to be multiples of 16
+  if (params.width % 16 !== 0) throw new Error(`Width must be a multiple of 16 (current: ${params.width})`)
+  if (params.height % 16 !== 0) throw new Error(`Height must be a multiple of 16 (current: ${params.height})`)
+}
+
 function getSeed(seed: number): number {
   return seed === -1 ? Math.floor(Math.random() * 2147483647) : Math.floor(seed)
+}
+
+// ─── Snap video dimensions to valid values ───
+
+export function snapToVideoGrid(width: number, height: number): { width: number; height: number } {
+  return {
+    width: Math.round(width / 16) * 16,
+    height: Math.round(height / 16) * 16,
+  }
 }
 
 // ─── Image Workflow: SDXL/SD (CheckpointLoaderSimple) ───
@@ -308,12 +371,14 @@ export function buildSDXLImgWorkflow(params: GenerateParams): Record<string, any
 export async function buildFluxImgWorkflow(params: GenerateParams): Promise<Record<string, any>> {
   validateParams(params)
   const seed = getSeed(params.seed)
-  const vae = await findMatchingVAE('flux')
-  const clip = await findMatchingCLIP('flux')
+  const modelType = classifyModel(params.model)
+  const vae = await findMatchingVAE(modelType)
+  const clip = await findMatchingCLIP(modelType)
+  const clipType = modelType === 'flux2' ? 'flux2' : 'flux'
 
   return {
     '1': { class_type: 'UNETLoader', inputs: { unet_name: params.model, weight_dtype: 'default' } },
-    '2': { class_type: 'CLIPLoader', inputs: { clip_name: clip, type: 'flux', device: 'default' } },
+    '2': { class_type: 'CLIPLoader', inputs: { clip_name: clip, type: clipType, device: 'default' } },
     '3': { class_type: 'VAELoader', inputs: { vae_name: vae } },
     '4': { class_type: 'CLIPTextEncode', inputs: { text: params.prompt, clip: ['2', 0] } },
     '5': { class_type: 'EmptySD3LatentImage', inputs: { width: params.width, height: params.height, batch_size: params.batchSize } },
@@ -333,19 +398,25 @@ export async function buildFluxImgWorkflow(params: GenerateParams): Promise<Reco
 // ─── Auto-select Image Workflow ───
 
 export async function buildTxt2ImgWorkflow(params: GenerateParams, modelType: ModelType): Promise<Record<string, any>> {
-  if (modelType === 'flux') return buildFluxImgWorkflow(params)
+  if (modelType === 'flux' || modelType === 'flux2') return buildFluxImgWorkflow(params)
   return buildSDXLImgWorkflow(params)
 }
 
-// ─── Video Workflow: Wan 2.1/2.2 ───
+// ─── Video Workflow: Wan 2.1/2.2 (Hunyuan latent space) ───
 
 export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record<string, any>> {
-  validateParams(params)
+  validateVideoParams(params)
   const seed = getSeed(params.seed)
+
+  // Pre-check required nodes
+  const hasLatent = await nodeExists('EmptyHunyuanLatentVideo')
+  if (!hasLatent) throw new Error('EmptyHunyuanLatentVideo node not found. Update ComfyUI to latest version.')
+  const hasSaveWEBP = await nodeExists('SaveAnimatedWEBP')
+
   const vae = await findMatchingVAE('wan')
   const clip = await findMatchingCLIP('wan')
 
-  return {
+  const workflow: Record<string, any> = {
     '1': { class_type: 'CLIPLoader', inputs: { clip_name: clip, type: 'wan', device: 'default' } },
     '2': { class_type: 'UNETLoader', inputs: { unet_name: params.model, weight_dtype: 'default' } },
     '3': { class_type: 'VAELoader', inputs: { vae_name: vae } },
@@ -361,21 +432,35 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record
       },
     },
     '8': { class_type: 'VAEDecode', inputs: { samples: ['7', 0], vae: ['3', 0] } },
-    '9': {
+  }
+
+  // Use SaveAnimatedWEBP if available, otherwise fall back to SaveImage (frame sequence)
+  if (hasSaveWEBP) {
+    workflow['9'] = {
       class_type: 'SaveAnimatedWEBP',
       inputs: { images: ['8', 0], filename_prefix: 'locally_uncensored_vid', fps: params.fps, lossless: false, quality: 90, method: 'default' },
-    },
+    }
+  } else {
+    workflow['9'] = {
+      class_type: 'SaveImage',
+      inputs: { images: ['8', 0], filename_prefix: 'locally_uncensored_vid' },
+    }
   }
+
+  return workflow
 }
 
 // ─── Video Workflow: AnimateDiff ───
 
 export async function buildAnimateDiffWorkflow(params: VideoParams): Promise<Record<string, any>> {
-  validateParams(params)
+  validateVideoParams(params)
   const seed = getSeed(params.seed)
   const motionModel = await findAnimateDiffModel()
 
-  return {
+  // AnimateDiff: batch_size=1, motion model handles temporal dimension
+  const hasVHS = await nodeExists('VHS_VideoCombine')
+
+  const workflow: Record<string, any> = {
     '1': { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: params.model } },
     '2': { class_type: 'ADE_LoadAnimateDiffModel', inputs: { model_name: motionModel } },
     '3': { class_type: 'ADE_ApplyAnimateDiffModelSimple', inputs: { motion_model: ['2', 0] } },
@@ -392,11 +477,30 @@ export async function buildAnimateDiffWorkflow(params: VideoParams): Promise<Rec
       },
     },
     '9': { class_type: 'VAEDecode', inputs: { samples: ['8', 0], vae: ['1', 2] } },
-    '10': {
+  }
+
+  // Use VHS_VideoCombine if available (produces MP4), otherwise SaveAnimatedWEBP, otherwise SaveImage
+  if (hasVHS) {
+    workflow['10'] = {
       class_type: 'VHS_VideoCombine',
       inputs: { images: ['9', 0], frame_rate: params.fps, loop_count: 0, filename_prefix: 'locally_uncensored_vid', format: 'video/h264-mp4', pingpong: false, save_output: true },
-    },
+    }
+  } else {
+    const hasSaveWEBP = await nodeExists('SaveAnimatedWEBP')
+    if (hasSaveWEBP) {
+      workflow['10'] = {
+        class_type: 'SaveAnimatedWEBP',
+        inputs: { images: ['9', 0], filename_prefix: 'locally_uncensored_vid', fps: params.fps, lossless: false, quality: 90, method: 'default' },
+      }
+    } else {
+      workflow['10'] = {
+        class_type: 'SaveImage',
+        inputs: { images: ['9', 0], filename_prefix: 'locally_uncensored_vid' },
+      }
+    }
   }
+
+  return workflow
 }
 
 // ─── Auto-select Video Workflow ───

@@ -127,10 +127,11 @@ export function useCreate() {
       setCurrentPromptId(promptId)
       addToPromptHistory(prompt)
 
-      // Poll for completion
+      // Poll for completion — video gets 60min timeout, image 20min
+      const maxTime = mode === 'video' ? 60 * 60 * 1000 : 20 * 60 * 1000
       await new Promise<void>((resolve, reject) => {
         let attempts = 0
-        const maxAttempts = 1200
+        let comfyCheckCounter = 0
         const startTime = Date.now()
 
         pollRef.current = setInterval(async () => {
@@ -140,20 +141,36 @@ export function useCreate() {
             return
           }
 
-          attempts++
-          if (attempts > maxAttempts) {
+          const elapsed = Date.now() - startTime
+          if (elapsed > maxTime) {
             if (pollRef.current) clearInterval(pollRef.current)
-            reject(new Error('Generation timed out after 20 minutes'))
+            reject(new Error(`Generation timed out after ${Math.round(maxTime / 60000)} minutes`))
             return
           }
 
-          const elapsed = Math.round((Date.now() - startTime) / 1000)
-          const pct = Math.min(10 + (attempts / (steps * 2) * 85), 95)
+          attempts++
+          comfyCheckCounter++
+
+          // Heartbeat: every 30 polls, check if ComfyUI is still alive
+          if (comfyCheckCounter >= 30) {
+            comfyCheckCounter = 0
+            const alive = await checkComfyConnection()
+            if (!alive) {
+              if (pollRef.current) clearInterval(pollRef.current)
+              reject(new Error('ComfyUI stopped responding during generation'))
+              return
+            }
+          }
+
+          const elapsedSec = Math.round(elapsed / 1000)
+          // Video progress: slower, more conservative estimate
+          const expectedSteps = mode === 'video' ? steps * frames * 0.5 : steps * 2
+          const pct = Math.min(10 + (attempts / expectedSteps * 85), 95)
 
           try {
             const history = await getHistory(promptId)
             if (!history) {
-              setProgress(pct, `Generating... ${elapsed}s elapsed`)
+              setProgress(pct, `Generating... ${elapsedSec}s elapsed`)
               return
             }
 
@@ -179,7 +196,7 @@ export function useCreate() {
                     subfolder: file.subfolder ?? '',
                     prompt, negativePrompt,
                     model: activeModel,
-                    modelType: mode === 'image' ? imageModelType : 'wan',
+                    modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                     seed: seed === -1 ? 0 : seed,
                     steps, cfgScale, sampler, scheduler, width, height,
                     batchSize,

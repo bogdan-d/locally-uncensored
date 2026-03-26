@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { ModelType } from '../api/comfyui'
+// ModelType includes: flux, flux2, sdxl, sd15, wan, hunyuan, unknown
 
 export interface GalleryItem {
   id: string

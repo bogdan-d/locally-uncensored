@@ -138,11 +138,20 @@ export function CreateView() {
 
       {/* Status: Connected */}
       {connected === true && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-green-50 dark:bg-green-500/10 border-b border-green-200 dark:border-green-500/20 text-green-600 dark:text-green-400 text-sm" role="status">
-          <CheckCircle size={16} />
-          <span>
-            ComfyUI connected — {imageModels.length} image model{imageModels.length !== 1 ? 's' : ''}, {videoModels.length} video model{videoModels.length !== 1 ? 's' : ''}
-          </span>
+        <div className="flex items-center justify-between px-4 py-2 bg-green-50 dark:bg-green-500/10 border-b border-green-200 dark:border-green-500/20 text-green-600 dark:text-green-400 text-sm" role="status">
+          <div className="flex items-center gap-2">
+            <CheckCircle size={16} />
+            <span>
+              ComfyUI connected — {imageModels.length} image model{imageModels.length !== 1 ? 's' : ''}, {videoModels.length} video model{videoModels.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          <button
+            onClick={fetchModels}
+            className="flex items-center gap-1 text-xs text-green-500 hover:text-green-700 dark:hover:text-green-300 transition-colors"
+            title="Refresh models"
+          >
+            <RefreshCw size={12} /> Refresh
+          </button>
         </div>
       )}
 
