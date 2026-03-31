@@ -9,8 +9,6 @@ on:
         description: 'Release tag (e.g. v1.2.1)'
         required: true
         default: 'v1.2.1'
-  schedule:
-    - cron: '*/5 * * * *'
 
 permissions:
   contents: write
@@ -23,12 +21,16 @@ jobs:
         include:
           - platform: ubuntu-22.04
             args: ''
+            rust_targets: ''
           - platform: windows-latest
             args: ''
+            rust_targets: ''
           - platform: macos-14
             args: '--target aarch64-apple-darwin'
-          - platform: macos-14
+            rust_targets: 'aarch64-apple-darwin'
+          - platform: macos-13
             args: '--target x86_64-apple-darwin'
+            rust_targets: 'x86_64-apple-darwin'
 
     runs-on: ${{ matrix.platform }}
 
@@ -44,7 +46,7 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-14' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust_targets }}
 
       - name: Rust cache
         uses: swatinem/rust-cache@v2
