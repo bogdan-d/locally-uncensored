@@ -523,7 +523,16 @@ function comfyLauncher(): Plugin {
             let stderr = ''
             let killed = false
 
-            const proc = spawn(process.platform === 'win32' ? 'python' : 'python3', ['-c', code], {
+            const pythonBin = (() => {
+              if (process.platform !== 'win32') return 'python3'
+              try {
+                const { execSync } = require('child_process')
+                const paths = execSync('where python', { encoding: 'utf8' }).trim().split('\n')
+                const real = paths.find((p) => !p.includes('WindowsApps'))
+                return real ? real.trim() : 'python'
+              } catch { return 'python' }
+            })()
+            const proc = spawn(pythonBin, ['-c', code], {
               cwd: tmpDir,
               stdio: ['ignore', 'pipe', 'pipe'],
               shell: false,
