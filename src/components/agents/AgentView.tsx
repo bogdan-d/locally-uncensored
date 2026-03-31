@@ -40,6 +40,47 @@ export function AgentView() {
   const [goal, setGoal] = useState('')
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   const [searxngAvailable, setSearxngAvailable] = useState<boolean | null>(null)
+  const [searxngInstalling, setSearxngInstalling] = useState(false)
+  const [searxngInstallMsg, setSearxngInstallMsg] = useState('')
+
+  const installSearxng = async () => {
+    setSearxngInstalling(true)
+    setSearxngInstallMsg('Starting install...')
+    try {
+      const res = await fetch('/local-api/install-searxng', { method: 'POST' })
+      const data = await res.json()
+      if (data.error) {
+        setSearxngInstallMsg('Error: ' + data.error)
+        setSearxngInstalling(false)
+        return
+      }
+      // Poll for progress
+      const poll = setInterval(async () => {
+        try {
+          const statusRes = await fetch('/local-api/install-searxng')
+          const statusData = await statusRes.json()
+          const lastLog = statusData.logs?.length ? statusData.logs[statusData.logs.length - 1] : ''
+          setSearxngInstallMsg(lastLog || statusData.status)
+          if (statusData.status === 'complete') {
+            clearInterval(poll)
+            setSearxngInstalling(false)
+            setSearxngInstallMsg('SearXNG installed successfully!')
+            // Re-check availability
+            const searchRes = await fetch('/local-api/search-status')
+            const searchData = await searchRes.json()
+            setSearxngAvailable(searchData.searxng)
+          } else if (statusData.status === 'error') {
+            clearInterval(poll)
+            setSearxngInstalling(false)
+            setSearxngInstallMsg('Error: ' + (statusData.error || 'Install failed'))
+          }
+        } catch { /* ignore poll errors */ }
+      }, 2000)
+    } catch (err) {
+      setSearxngInstallMsg('Failed to start install')
+      setSearxngInstalling(false)
+    }
+  }
 
   useEffect(() => {
     fetch('/local-api/search-status')
@@ -117,8 +158,22 @@ export function AgentView() {
       </GlassCard>
 
       {searxngAvailable === false && (
-        <div className="text-[0.7rem] text-gray-500 px-1 -mt-1.5">
-          Tip: Install <a href="https://docs.searxng.org/" target="_blank" rel="noopener noreferrer" className="text-blue-400/70 hover:text-blue-400 underline">SearXNG</a> on port 8888 for better web search results
+        <div className="text-[0.7rem] text-gray-500 px-1 -mt-1.5 flex items-center gap-2 flex-wrap">
+          <span>
+            Tip: Install <a href="https://docs.searxng.org/" target="_blank" rel="noopener noreferrer" className="text-blue-400/70 hover:text-blue-400 underline">SearXNG</a> on port 8888 for better web search results
+          </span>
+          <button
+            onClick={installSearxng}
+            disabled={searxngInstalling}
+            className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-[0.65rem] font-medium border border-blue-500/30"
+          >
+            {searxngInstalling ? 'Installing...' : 'Install SearXNG'}
+          </button>
+          {searxngInstallMsg && (
+            <span className="text-[0.65rem] text-gray-400 truncate max-w-[300px]" title={searxngInstallMsg}>
+              {searxngInstallMsg}
+            </span>
+          )}
         </div>
       )}
 

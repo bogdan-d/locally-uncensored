@@ -669,6 +669,134 @@ function comfyLauncher(): Plugin {
         res.end(JSON.stringify({ searxng: searxngAvailable }))
       })
 
+
+      // --- SearXNG One-Click Install ---
+      const searxngInstallLogs: string[] = []
+      let searxngInstallStatus: "idle" | "installing" | "complete" | "error" = "idle"
+      let searxngInstallError = ""
+
+      server.middlewares.use("/local-api/install-searxng", (req, res) => {
+        if (req.method === "GET") {
+          // Return install status
+          res.writeHead(200, { "Content-Type": "application/json" })
+          res.end(JSON.stringify({
+            status: searxngInstallStatus,
+            error: searxngInstallError,
+            logs: searxngInstallLogs.slice(-30),
+            searxng: searxngAvailable,
+          }))
+          return
+        }
+        if (req.method !== "POST") { res.writeHead(405); res.end(); return }
+
+        if (searxngInstallStatus === "installing") {
+          res.writeHead(200, { "Content-Type": "application/json" })
+          res.end(JSON.stringify({ status: "already_installing" }))
+          return
+        }
+
+        searxngInstallStatus = "installing"
+        searxngInstallError = ""
+        searxngInstallLogs.length = 0
+
+        const home = process.env.HOME || ""
+        const searxngDir = join(home, "searxng")
+
+        const log = (msg: string) => {
+          searxngInstallLogs.push(msg)
+          if (searxngInstallLogs.length > 200) searxngInstallLogs.shift()
+          console.log("[SearXNG Install] " + msg)
+        }
+
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ status: "started", path: searxngDir }))
+
+        // Run installation in background
+        ;(async () => {
+          try {
+            // Create directory
+            if (!existsSync(searxngDir)) {
+              mkdirSync(searxngDir, { recursive: true })
+              log("Created directory: " + searxngDir)
+            }
+
+            // Try Docker first
+            let hasDocker = false
+            try {
+              execSync("docker --version", { stdio: "ignore" })
+              hasDocker = true
+            } catch { /* no docker */ }
+
+            if (hasDocker) {
+              log("Docker found. Pulling SearXNG image...")
+              const pull = spawn("docker", ["pull", "searxng/searxng"], { shell: true, stdio: ["ignore", "pipe", "pipe"] })
+              pull.stdout?.on("data", (d) => log(d.toString().trim()))
+              pull.stderr?.on("data", (d) => log(d.toString().trim()))
+              await new Promise<void>((resolve, reject) => {
+                pull.on("exit", (code) => code === 0 ? resolve() : reject(new Error("docker pull failed (exit " + code + ")")))
+              })
+              log("Pull complete. Starting SearXNG container...")
+
+              // Remove existing container if any
+              try { execSync("docker rm -f searxng", { stdio: "ignore" }) } catch { /* no existing container */ }
+
+              const run = spawn("docker", [
+                "run", "-d", "--name", "searxng",
+                "-p", "8888:8080",
+                "-e", "SEARXNG_BASE_URL=http://localhost:8888",
+                "--restart", "unless-stopped",
+                "searxng/searxng",
+              ], { shell: true, stdio: ["ignore", "pipe", "pipe"] })
+              run.stdout?.on("data", (d) => log(d.toString().trim()))
+              run.stderr?.on("data", (d) => log(d.toString().trim()))
+              await new Promise<void>((resolve, reject) => {
+                run.on("exit", (code) => code === 0 ? resolve() : reject(new Error("docker run failed (exit " + code + ")")))
+              })
+              log("SearXNG container started on port 8888.")
+
+              // Wait a moment then re-check availability
+              await new Promise((r) => setTimeout(r, 3000))
+              checkSearXNG()
+              log("SearXNG installed and running via Docker!")
+              searxngInstallStatus = "complete"
+            } else {
+              // Fallback: pip install
+              log("Docker not found. Trying pip install as fallback...")
+              const pipBin = (() => {
+                try { execSync("pip3 --version", { stdio: "ignore" }); return "pip3" } catch { /* */ }
+                try { execSync("pip --version", { stdio: "ignore" }); return "pip" } catch { /* */ }
+                return null
+              })()
+
+              if (!pipBin) {
+                throw new Error("Neither Docker nor pip found. Install Docker (recommended) or Python pip to continue.")
+              }
+
+              log("Installing SearXNG via " + pipBin + "...")
+              const pip = spawn(pipBin, ["install", "searxng"], { shell: true, stdio: ["ignore", "pipe", "pipe"] })
+              pip.stdout?.on("data", (d) => {
+                const lines = d.toString().split("\n").filter((l: string) => l.trim())
+                lines.forEach((l: string) => log(l.trim()))
+              })
+              pip.stderr?.on("data", (d) => {
+                const lines = d.toString().split("\n").filter((l: string) => l.trim())
+                lines.forEach((l: string) => log(l.trim()))
+              })
+              await new Promise<void>((resolve, reject) => {
+                pip.on("exit", (code) => code === 0 ? resolve() : reject(new Error(pipBin + " install searxng failed (exit " + code + ")")))
+              })
+              log("SearXNG pip package installed. Note: You may need to configure and start it manually with: searxng-run")
+              searxngInstallStatus = "complete"
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            log("ERROR: " + msg)
+            searxngInstallError = msg
+            searxngInstallStatus = "error"
+          }
+        })()
+      })
+
       // API: Multi-tier web search (SearXNG > DDG Instant Answer API > Wikipedia)
       server.middlewares.use('/local-api/web-search', (req, res) => {
         if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
