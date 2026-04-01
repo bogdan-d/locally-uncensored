@@ -298,6 +298,87 @@ export function getVideoBundles(): ModelBundle[] {
   ]
 }
 
+// ─── CivitAI Model Search ───
+
+export interface CivitAIModelResult {
+  id: number
+  name: string
+  description: string
+  type: string
+  thumbnailUrl?: string
+  downloadUrl?: string
+  filename?: string
+  subfolder?: string
+  sizeGB?: number
+  stats?: { downloads: number; likes: number }
+  creator?: string
+  sourceUrl: string
+}
+
+export async function searchCivitaiModels(
+  query: string,
+  type: 'Checkpoint' | 'LORA' | 'VAE' | 'TextualInversion' = 'Checkpoint'
+): Promise<CivitAIModelResult[]> {
+  try {
+    const params = new URLSearchParams({
+      query,
+      types: type,
+      limit: '20',
+      sort: 'Most Downloaded',
+    })
+    const resp = await fetch(`/civitai-api/v1/models?${params}`)
+    if (!resp.ok) return []
+
+    const data = await resp.json()
+    const items: any[] = data.items ?? []
+
+    return items.map((item) => {
+      const version = item.modelVersions?.[0]
+      const file = version?.files?.[0]
+      const thumb = version?.images?.[0]?.url
+      const downloadUrl = version?.downloadUrl ?? file?.downloadUrl
+      const sizeKB = file?.sizeKB ?? 0
+
+      // Determine subfolder based on model type
+      let subfolder = 'checkpoints'
+      if (type === 'LORA') subfolder = 'loras'
+      else if (type === 'VAE') subfolder = 'vae'
+      else if (type === 'TextualInversion') subfolder = 'embeddings'
+      // Check if it's a diffusion model (FLUX, Wan, etc.)
+      const name = item.name?.toLowerCase() || ''
+      if (name.includes('flux') || name.includes('wan') || name.includes('hunyuan')) {
+        subfolder = 'diffusion_models'
+      }
+
+      const filename = file?.name || `${item.name?.replace(/[^a-zA-Z0-9._-]/g, '_')}.safetensors`
+
+      const descParts: string[] = []
+      const rawDesc = (item.description ?? '').replace(/<[^>]*>/g, '').trim()
+      if (rawDesc) descParts.push(rawDesc.slice(0, 120))
+      if (item.stats?.downloadCount) descParts.push(`${item.stats.downloadCount.toLocaleString()} downloads`)
+      if (item.creator?.username) descParts.push(`by ${item.creator.username}`)
+
+      return {
+        id: item.id,
+        name: item.name || `Model #${item.id}`,
+        description: descParts.join(' — '),
+        type: type,
+        thumbnailUrl: thumb,
+        downloadUrl,
+        filename,
+        subfolder,
+        sizeGB: sizeKB > 0 ? Math.round(sizeKB / 1024 / 1024 * 10) / 10 : undefined,
+        stats: item.stats ? { downloads: item.stats.downloadCount || 0, likes: item.stats.thumbsUpCount || 0 } : undefined,
+        creator: item.creator?.username,
+        sourceUrl: `https://civitai.com/models/${item.id}`,
+      }
+    })
+  } catch (err) {
+    console.warn('[discover] CivitAI model search failed:', err)
+    return []
+  }
+}
+
 // Flat list for backwards compatibility (individual files)
 export function getVideoModelsDiscover(): DiscoverModel[] {
   const bundles = getVideoBundles()

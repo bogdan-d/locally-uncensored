@@ -17,6 +17,8 @@ import {
   type ComfyUIOutput,
   type VideoBackend,
 } from '../api/comfyui'
+import { buildDynamicWorkflow } from '../api/dynamic-workflow'
+import { getAllNodeInfo } from '../api/comfyui-nodes'
 import { useCreateStore, type GalleryItem } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { injectParameters } from '../api/workflows'
@@ -39,6 +41,16 @@ export function useCreate() {
     }
   }, [])
 
+  // Auto-refresh models when a ComfyUI model download completes
+  useEffect(() => {
+    const handler = () => {
+      console.log('[useCreate] Model download completed, refreshing model list...')
+      fetchModels()
+    }
+    window.addEventListener('comfyui-model-downloaded', handler)
+    return () => window.removeEventListener('comfyui-model-downloaded', handler)
+  }, [fetchModels])
+
   const checkConnection = useCallback(async () => {
     const ok = await checkComfyConnection()
     setConnected(ok)
@@ -47,12 +59,13 @@ export function useCreate() {
 
   const fetchModels = useCallback(async () => {
     try {
-      const [imgModels, vidModels, samplers, schedulers, vBackend] = await Promise.all([
+      const [imgModels, vidModels, samplers, schedulers, vBackend, _nodeInfo] = await Promise.all([
         getImageModels(),
         getVideoModels(),
         getSamplers(),
         getSchedulers(),
         detectVideoBackend(),
+        getAllNodeInfo().catch(() => null),
       ])
       setImageModels(imgModels)
       setVideoModelsList(vidModels)
@@ -142,12 +155,21 @@ export function useCreate() {
         setProgress(5, `Using workflow: ${customWf.name}...`)
         const params = mode === 'video' ? { ...baseParams, frames, fps } : baseParams
         workflow = await injectParameters(customWf.workflow, customWf.parameterMap, params, imageModelType)
-      } else if (mode === 'video') {
-        setProgress(5, 'Building video workflow...')
-        workflow = await buildTxt2VidWorkflow({ ...baseParams, frames, fps }, videoBackend)
       } else {
-        setProgress(5, 'Building image workflow...')
-        workflow = await buildTxt2ImgWorkflow(baseParams, imageModelType)
+        // Dynamic workflow builder — auto-detects nodes and builds the right pipeline
+        setProgress(5, 'Building workflow...')
+        try {
+          const genParams = mode === 'video' ? { ...baseParams, frames, fps } : baseParams
+          workflow = await buildDynamicWorkflow(genParams, imageModelType)
+        } catch (dynErr) {
+          // Fallback to legacy builders if dynamic fails
+          console.warn('[useCreate] Dynamic builder failed, using legacy:', dynErr)
+          if (mode === 'video') {
+            workflow = await buildTxt2VidWorkflow({ ...baseParams, frames, fps }, videoBackend)
+          } else {
+            workflow = await buildTxt2ImgWorkflow(baseParams, imageModelType)
+          }
+        }
       }
 
       setProgress(10, 'Submitting to ComfyUI...')

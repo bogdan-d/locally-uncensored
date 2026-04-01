@@ -3,8 +3,8 @@ import { motion } from 'framer-motion'
 import { Download, RefreshCw, ExternalLink, Search, Info, CheckCircle, XCircle, Loader2 } from 'lucide-react'
 import {
   fetchAbliteratedModels, getImageBundles, getVideoBundles,
-  startModelDownload, getDownloadProgress,
-  type DiscoverModel, type DownloadProgress, type ModelBundle,
+  startModelDownload, getDownloadProgress, searchCivitaiModels,
+  type DiscoverModel, type DownloadProgress, type ModelBundle, type CivitAIModelResult,
 } from '../../api/discover'
 import { useModels } from '../../hooks/useModels'
 import { GlassCard } from '../ui/GlassCard'
@@ -19,6 +19,9 @@ interface Props {
 
 export function DiscoverModels({ category }: Props) {
   const [textModels, setTextModels] = useState<DiscoverModel[]>([])
+  const [civitaiResults, setCivitaiResults] = useState<CivitAIModelResult[]>([])
+  const [civitaiSearching, setCivitaiSearching] = useState(false)
+  const [civitaiQuery, setCivitaiQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [downloads, setDownloads] = useState<Record<string, DownloadProgress>>({})
@@ -39,7 +42,16 @@ export function DiscoverModels({ category }: Props) {
     if (hasActive && !pollRef.current) {
       pollRef.current = setInterval(async () => {
         const prog = await getDownloadProgress()
-        setDownloads(prog)
+        setDownloads(prev => {
+          // Check if any download just completed
+          for (const [id, d] of Object.entries(prog)) {
+            if (d.status === 'complete' && prev[id]?.status !== 'complete') {
+              // Trigger model list refresh across the app
+              window.dispatchEvent(new CustomEvent('comfyui-model-downloaded'))
+            }
+          }
+          return prog
+        })
         const stillActive = Object.values(prog).some(d => d.status === 'downloading' || d.status === 'connecting')
         if (!stillActive && pollRef.current) {
           clearInterval(pollRef.current)
@@ -83,6 +95,27 @@ export function DiscoverModels({ category }: Props) {
     }
     const prog = await getDownloadProgress()
     setDownloads(prog)
+  }
+
+  const handleCivitaiSearch = async () => {
+    if (!civitaiQuery.trim()) return
+    setCivitaiSearching(true)
+    const results = await searchCivitaiModels(civitaiQuery, 'Checkpoint')
+    setCivitaiResults(results)
+    setCivitaiSearching(false)
+  }
+
+  const handleCivitaiDownload = async (model: CivitAIModelResult) => {
+    if (!model.downloadUrl || !model.filename || !model.subfolder) return
+    // CivitAI downloads need the proxy
+    const url = model.downloadUrl.startsWith('http')
+      ? `/local-api/proxy-download?url=${encodeURIComponent(model.downloadUrl)}`
+      : model.downloadUrl
+    const result = await startModelDownload(model.downloadUrl, model.subfolder, model.filename)
+    if (result.status === 'started' || result.status === 'already_exists') {
+      const prog = await getDownloadProgress()
+      setDownloads(prog)
+    }
   }
 
   const isBundleComplete = (bundle: ModelBundle): boolean => {
@@ -289,6 +322,76 @@ export function DiscoverModels({ category }: Props) {
             )
           })}
         </div>
+      )}
+
+      {/* CivitAI Search (Image & Video) */}
+      {(isImage || isVideo) && (
+        <GlassCard className="p-4 space-y-3">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Search CivitAI</h3>
+          <div className="flex gap-2">
+            <input
+              value={civitaiQuery}
+              onChange={(e) => setCivitaiQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCivitaiSearch()}
+              placeholder="e.g. flux, sdxl realistic, anime..."
+              className="flex-1 px-3 py-2 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/20"
+            />
+            <button
+              onClick={handleCivitaiSearch}
+              disabled={civitaiSearching || !civitaiQuery.trim()}
+              className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/15 disabled:opacity-50 text-gray-700 dark:text-white transition-colors"
+            >
+              {civitaiSearching ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+            </button>
+          </div>
+
+          {civitaiResults.length > 0 && (
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+              {civitaiResults.map((model) => {
+                const dlState = model.filename ? downloads[model.filename] : null
+                const isDl = dlState?.status === 'downloading' || dlState?.status === 'connecting'
+                const isDone = dlState?.status === 'complete'
+
+                return (
+                  <div key={model.id} className="flex gap-3 p-3 rounded-lg bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10">
+                    {model.thumbnailUrl && (
+                      <img src={model.thumbnailUrl} alt="" className="w-14 h-14 rounded-lg object-cover flex-shrink-0" loading="lazy" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{model.name}</span>
+                        {model.sizeGB && <span className="text-[10px] text-gray-400 flex-shrink-0">{model.sizeGB} GB</span>}
+                      </div>
+                      {model.description && <p className="text-[11px] text-gray-500 line-clamp-1 mt-0.5">{model.description}</p>}
+                      {isDl && dlState && dlState.total > 0 && (
+                        <div className="mt-1.5">
+                          <ProgressBar progress={(dlState.progress / dlState.total) * 100} />
+                          <span className="text-[10px] text-gray-400">{formatBytes(dlState.progress)} / {formatBytes(dlState.total)}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {isDone ? (
+                        <CheckCircle size={16} className="text-green-500" />
+                      ) : isDl ? (
+                        <Loader2 size={16} className="animate-spin text-gray-400" />
+                      ) : model.downloadUrl ? (
+                        <button onClick={() => handleCivitaiDownload(model)} className="p-2 rounded-lg bg-green-100 dark:bg-green-500/15 hover:bg-green-200 dark:hover:bg-green-500/25 text-green-700 dark:text-green-400 transition-all" title="Download">
+                          <Download size={14} />
+                        </button>
+                      ) : null}
+                      <a href={model.sourceUrl} target="_blank" rel="noopener noreferrer" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 transition-all" title="View on CivitAI">
+                        <ExternalLink size={14} />
+                      </a>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {civitaiSearching && <div className="text-center py-4 text-gray-500 text-sm">Searching CivitAI...</div>}
+        </GlassCard>
       )}
 
       {loading ? (
