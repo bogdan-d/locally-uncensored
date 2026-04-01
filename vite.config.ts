@@ -1074,7 +1074,7 @@ function comfyLauncher(): Plugin {
             try {
               const output = execSync(`${pythonBin} ${fwScript}`, {
                 encoding: 'utf8',
-                timeout: 30000,
+                timeout: 120000,
               }).trim()
               const lines = output.split('\n')
               const langLine = lines.find((l: string) => l.startsWith('LANG:'))
@@ -1084,7 +1084,10 @@ function comfyLauncher(): Plugin {
               }
               transcript = lines.join(' ').trim()
               success = true
-            } catch { /* try fallback */ }
+            } catch (fwErr) {
+              console.error('[Transcribe] faster-whisper failed:', (fwErr as any).stderr || (fwErr as any).message)
+              /* try fallback */
+            }
 
             // Try openai-whisper
             if (!success) {
@@ -1101,7 +1104,10 @@ function comfyLauncher(): Plugin {
                 }
                 transcript = lines.join(' ').trim()
                 success = true
-              } catch { /* neither works */ }
+              } catch (owErr) {
+              console.error('[Transcribe] openai-whisper failed:', (owErr as any).stderr || (owErr as any).message)
+              /* neither works */
+            }
             }
 
             // Clean up temp files
@@ -1111,7 +1117,7 @@ function comfyLauncher(): Plugin {
 
             if (!success) {
               res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ error: 'Install faster-whisper: pip install faster-whisper', transcript: '' }))
+              res.end(JSON.stringify({ error: 'Transcription failed. Install faster-whisper: pip install faster-whisper', transcript: '' }))
               return
             }
 
