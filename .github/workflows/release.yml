@@ -28,9 +28,9 @@ jobs:
           - platform: macos-14
             args: '--target aarch64-apple-darwin'
             rust_targets: 'aarch64-apple-darwin'
-          - platform: macos-13
+          - platform: macos-14
             args: '--target x86_64-apple-darwin'
-            rust_targets: 'x86_64-apple-darwin'
+            rust_targets: 'aarch64-apple-darwin,x86_64-apple-darwin'
 
     runs-on: ${{ matrix.platform }}
 
@@ -80,8 +80,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.event.inputs.tag || 'v1.2.1' }}
-          releaseName: 'Locally Uncensored ${{ github.event.inputs.tag || ''v1.2.1'' }}'
+          tagName: ${{ github.event.release.tag_name || github.event.inputs.tag || 'v1.3.0' }}
+          releaseName: 'Locally Uncensored ${{ github.event.release.tag_name || github.event.inputs.tag }}'
           releaseBody: |
             ## Download
 
