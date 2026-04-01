@@ -677,13 +677,30 @@ function comfyLauncher(): Plugin {
 
       server.middlewares.use("/local-api/install-searxng", (req, res) => {
         if (req.method === "GET") {
-          // Return install status
+          // Check Docker availability and container status
+          let dockerAvailable = false
+          let installed = false
+          let running = false
+          try {
+            execSync("docker --version", { stdio: "ignore" })
+            dockerAvailable = true
+            try {
+              const containerStatus = execSync("docker ps -a --filter name=^searxng$ --format \"{{.Status}}\"", { encoding: "utf8" }).trim()
+              if (containerStatus) {
+                installed = true
+                running = containerStatus.toLowerCase().startsWith("up")
+              }
+            } catch { /* no container */ }
+          } catch { /* no docker */ }
+
           res.writeHead(200, { "Content-Type": "application/json" })
           res.end(JSON.stringify({
+            installed,
+            running,
+            dockerAvailable,
             status: searxngInstallStatus,
             error: searxngInstallError,
             logs: searxngInstallLogs.slice(-30),
-            searxng: searxngAvailable,
           }))
           return
         }
@@ -694,6 +711,32 @@ function comfyLauncher(): Plugin {
           res.end(JSON.stringify({ status: "already_installing" }))
           return
         }
+
+        // Check if Docker is available
+        let postHasDocker = false
+        try {
+          execSync("docker --version", { stdio: "ignore" })
+          postHasDocker = true
+        } catch { /* no docker */ }
+
+        if (!postHasDocker) {
+          res.writeHead(200, { "Content-Type": "application/json" })
+          res.end(JSON.stringify({ error: "Docker is required for SearXNG. Install Docker first.", dockerMissing: true }))
+          return
+        }
+
+        // Check if container already exists but is stopped — just restart it
+        try {
+          const existingStatus = execSync("docker ps -a --filter name=^searxng$ --format \"{{.Status}}\"", { encoding: "utf8" }).trim()
+          if (existingStatus && !existingStatus.toLowerCase().startsWith("up")) {
+            execSync("docker start searxng", { stdio: "ignore" })
+            res.writeHead(200, { "Content-Type": "application/json" })
+            res.end(JSON.stringify({ status: "ok", message: "SearXNG restarted on port 8888" }))
+            // Re-check availability after a short delay
+            setTimeout(() => checkSearXNG(), 3000)
+            return
+          }
+        } catch { /* no existing container */ }
 
         searxngInstallStatus = "installing"
         searxngInstallError = ""
@@ -720,74 +763,37 @@ function comfyLauncher(): Plugin {
               log("Created directory: " + searxngDir)
             }
 
-            // Try Docker first
-            let hasDocker = false
-            try {
-              execSync("docker --version", { stdio: "ignore" })
-              hasDocker = true
-            } catch { /* no docker */ }
+            log("Pulling SearXNG image...")
+            const pull = spawn("docker", ["pull", "searxng/searxng"], { shell: true, stdio: ["ignore", "pipe", "pipe"] })
+            pull.stdout?.on("data", (d) => log(d.toString().trim()))
+            pull.stderr?.on("data", (d) => log(d.toString().trim()))
+            await new Promise<void>((resolve, reject) => {
+              pull.on("exit", (code) => code === 0 ? resolve() : reject(new Error("docker pull failed (exit " + code + ")")))
+            })
+            log("Pull complete. Starting SearXNG container...")
 
-            if (hasDocker) {
-              log("Docker found. Pulling SearXNG image...")
-              const pull = spawn("docker", ["pull", "searxng/searxng"], { shell: true, stdio: ["ignore", "pipe", "pipe"] })
-              pull.stdout?.on("data", (d) => log(d.toString().trim()))
-              pull.stderr?.on("data", (d) => log(d.toString().trim()))
-              await new Promise<void>((resolve, reject) => {
-                pull.on("exit", (code) => code === 0 ? resolve() : reject(new Error("docker pull failed (exit " + code + ")")))
-              })
-              log("Pull complete. Starting SearXNG container...")
+            // Remove existing container if any
+            try { execSync("docker rm -f searxng", { stdio: "ignore" }) } catch { /* no existing container */ }
 
-              // Remove existing container if any
-              try { execSync("docker rm -f searxng", { stdio: "ignore" }) } catch { /* no existing container */ }
+            const run = spawn("docker", [
+              "run", "-d", "--name", "searxng",
+              "-p", "8888:8080",
+              "-e", "SEARXNG_BASE_URL=http://localhost:8888",
+              "--restart", "unless-stopped",
+              "searxng/searxng",
+            ], { shell: true, stdio: ["ignore", "pipe", "pipe"] })
+            run.stdout?.on("data", (d) => log(d.toString().trim()))
+            run.stderr?.on("data", (d) => log(d.toString().trim()))
+            await new Promise<void>((resolve, reject) => {
+              run.on("exit", (code) => code === 0 ? resolve() : reject(new Error("docker run failed (exit " + code + ")")))
+            })
+            log("SearXNG container started on port 8888.")
 
-              const run = spawn("docker", [
-                "run", "-d", "--name", "searxng",
-                "-p", "8888:8080",
-                "-e", "SEARXNG_BASE_URL=http://localhost:8888",
-                "--restart", "unless-stopped",
-                "searxng/searxng",
-              ], { shell: true, stdio: ["ignore", "pipe", "pipe"] })
-              run.stdout?.on("data", (d) => log(d.toString().trim()))
-              run.stderr?.on("data", (d) => log(d.toString().trim()))
-              await new Promise<void>((resolve, reject) => {
-                run.on("exit", (code) => code === 0 ? resolve() : reject(new Error("docker run failed (exit " + code + ")")))
-              })
-              log("SearXNG container started on port 8888.")
-
-              // Wait a moment then re-check availability
-              await new Promise((r) => setTimeout(r, 3000))
-              checkSearXNG()
-              log("SearXNG installed and running via Docker!")
-              searxngInstallStatus = "complete"
-            } else {
-              // Fallback: pip install
-              log("Docker not found. Trying pip install as fallback...")
-              const pipBin = (() => {
-                try { execSync("pip3 --version", { stdio: "ignore" }); return "pip3" } catch { /* */ }
-                try { execSync("pip --version", { stdio: "ignore" }); return "pip" } catch { /* */ }
-                return null
-              })()
-
-              if (!pipBin) {
-                throw new Error("Neither Docker nor pip found. Install Docker (recommended) or Python pip to continue.")
-              }
-
-              log("Installing SearXNG via " + pipBin + "...")
-              const pip = spawn(pipBin, ["install", "searxng"], { shell: true, stdio: ["ignore", "pipe", "pipe"] })
-              pip.stdout?.on("data", (d) => {
-                const lines = d.toString().split("\n").filter((l: string) => l.trim())
-                lines.forEach((l: string) => log(l.trim()))
-              })
-              pip.stderr?.on("data", (d) => {
-                const lines = d.toString().split("\n").filter((l: string) => l.trim())
-                lines.forEach((l: string) => log(l.trim()))
-              })
-              await new Promise<void>((resolve, reject) => {
-                pip.on("exit", (code) => code === 0 ? resolve() : reject(new Error(pipBin + " install searxng failed (exit " + code + ")")))
-              })
-              log("SearXNG pip package installed. Note: You may need to configure and start it manually with: searxng-run")
-              searxngInstallStatus = "complete"
-            }
+            // Wait a moment then re-check availability
+            await new Promise((r) => setTimeout(r, 3000))
+            checkSearXNG()
+            log("SearXNG installed and running via Docker!")
+            searxngInstallStatus = "complete"
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err)
             log("ERROR: " + msg)

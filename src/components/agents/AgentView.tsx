@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Bot, Play, Square, Trash2, Clock } from 'lucide-react'
+import { Bot, Play, Square, Trash2, Clock, Download, Loader2, CircleCheck, CircleAlert } from 'lucide-react'
 import { GlowButton } from '../ui/GlowButton'
 import { GlassCard } from '../ui/GlassCard'
 import { TaskBreakdown } from './TaskBreakdown'
@@ -39,54 +39,63 @@ function statusLabel(status: AgentRun['status']): string {
 export function AgentView() {
   const [goal, setGoal] = useState('')
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
-  const [searxngAvailable, setSearxngAvailable] = useState<boolean | null>(null)
+  const [searxngStatus, setSearxngStatus] = useState<{ installed: boolean; running: boolean; dockerAvailable: boolean } | null>(null)
   const [searxngInstalling, setSearxngInstalling] = useState(false)
-  const [searxngInstallMsg, setSearxngInstallMsg] = useState('')
+  const [searxngMsg, setSearxngMsg] = useState('')
 
-  const installSearxng = async () => {
+  const checkSearxngStatus = async () => {
+    try {
+      const res = await fetch('/local-api/install-searxng')
+      const data = await res.json()
+      setSearxngStatus({ installed: data.installed, running: data.running, dockerAvailable: data.dockerAvailable })
+    } catch {
+      setSearxngStatus({ installed: false, running: false, dockerAvailable: false })
+    }
+  }
+
+  const installOrStartSearxng = async () => {
     setSearxngInstalling(true)
-    setSearxngInstallMsg('Starting install...')
+    setSearxngMsg('Starting...')
     try {
       const res = await fetch('/local-api/install-searxng', { method: 'POST' })
       const data = await res.json()
       if (data.error) {
-        setSearxngInstallMsg('Error: ' + data.error)
+        setSearxngMsg(data.error)
         setSearxngInstalling(false)
         return
       }
-      // Poll for progress
+      if (data.status === 'ok') {
+        setSearxngMsg(data.message)
+        setSearxngInstalling(false)
+        setTimeout(checkSearxngStatus, 3000)
+        return
+      }
       const poll = setInterval(async () => {
         try {
           const statusRes = await fetch('/local-api/install-searxng')
           const statusData = await statusRes.json()
           const lastLog = statusData.logs?.length ? statusData.logs[statusData.logs.length - 1] : ''
-          setSearxngInstallMsg(lastLog || statusData.status)
+          setSearxngMsg(lastLog || statusData.status)
           if (statusData.status === 'complete') {
             clearInterval(poll)
             setSearxngInstalling(false)
-            setSearxngInstallMsg('SearXNG installed successfully!')
-            // Re-check availability
-            const searchRes = await fetch('/local-api/search-status')
-            const searchData = await searchRes.json()
-            setSearxngAvailable(searchData.searxng)
+            setSearxngMsg('')
+            checkSearxngStatus()
           } else if (statusData.status === 'error') {
             clearInterval(poll)
             setSearxngInstalling(false)
-            setSearxngInstallMsg('Error: ' + (statusData.error || 'Install failed'))
+            setSearxngMsg(statusData.error || 'Install failed')
           }
         } catch { /* ignore poll errors */ }
       }, 2000)
-    } catch (err) {
-      setSearxngInstallMsg('Failed to start install')
+    } catch {
+      setSearxngMsg('Failed to start install')
       setSearxngInstalling(false)
     }
   }
 
   useEffect(() => {
-    fetch('/local-api/search-status')
-      .then(r => r.json())
-      .then(data => setSearxngAvailable(data.searxng))
-      .catch(() => setSearxngAvailable(false))
+    checkSearxngStatus()
   }, [])
   const { activeRun, isRunning, startAgent, stopAgent, approveToolCall, rejectToolCall } = useAgent()
   const { runs, setActiveRun, deleteRun } = useAgentStore()
@@ -157,22 +166,51 @@ export function AgentView() {
         </div>
       </GlassCard>
 
-      {searxngAvailable === false && (
-        <div className="text-[0.7rem] text-gray-500 px-1 -mt-1.5 flex items-center gap-2 flex-wrap">
-          <span>
-            Tip: Install <a href="https://docs.searxng.org/" target="_blank" rel="noopener noreferrer" className="text-blue-400/70 hover:text-blue-400 underline">SearXNG</a> on port 8888 for better web search results
-          </span>
-          <button
-            onClick={installSearxng}
-            disabled={searxngInstalling}
-            className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-[0.65rem] font-medium border border-blue-500/30"
-          >
-            {searxngInstalling ? 'Installing...' : 'Install SearXNG'}
-          </button>
-          {searxngInstallMsg && (
-            <span className="text-[0.65rem] text-gray-400 truncate max-w-[300px]" title={searxngInstallMsg}>
-              {searxngInstallMsg}
-            </span>
+      {searxngStatus && (
+        <div className="text-[0.7rem] px-1 -mt-1.5 flex items-center gap-2">
+          {searxngStatus.running ? (
+            <>
+              <CircleCheck size={12} className="text-green-400 flex-shrink-0" />
+              <span className="text-green-400/80">Search Enhanced</span>
+            </>
+          ) : searxngInstalling ? (
+            <>
+              <Loader2 size={12} className="text-blue-400 animate-spin flex-shrink-0" />
+              <span className="text-blue-400/80 truncate max-w-[400px]" title={searxngMsg}>
+                {searxngMsg || 'Installing SearXNG...'}
+              </span>
+            </>
+          ) : searxngStatus.installed ? (
+            <>
+              <CircleAlert size={12} className="text-amber-400 flex-shrink-0" />
+              <span className="text-gray-500">SearXNG: Stopped</span>
+              <button
+                onClick={installOrStartSearxng}
+                className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 hover:bg-amber-500/30 transition-colors text-[0.65rem] font-medium border border-amber-500/30"
+              >
+                Start SearXNG
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-gray-500">SearXNG: Not installed</span>
+              {searxngStatus.dockerAvailable ? (
+                <button
+                  onClick={installOrStartSearxng}
+                  className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-colors text-[0.65rem] font-medium border border-blue-500/30"
+                >
+                  <Download size={10} className="inline mr-1 -mt-0.5" />
+                  Install SearXNG
+                </button>
+              ) : (
+                <span className="text-gray-600 text-[0.65rem]">Docker required</span>
+              )}
+              {searxngMsg && (
+                <span className="text-red-400/70 text-[0.65rem] truncate max-w-[300px]" title={searxngMsg}>
+                  {searxngMsg}
+                </span>
+              )}
+            </>
           )}
         </div>
       )}
