@@ -32,5 +32,12 @@ src-tauri/target/
 # Claude Code
 .claude/
 
+# Private/internal docs (not for public repo)
+MARKETING_PLAN.md
+MARKET_RESEARCH*.md
+PROMOTION_PLAN.md
+ROADMAP*.md
+marketing/
+
 # OS
 Thumbs.db
