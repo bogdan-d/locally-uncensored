@@ -64,9 +64,9 @@ export function ChatView() {
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.2 }}
           >
-            <img src="/LU-monogram-bw.png" alt="" width={38} height={38} className="dark:invert-0 invert opacity-20 mb-3" />
-            <h1 className="text-[0.8rem] font-semibold text-gray-400 mb-0.5 tracking-wide">LUncensored</h1>
-            <p className="text-[0.6rem] text-gray-600">No filters, no limits.</p>
+            <img src="/LU-monogram-bw.png" alt="" width={46} height={46} className="dark:invert-0 invert opacity-20 mb-3" />
+            <h1 className="text-[0.95rem] font-semibold text-gray-400 mb-0.5 tracking-wide">LUncensored</h1>
+            <p className="text-[0.72rem] text-gray-600">No filters, no limits.</p>
 
             {models.length === 0 && <div className="mt-4"><ModelRecommendation /></div>}
             {models.length > 0 && !activeModel && (
