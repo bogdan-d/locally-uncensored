@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
 import type { Conversation, Message } from '../types/chat'
 import type { AgentBlock } from '../types/agent-mode'
+import { createSafeStorage } from '../lib/storage-quota'
 
 interface ChatState {
   conversations: Conversation[]
@@ -15,6 +16,7 @@ interface ChatState {
   updateMessageContent: (conversationId: string, messageId: string, content: string) => void
   updateMessageThinking: (conversationId: string, messageId: string, thinking: string) => void
   updateMessageAgentBlocks: (conversationId: string, messageId: string, blocks: AgentBlock[]) => void
+  deleteMessagesAfter: (conversationId: string, messageId: string) => void
   getActiveConversation: () => Conversation | undefined
   searchConversations: (query: string) => Conversation[]
 }
@@ -115,6 +117,16 @@ export const useChatStore = create<ChatState>()(
           ),
         })),
 
+      deleteMessagesAfter: (conversationId, messageId) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) => {
+            if (c.id !== conversationId) return c
+            const idx = c.messages.findIndex((m) => m.id === messageId)
+            if (idx < 0) return c
+            return { ...c, messages: c.messages.slice(0, idx), updatedAt: Date.now() }
+          }),
+        })),
+
       getActiveConversation: () => {
         const { conversations, activeConversationId } = get()
         return conversations.find((c) => c.id === activeConversationId)
@@ -130,6 +142,6 @@ export const useChatStore = create<ChatState>()(
         )
       },
     }),
-    { name: 'chat-conversations' }
+    { name: 'chat-conversations', storage: createSafeStorage() }
   )
 )

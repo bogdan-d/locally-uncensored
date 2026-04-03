@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
 import type { MemoryEntry, MemoryCategory, MemoryFile, MemoryType, MemorySettings } from '../types/agent-mode'
 import { MEMORY_MIGRATION_MAP, MEMORY_BUDGET_TIERS } from '../types/agent-mode'
+import { createSafeStorage } from '../lib/storage-quota'
 
 // ── Memory Budget Helper ──────────────────────────────────────
 
@@ -11,6 +12,29 @@ export function getMemoryBudget(contextTokens: number) {
     if (contextTokens <= tier.maxContext) return tier
   }
   return MEMORY_BUDGET_TIERS[MEMORY_BUDGET_TIERS.length - 1]
+}
+
+// ── Injection Sanitization ────────────────────────────────────
+
+function sanitizeForInjection(text: string): string {
+  return text
+    // Strip common prompt injection patterns
+    .replace(/<\|im_start\|>[\s\S]*?<\|im_end\|>/g, '')
+    .replace(/<\|im_start\|>/g, '')
+    .replace(/<\|im_end\|>/g, '')
+    .replace(/<system>[\s\S]*?<\/system>/gi, '')
+    .replace(/<\/?system>/gi, '')
+    .replace(/\[INST\][\s\S]*?\[\/INST\]/g, '')
+    .replace(/\[\/?INST\]/g, '')
+    .replace(/<\|user\|>/g, '')
+    .replace(/<\|assistant\|>/g, '')
+    // Escape heading markers at line start (prevent prompt structure manipulation)
+    .replace(/^#{1,6}\s/gm, '\\# ')
+    // Collapse multiple newlines
+    .replace(/\n{3,}/g, '\n\n')
+    // Truncate per entry
+    .substring(0, 500)
+    .trim()
 }
 
 // ── Search Scoring ────────────────────────────────────────────
@@ -246,14 +270,16 @@ export const useMemoryStore = create<MemoryState>()(
           result += header
 
           for (const item of items) {
-            const line = `- ${item.title}: ${item.content.substring(0, 200).replace(/\n/g, ' ')}\n`
+            const sanitized = sanitizeForInjection(item.content).replace(/\n/g, ' ')
+            const line = `- ${item.title}: ${sanitized}\n`
             if (result.length + line.length > maxChars) break
             result += line
           }
           result += '\n'
         }
 
-        return result.trim()
+        if (!result.trim()) return ''
+        return `<remembered_context>\n${result.trim()}\n</remembered_context>`
       },
 
       // ── Settings ────────────────────────────────────────────
@@ -384,6 +410,7 @@ export const useMemoryStore = create<MemoryState>()(
     {
       name: 'locally-uncensored-memory',
       version: 2,
+      storage: createSafeStorage(),
       migrate: (persistedState, version) => {
         if (version < 2) {
           return migrateV1toV2(persistedState)

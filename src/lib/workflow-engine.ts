@@ -16,6 +16,11 @@ import { resolveToolCallingStrategy } from './agent-strategy'
 import type { AgentWorkflow, WorkflowStep, StepResult, WorkflowEngineCallbacks } from '../types/agent-workflows'
 import type { ChatMessage, ToolDefinition } from '../api/providers/types'
 
+// ── Safety Limits ─────────────────────────────────────────────
+
+export const MAX_LOOP_ITERATIONS = 100
+export const MAX_WORKFLOW_DEPTH = 5
+
 // ── Variable Interpolation ────────────────────────────────────
 
 function interpolate(template: string, variables: Record<string, string>): string {
@@ -54,24 +59,31 @@ export class WorkflowEngine {
   private variables: Record<string, string>
   private abortController: AbortController
   private inputResolver: ((input: string) => void) | null = null
+  private depth: number
 
   constructor(
     workflow: AgentWorkflow,
     conversationId: string,
     callbacks: WorkflowEngineCallbacks,
-    initialVariables?: Record<string, string>
+    initialVariables?: Record<string, string>,
+    depth: number = 0
   ) {
     this.workflow = workflow
     this.conversationId = conversationId
     this.callbacks = callbacks
     this.variables = { ...workflow.variables, ...(initialVariables || {}) }
     this.abortController = new AbortController()
+    this.depth = depth
   }
 
   /**
    * Run the workflow from start to finish.
    */
   async run(): Promise<StepResult[]> {
+    if (this.depth >= MAX_WORKFLOW_DEPTH) {
+      throw new Error(`Maximum workflow nesting depth (${MAX_WORKFLOW_DEPTH}) exceeded`)
+    }
+
     const results: StepResult[] = []
     let stepIndex = 0
 
@@ -319,7 +331,7 @@ export class WorkflowEngine {
     let iterations = 0
     const outputs: string[] = []
 
-    while (iterations < step.loop.maxIterations) {
+    while (iterations < Math.min(step.loop.maxIterations, MAX_LOOP_ITERATIONS)) {
       if (this.abortController.signal.aborted) break
 
       // Execute body steps

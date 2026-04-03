@@ -14,14 +14,16 @@ import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { isAgentCompatible } from '../../lib/model-compatibility'
-import { FileText, Bot, User, ChevronDown, Download, GitCompareArrows } from 'lucide-react'
+import { FileText, Bot, User, ChevronDown, Download, GitCompareArrows, Trophy } from 'lucide-react'
 import { TokenCounter } from './TokenCounter'
+import { MemoryDebugToggle } from './MemoryDebugPanel'
 import { ABCompare } from './ABCompare'
 import { useCompareStore } from '../../stores/compareStore'
+import { useUIStore } from '../../stores/uiStore'
 import { exportConversation } from '../../lib/chat-export'
 
 export function ChatView() {
-  const { sendMessage, stopGeneration, isGenerating, isLoadingModel, pendingApproval, approveToolCall, rejectToolCall } = useChat()
+  const { sendMessage, stopGeneration, isGenerating, isLoadingModel, regenerateMessage, editAndResend, pendingApproval, approveToolCall, rejectToolCall } = useChat()
   const activeConversationId = useChatStore((s) => s.activeConversationId)
   const conversations = useChatStore((s) => s.conversations)
   const activeModel = useModelStore((s) => s.activeModel)
@@ -67,6 +69,26 @@ export function ChatView() {
             <h1 className="text-[0.8rem] font-semibold text-gray-400 mb-0.5 tracking-wide">LUncensored</h1>
             <p className="text-[0.6rem] text-gray-600">No filters, no limits.</p>
 
+            {/* Quick action CTAs */}
+            {models.length > 0 && activeModel && (
+              <div className="flex items-center gap-2 mt-4">
+                <button
+                  onClick={() => setComparing(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/20 text-[0.6rem] text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  <GitCompareArrows size={12} />
+                  Compare Models
+                </button>
+                <button
+                  onClick={() => useUIStore.getState().setView('models')}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 hover:border-white/20 text-[0.6rem] text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  <Trophy size={12} />
+                  Benchmark
+                </button>
+              </div>
+            )}
+
             {models.length === 0 && <div className="mt-4"><ModelRecommendation /></div>}
             {models.length > 0 && !activeModel && (
               <p className="text-[0.6rem] text-amber-500/60 mt-3">Select a model above.</p>
@@ -86,6 +108,9 @@ export function ChatView() {
               <div className="flex items-center justify-end gap-2 px-3 pt-1">
                 {/* Token Counter */}
                 <TokenCounter />
+
+                {/* Memory Debug */}
+                <MemoryDebugToggle />
 
                 {/* Export */}
                 <div className="relative">
@@ -209,7 +234,12 @@ export function ChatView() {
                 )}
               </div>
 
-              <MessageList isGenerating={isGenerating} isLoadingModel={isLoadingModel} />
+              <MessageList
+                isGenerating={isGenerating}
+                isLoadingModel={isLoadingModel}
+                onRegenerate={regenerateMessage}
+                onEdit={editAndResend}
+              />
               <ChatInput
                 onSend={sendMessage}
                 onStop={stopGeneration}

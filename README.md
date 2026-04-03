@@ -33,6 +33,27 @@ No cloud. No censorship. No data collection. Your AI, your rules.
 
 ---
 
+## v2.0 — What's New
+
+**Security Hardening**
+- SSRF protection on all external fetches (private IP/scheme blocking)
+- Memory content sanitization prevents prompt injection via stored memories
+- Workflow recursion guard (max depth 5) and loop hard cap (max 100 iterations)
+- localStorage quota protection with automatic cleanup prevents data loss
+- API key storage disclaimer for cloud providers
+
+**New Features**
+- **Regenerate / Edit Messages** — Edit any user message and resend, or regenerate any AI response
+- **Memory Debug Panel** — See which memories are injected into the current prompt
+- **Rate-limited Auto-Extraction** — Memory extraction every 3rd turn with short-response skip, cost warnings for cloud providers
+
+**UI Improvements**
+- A/B Compare and Benchmark accessible from the main header navigation
+- Homepage quick-action buttons for Compare Models and Benchmark
+- ErrorBoundary wrapping around all main views prevents white-screen crashes
+
+---
+
 ## ❓ Why Locally Uncensored?
 
 Tired of switching between Ollama for chat, ComfyUI for images, and another tool for video? Frustrated with bloated UIs that need Docker and a PhD to set up?

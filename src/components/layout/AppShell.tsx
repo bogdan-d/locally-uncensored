@@ -7,6 +7,7 @@ import { SettingsPage } from '../settings/SettingsPage'
 import { CreateView } from '../create/CreateView'
 import { Onboarding } from '../onboarding/Onboarding'
 import { BackendSelector } from '../onboarding/BackendSelector'
+import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -72,10 +73,10 @@ export function AppShell() {
         <div className="flex-1 flex overflow-hidden">
           <Sidebar />
           <main className="flex-1 overflow-hidden">
-            {currentView === 'chat' && <ChatView />}
-            {currentView === 'models' && <ModelManager />}
-            {currentView === 'settings' && <SettingsPage />}
-            {currentView === 'create' && <CreateView />}
+            {currentView === 'chat' && <ErrorBoundary><ChatView /></ErrorBoundary>}
+            {currentView === 'models' && <ErrorBoundary><ModelManager /></ErrorBoundary>}
+            {currentView === 'settings' && <ErrorBoundary><SettingsPage /></ErrorBoundary>}
+            {currentView === 'create' && <ErrorBoundary><CreateView /></ErrorBoundary>}
           </main>
         </div>
       </div>

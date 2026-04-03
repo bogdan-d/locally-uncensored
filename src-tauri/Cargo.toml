@@ -1,6 +1,6 @@
 [package]
 name = "locally-uncensored"
-version = "1.9.0"
+version = "2.0.0"
 description = "Private, local AI chat & image/video generation"
 authors = ["purpledoubled"]
 edition = "2021"
@@ -22,6 +22,7 @@ tempfile = "3"
 futures-util = "0.3"
 tokio-util = "0.7"
 urlencoding = "2"
+url = "2"
 
 [profile.release]
 panic = "abort"

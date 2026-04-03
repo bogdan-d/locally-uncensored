@@ -1,7 +1,8 @@
-import { Menu, Settings, Sun, Moon, MessageSquare, Film, Layers } from 'lucide-react'
+import { Menu, Settings, Sun, Moon, MessageSquare, Film, Layers, GitCompareArrows, Trophy } from 'lucide-react'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
+import { useCompareStore } from '../../stores/compareStore'
 import { ModelSelector } from '../models/ModelSelector'
 
 export function Header() {
@@ -62,7 +63,21 @@ export function Header() {
           {settings.theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
         </button>
         {navBtn('chat', <MessageSquare size={14} />, 'Chat')}
+        <button
+          onClick={() => { useCompareStore.getState().setComparing(true); setView('chat') }}
+          className="p-1.5 rounded-md text-gray-500 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          title="A/B Compare"
+        >
+          <GitCompareArrows size={14} />
+        </button>
         {navBtn('create', <Film size={14} />, 'Create')}
+        <button
+          onClick={() => setView('models')}
+          className="p-1.5 rounded-md text-gray-500 hover:text-gray-200 hover:bg-white/5 transition-colors"
+          title="Benchmark Leaderboard"
+        >
+          <Trophy size={14} />
+        </button>
         {navBtn('models', <Layers size={14} />, 'Models')}
         {navBtn('settings', <Settings size={14} />, 'Settings')}
       </div>

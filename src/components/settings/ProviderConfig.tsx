@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Wifi, WifiOff, Loader2, Eye, EyeOff, ChevronDown } from 'lucide-react'
 import { useProviderStore } from '../../stores/providerStore'
+import { useMemoryStore } from '../../stores/memoryStore'
 import { getProvider } from '../../api/providers'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
 import { Modal } from '../ui/Modal'
@@ -49,6 +50,7 @@ export function ProviderSettings() {
   const activeConfig = activeProviderId ? providers[activeProviderId] : null
   const needsKey = activeConfig && !activeConfig.isLocal
   const currentKey = activeProviderId ? getProviderApiKey(activeProviderId) : ''
+  const autoExtractEnabled = useMemoryStore((s) => s.settings.autoExtractEnabled)
 
   // Select a preset
   function selectPreset(preset: typeof PROVIDER_PRESETS[0]) {
@@ -212,6 +214,20 @@ export function ProviderSettings() {
               </span>
             )}
           </div>
+
+          {/* API key storage disclaimer */}
+          {needsKey && currentKey && (
+            <p className="text-[0.5rem] text-gray-600 mt-0.5 leading-tight">
+              Keys are stored locally with basic obfuscation, not encryption. Avoid shared computers.
+            </p>
+          )}
+
+          {/* Cloud + auto-extract cost warning */}
+          {needsKey && autoExtractEnabled && (
+            <p className="text-[0.55rem] text-amber-400/80 mt-1 leading-tight">
+              Memory auto-extraction runs a secondary inference every 3rd turn, increasing API costs. Disable in Settings &gt; Memory if not needed.
+            </p>
+          )}
         </>
       )}
 

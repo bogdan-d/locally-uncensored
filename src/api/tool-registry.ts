@@ -238,8 +238,14 @@ function htmlToText(html: string): string {
 
 // ── run_workflow: Execute a workflow by name ────────────────────
 
+let _workflowDepth = 0
+
 async function executeRunWorkflow(workflowName: string, input?: string): Promise<string> {
   if (!workflowName) return 'Error: No workflow name provided'
+
+  if (_workflowDepth >= 5) {
+    return 'Error: Maximum workflow nesting depth (5) exceeded'
+  }
 
   const store = useAgentWorkflowStore.getState()
   const workflow = store.workflows.find(
@@ -268,8 +274,12 @@ async function executeRunWorkflow(workflowName: string, input?: string): Promise
   }
 
   const initialVars = input ? { user_input: input, last_output: input } : {}
-  const engine = new WorkflowEngine(workflow, 'tool-execution', callbacks, initialVars)
-
-  await engine.run()
+  _workflowDepth++
+  try {
+    const engine = new WorkflowEngine(workflow, 'tool-execution', callbacks, initialVars, _workflowDepth)
+    await engine.run()
+  } finally {
+    _workflowDepth--
+  }
   return finalOutput
 }
