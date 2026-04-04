@@ -63,13 +63,14 @@ export async function localFetch(
  */
 export async function localFetchStream(
   url: string,
-  options?: { method?: string; body?: string }
+  options?: { method?: string; body?: string; signal?: AbortSignal }
 ): Promise<Response> {
   if (!isTauri()) {
     return fetch(url, {
       method: options?.method || "GET",
       body: options?.body,
       headers: options?.body ? { "Content-Type": "application/json" } : undefined,
+      signal: options?.signal,
     });
   }
 

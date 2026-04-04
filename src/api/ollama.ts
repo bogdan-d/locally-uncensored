@@ -1,5 +1,5 @@
-import type { OllamaModel } from "../types/models"
-import { ollamaUrl, localFetch, localFetchStream } from "./backend"
+import type { OllamaModel, PullProgress } from "../types/models"
+import { ollamaUrl, localFetch, localFetchStream, isTauri } from "./backend"
 
 export async function listModels(): Promise<OllamaModel[]> {
   const res = await localFetch(ollamaUrl("/tags"))
@@ -98,12 +98,56 @@ export async function chatWithTools(
 }
 
 export async function pullModel(name: string, signal?: AbortSignal): Promise<Response> {
-  const res = await localFetchStream(ollamaUrl("/pull"), {
+  const res = await localFetchStream(isTauri() ? ollamaUrl("/pull") : "/api/pull", {
     method: "POST",
     body: JSON.stringify({ name, stream: true }),
+    signal,
   })
   if (!res.ok) throw new Error("Failed to pull model")
   return res
+}
+
+/**
+ * Tauri-only: stream a model pull via Rust command + events.
+ * Events are tagged with model name so multiple concurrent pulls work.
+ * Returns { promise, cancel } — cancel() stops both frontend + Rust backend.
+ */
+export function pullModelTauri(
+  name: string,
+  onProgress: (progress: PullProgress) => void,
+): { promise: Promise<void>; cancel: () => void } {
+  let cancelFn = () => {}
+
+  const promise = (async () => {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const { listen } = await import("@tauri-apps/api/event")
+
+    const unlisten = await listen<string>("pull-progress", (event) => {
+      try {
+        const envelope = JSON.parse(event.payload) as { model: string; data: PullProgress }
+        // Only process events for THIS model
+        if (envelope.model === name) {
+          onProgress(envelope.data)
+        }
+      } catch { /* ignore parse errors */ }
+    })
+
+    cancelFn = () => {
+      unlisten()
+      // Also cancel the Rust-side download
+      import("@tauri-apps/api/core").then(({ invoke: inv }) => {
+        inv("cancel_model_pull", { name }).catch(() => {})
+      })
+    }
+
+    try {
+      await invoke("pull_model_stream", { name })
+    } finally {
+      unlisten()
+    }
+  })()
+
+  return { promise, cancel: () => cancelFn() }
 }
 
 export async function deleteModel(name: string): Promise<void> {

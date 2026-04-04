@@ -54,6 +54,8 @@ fn main() {
             commands::proxy::fetch_external_bytes,
             commands::proxy::proxy_localhost,
             commands::proxy::proxy_localhost_stream,
+            commands::proxy::pull_model_stream,
+            commands::proxy::cancel_model_pull,
             // Window management
             commands::process::show_window,
         ])

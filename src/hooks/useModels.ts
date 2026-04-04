@@ -1,14 +1,13 @@
 import { useCallback } from 'react'
-import { listModels, pullModel as pullModelApi, deleteModel as deleteModelApi } from '../api/ollama'
+import { listModels, pullModel as pullModelApi, pullModelTauri, deleteModel as deleteModelApi } from '../api/ollama'
+import { isTauri } from '../api/backend'
 import { getCheckpoints as getComfyCheckpoints, getDiffusionModels as getComfyDiffusionModels, checkComfyConnection } from '../api/comfyui'
 import { parseNDJSONStream } from '../api/stream'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
-// useProviderStore also used inline in fetchModels for Ollama-enabled check
 import { getEnabledProviders, prefixModelName } from '../api/providers'
 import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, CloudModel } from '../types/models'
 
-// Known video model patterns
 const VIDEO_PATTERNS = [/wan/, /svd/, /animatediff/, /animate/, /video/, /cogvideo/, /ltx/i]
 
 function isVideoModel(name: string): boolean {
@@ -17,66 +16,41 @@ function isVideoModel(name: string): boolean {
 }
 
 export function useModels() {
-  const { models, activeModel, pullProgress, isPulling, categoryFilter, setModels, setActiveModel, setPullProgress, setIsPulling, setCategoryFilter } =
-    useModelStore()
+  const {
+    models, activeModel, activePulls, categoryFilter,
+    setModels, setActiveModel, startPull, updatePullProgress,
+    pausePull, completePull, dismissPull, setCategoryFilter,
+  } = useModelStore()
+
+  const isPulling = Object.keys(activePulls).length > 0
 
   const fetchModels = useCallback(async () => {
     try {
       const allModels: AIModel[] = []
-
-      // ── Fetch from all enabled providers ──────────────────
       const providers = getEnabledProviders()
-
       const providerResults = await Promise.allSettled(
         providers.map(async (provider) => {
           const providerModels = await provider.listModels()
           return providerModels.map((pm): AIModel => {
             if (pm.provider === 'ollama') {
-              // Ollama models keep their original name format (backward compat)
               return {
-                name: pm.id,
-                model: pm.id,
-                size: 0,
-                digest: '',
-                modified_at: '',
-                details: {
-                  parent_model: '',
-                  format: '',
-                  family: '',
-                  families: [],
-                  parameter_size: '',
-                  quantization_level: '',
-                },
-                type: 'text' as const,
-                provider: 'ollama',
-                providerName: 'Ollama',
+                name: pm.id, model: pm.id, size: 0, digest: '', modified_at: '',
+                details: { parent_model: '', format: '', family: '', families: [], parameter_size: '', quantization_level: '' },
+                type: 'text' as const, provider: 'ollama', providerName: 'Ollama',
               }
             }
-
-            // Cloud models get prefixed names for disambiguation
             const prefixedName = prefixModelName(pm.provider, pm.id)
             return {
-              name: prefixedName,
-              model: pm.id,
-              size: 0,
-              type: 'text' as const,
-              provider: pm.provider,
-              providerName: pm.providerName,
-              contextLength: pm.contextLength,
-              supportsTools: pm.supportsTools,
-              supportsVision: pm.supportsVision,
+              name: prefixedName, model: pm.id, size: 0, type: 'text' as const,
+              provider: pm.provider, providerName: pm.providerName,
+              contextLength: pm.contextLength, supportsTools: pm.supportsTools, supportsVision: pm.supportsVision,
             } satisfies CloudModel
           })
         })
       )
-
       for (const result of providerResults) {
-        if (result.status === 'fulfilled') {
-          allModels.push(...result.value)
-        }
+        if (result.status === 'fulfilled') allModels.push(...result.value)
       }
-
-      // Fallback: if Ollama is enabled but provider didn't return models, try direct API
       const ollamaEnabled = useProviderStore.getState().providers.ollama.enabled
       const hasOllamaModels = allModels.some(m => m.provider === 'ollama')
       if (ollamaEnabled && !hasOllamaModels) {
@@ -85,55 +59,73 @@ export function useModels() {
           allModels.push(...ollamaModels.map(m => ({ ...m, provider: 'ollama' as const, providerName: 'Ollama' })))
         } catch { /* Ollama might not be running */ }
       }
-
-      // ── ComfyUI image/video models (unchanged) ────────────
       let comfyModels: AIModel[] = []
       const comfyOk = await checkComfyConnection()
       if (comfyOk) {
         try {
-          const [checkpoints, diffusionModels] = await Promise.all([
-            getComfyCheckpoints(),
-            getComfyDiffusionModels(),
-          ])
+          const [checkpoints, diffusionModels] = await Promise.all([getComfyCheckpoints(), getComfyDiffusionModels()])
           const classifyComfyModel = (name: string): AIModel => {
-            if (isVideoModel(name)) {
-              return { name, model: name, size: 0, format: 'safetensors', architecture: 'unknown', type: 'video', providerName: 'ComfyUI' } as VideoModel
-            }
+            if (isVideoModel(name)) return { name, model: name, size: 0, format: 'safetensors', architecture: 'unknown', type: 'video', providerName: 'ComfyUI' } as VideoModel
             return { name, model: name, size: 0, format: 'safetensors', architecture: 'unknown', type: 'image', providerName: 'ComfyUI' } as ImageModel
           }
-          comfyModels = [
-            ...checkpoints.map((name) => classifyComfyModel(name)),
-            ...diffusionModels.map((name) => classifyComfyModel(name)),
-          ]
-        } catch {
-          // ComfyUI model fetch failed, continue without
-        }
+          comfyModels = [...checkpoints.map(classifyComfyModel), ...diffusionModels.map(classifyComfyModel)]
+        } catch { /* continue */ }
       }
-
       setModels([...allModels, ...comfyModels])
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }, [setModels])
 
   const pullModel = useCallback(
     async (name: string) => {
-      setIsPulling(true)
-      setPullProgress({ status: 'Starting download...' })
-      try {
-        const response = await pullModelApi(name)
-        for await (const chunk of parseNDJSONStream<PullProgress>(response)) {
-          setPullProgress(chunk)
+      const existing = activePulls[name]
+      // If already active and not paused, don't restart
+      if (existing && !existing.paused && !existing.complete) return
+
+      const controller = new AbortController()
+      startPull(name, controller)
+
+      if (isTauri()) {
+        const { promise, cancel } = pullModelTauri(name, (progress) => {
+          updatePullProgress(name, progress)
+        })
+        controller.signal.addEventListener('abort', cancel)
+        try {
+          await promise
+          completePull(name)
+          await fetchModels()
+          // Auto-dismiss after 5s
+          setTimeout(() => dismissPull(name), 5000)
+        } catch {
+          // Stream disconnected (pause or error) — card stays visible
         }
+        return
+      }
+
+      // Dev mode: streaming fetch
+      try {
+        const response = await pullModelApi(name, controller.signal)
+        for await (const chunk of parseNDJSONStream<PullProgress>(response)) {
+          updatePullProgress(name, chunk)
+        }
+        completePull(name)
         await fetchModels()
+        setTimeout(() => dismissPull(name), 5000)
       } catch (err) {
-        setPullProgress({ status: `Error: ${(err as Error).message}` })
-      } finally {
-        setIsPulling(false)
-        setTimeout(() => setPullProgress(null), 3000)
+        if ((err as Error).name !== 'AbortError') {
+          updatePullProgress(name, { status: `Error: ${(err as Error).message}` })
+        }
+        // On abort (pause): card stays with "Paused" status
       }
     },
-    [fetchModels, setIsPulling, setPullProgress]
+    [activePulls, fetchModels, startPull, updatePullProgress, completePull, dismissPull]
+  )
+
+  const isPullingModel = useCallback(
+    (name: string) => {
+      const pull = activePulls[name]
+      return !!pull && !pull.paused && !pull.complete
+    },
+    [activePulls]
   )
 
   const removeModel = useCallback(
@@ -144,11 +136,14 @@ export function useModels() {
     [fetchModels]
   )
 
-  // Filter-Helper für UI
   const getFilteredModels = (filter: ModelCategory = categoryFilter) => {
     if (filter === 'all') return models
     return models.filter((m: AIModel) => m.type === filter)
   }
 
-  return { models, activeModel, pullProgress, isPulling, categoryFilter, fetchModels, pullModel, removeModel, setActiveModel, setCategoryFilter, getFilteredModels }
+  return {
+    models, activeModel, activePulls, isPulling, categoryFilter,
+    fetchModels, pullModel, pausePull, dismissPull,
+    removeModel, setActiveModel, setCategoryFilter, getFilteredModels, isPullingModel,
+  }
 }

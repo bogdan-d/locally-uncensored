@@ -5,6 +5,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { ModelSelector } from '../models/ModelSelector'
 import { UpdateBadge } from './UpdateBadge'
+import { DownloadBadge } from './DownloadBadge'
 
 export function Header() {
   const { currentView, toggleSidebar, setView } = useUIStore()
@@ -62,6 +63,7 @@ export function Header() {
 
       {/* Right: Nav icons — Order: Chat, Create, A/B Compare, Benchmark, Models, Settings */}
       <div className="flex items-center gap-0.5">
+        <DownloadBadge />
         <button
           onClick={toggleTheme}
           className="p-1.5 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"

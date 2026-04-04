@@ -211,29 +211,32 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // ── HOT: Agent Mode + Uncensored ──
     { name: 'hermes3', description: 'NousResearch Hermes 3 — uncensored + native tool calling. THE agent model.', pulls: '500K+', tags: ['3B', '8B', '70B', '405B'], updated: 'Hot', hot: true, agent: true },
     { name: 'dolphin3', description: 'Dolphin 3 — uncensored from training. Coding, math, general purpose.', pulls: '3.7M', tags: ['8B'], updated: 'Hot', hot: true },
-    { name: 'huihui_ai/qwen3.5-abliterated', description: 'Qwen 3.5 abliterated — newest, strongest reasoning + coding.', pulls: '10K+', tags: ['8B', '14B', '32B'], updated: 'Hot', hot: true },
-    { name: 'huihui_ai/gpt-oss-abliterated', description: 'OpenAI GPT-OSS — abliterated open-source GPT model.', pulls: '15K+', tags: ['8B', '32B'], updated: 'Hot', hot: true },
+    { name: 'huihui_ai/qwen3.5-abliterated', description: 'Qwen 3.5 abliterated — newest, strongest reasoning + coding.', pulls: '10K+', tags: ['9B', '27B', '35B'], updated: 'Hot', hot: true },
+    { name: 'huihui_ai/gpt-oss-abliterated', description: 'OpenAI GPT-OSS — abliterated open-source GPT model.', pulls: '15K+', tags: ['20B', '120B'], updated: 'Hot', hot: true },
+    { name: 'huihui_ai/qwen3-coder-abliterated', description: 'Qwen3-Coder abliterated — 30B MoE (3B active), built for code agents. 256K context.', pulls: '5K+', tags: ['30B', '480B'], updated: 'Hot', hot: true, agent: true },
     // ── Popular Uncensored ──
     { name: 'huihui_ai/qwen3-abliterated', description: 'Qwen3 abliterated — best overall. Exceptional reasoning, coding, multilingual.', pulls: '30K+', tags: ['8B', '30B'], updated: 'Popular' },
-    { name: 'mannix/llama3.1-8b-abliterated', description: 'Llama 3.1 8B — fast, reliable, great entry point.', pulls: '200K+', tags: ['8B', 'Q5_K_M'], updated: 'Popular' },
+    { name: 'mannix/llama3.1-8b-abliterated', description: 'Llama 3.1 8B — fast, reliable, great entry point.', pulls: '200K+', tags: ['Q5_K_M', 'Q4_K_M'], updated: 'Popular' },
     { name: 'huihui_ai/deepseek-r1-abliterated', description: 'DeepSeek R1 — chain-of-thought reasoning. Scales to your hardware.', pulls: '40K+', tags: ['8B', '14B', '32B', '70B'], updated: 'Popular' },
-    { name: 'huihui_ai/glm4.6-abliterated', description: 'GLM 4.6 abliterated — newest model, strong coding and reasoning.', pulls: '5K+', tags: ['9B'], updated: 'New' },
+    { name: 'huihui_ai/glm4.6-abliterated', description: 'GLM 4.6 abliterated — newest model, strong coding and reasoning.', pulls: '5K+', tags: ['357B'], updated: 'New' },
     { name: 'huihui_ai/gemma3-abliterated', description: 'Google Gemma 3 — vision support, great quality.', pulls: '20K+', tags: ['4B', '12B', '27B'], updated: 'Popular' },
-    { name: 'richardyoung/qwen3-14b-abliterated', description: 'Qwen3 14B — sweet spot of speed and intelligence.', pulls: '4K+', tags: ['14B', 'Q4_K_M'], updated: 'Recent' },
-    { name: 'huihui_ai/qwen2.5-abliterated', description: 'Qwen 2.5 abliterated series — proven and reliable.', pulls: '50K+', tags: ['7B', '14B', '32B'], updated: 'Popular' },
+    { name: 'richardyoung/qwen3-14b-abliterated', description: 'Qwen3 14B — sweet spot of speed and intelligence.', pulls: '4K+', tags: ['Q4_K_M', 'Q5_K_M'], updated: 'Recent' },
+    { name: 'huihui_ai/qwen2.5-abliterate', description: 'Qwen 2.5 abliterated series — proven and reliable.', pulls: '50K+', tags: ['7B', '14B', '32B'], updated: 'Popular' },
     { name: 'huihui_ai/llama3.3-abliterated', description: 'Llama 3.3 70B — maximum intelligence for high-VRAM setups.', pulls: '15K+', tags: ['70B'], updated: 'Popular' },
     { name: 'huihui_ai/mistral-small-abliterated', description: 'Mistral Small 24B — powerful, strong multilingual.', pulls: '10K+', tags: ['24B'], updated: 'Recent' },
     { name: 'huihui_ai/phi4-abliterated', description: 'Microsoft Phi-4 — excellent at math, logic, structured tasks.', pulls: '8K+', tags: ['14B'], updated: 'Recent' },
-    { name: 'krith/mistral-nemo-instruct-2407-abliterated', description: 'Mistral Nemo 12B — multilingual powerhouse.', pulls: '5K+', tags: ['12B'], updated: 'Popular' },
+    { name: 'krith/mistral-nemo-instruct-2407-abliterated', description: 'Mistral Nemo 12B — multilingual powerhouse.', pulls: '5K+', tags: ['IQ4_XS', 'IQ3_M'], updated: 'Popular' },
   ]
 }
 
 /** Mainstream models — not uncensored but excellent for specific tasks */
 export function getMainstreamTextModels(): DiscoverModel[] {
   return [
-    { name: 'gemma4', description: 'Google Gemma 4 — native tool calling + vision. 128-256K context. Apache 2.0.', pulls: '100K+', tags: ['2B', '4B', '26B MoE', '31B'], updated: 'New', hot: true, agent: true },
+    { name: 'gemma4', description: 'Google Gemma 4 — native tool calling + vision. 128-256K context. Apache 2.0.', pulls: '100K+', tags: ['e2b', 'e4b', '26B', '31B'], updated: 'New', hot: true, agent: true },
+    { name: 'qwen3-coder', description: 'Qwen3-Coder — 30B MoE coding agent (3B active). Native tool calling, 256K context.', pulls: '100K+', tags: ['30B', '480B'], updated: 'New', hot: true, agent: true },
+    { name: 'qwen3-coder-next', description: 'Qwen3-Coder-Next — 80B MoE (3B active). Optimized for agentic coding workflows.', pulls: '10K+', tags: ['Q4_K_M', 'Q8_0'], updated: 'New', hot: true, agent: true },
     { name: 'qwen3', description: 'Qwen 3 — top-tier reasoning and coding. Thinking mode support.', pulls: '5M+', tags: ['8B', '14B', '32B'], updated: 'Popular', agent: true },
-    { name: 'llama4', description: 'Meta Llama 4 — latest generation. Strong all-rounder with tool calling.', pulls: '1M+', tags: ['8B'], updated: 'New', agent: true },
+    { name: 'llama4', description: 'Meta Llama 4 — latest generation MoE. Needs 64GB+ RAM.', pulls: '1M+', tags: ['scout', 'maverick'], updated: 'New', agent: true },
     { name: 'deepseek-r1', description: 'DeepSeek R1 — chain-of-thought reasoning model. Shows its thinking.', pulls: '2M+', tags: ['8B', '14B', '32B', '70B'], updated: 'Popular' },
     { name: 'phi4', description: 'Microsoft Phi 4 — excellent math, logic, structured tasks.', pulls: '500K+', tags: ['14B'], updated: 'Popular', agent: true },
     { name: 'mistral-small', description: 'Mistral Small — fast, multilingual, native tool calling.', pulls: '300K+', tags: ['24B'], updated: 'Popular', agent: true },

@@ -23,14 +23,23 @@ interface Props {
 }
 
 // Variant selector for text models with multiple sizes
-function VariantPullButton({ model, pullModel, isPulling, isInstalled }: {
+function VariantPullButton({ model, pullModel, isPullingModel, isInstalled }: {
   model: DiscoverModel
   pullModel: (name: string) => void
-  isPulling: boolean
+  isPullingModel: (name: string) => boolean
   isInstalled: (name: string) => boolean
 }) {
   const [open, setOpen] = useState(false)
-  const tags = model.tags.filter(t => /^\d+B/.test(t) || /^Q\d/.test(t))
+  // Filter tags that are valid Ollama size/variant identifiers (e.g. 8B, Q4_K_M, e2b, scout, IQ4_XS)
+  const tags = model.tags.filter(t => /^\d+B$/i.test(t) || /^[Qe]\d/i.test(t) || /^IQ\d/i.test(t) || /^[a-z]+$/i.test(t))
+
+  // Human-readable descriptions for non-obvious tags
+  const TAG_INFO: Record<string, string> = {
+    scout: 'Llama 4 Scout — 16×17B MoE, ~109 GB, 10M context',
+    maverick: 'Llama 4 Maverick — 128×17B MoE, ~280 GB, 1M context',
+    e2b: 'Gemma 4 — 2B parameters, lightweight',
+    e4b: 'Gemma 4 — 4B parameters, balanced',
+  }
 
   // If no size tags or only one, show simple button
   if (tags.length <= 1) {
@@ -41,7 +50,7 @@ function VariantPullButton({ model, pullModel, isPulling, isInstalled }: {
     return (
       <button
         onClick={() => pullModel(fullName)}
-        disabled={isPulling}
+        disabled={isPullingModel(fullName)}
         className="p-2 rounded-lg bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/15 text-gray-700 dark:text-white disabled:opacity-30 transition-all"
         title={`Install ${fullName}`}
       >
@@ -55,8 +64,7 @@ function VariantPullButton({ model, pullModel, isPulling, isInstalled }: {
     <div className="relative">
       <button
         onClick={() => setOpen(!open)}
-        disabled={isPulling}
-        className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/15 text-gray-700 dark:text-white disabled:opacity-30 transition-all text-xs"
+        className="flex items-center gap-1 px-2 py-1.5 rounded-lg bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/15 text-gray-700 dark:text-white transition-all text-xs"
       >
         <Download size={12} />
         <span>Install</span>
@@ -67,18 +75,23 @@ function VariantPullButton({ model, pullModel, isPulling, isInstalled }: {
           {tags.map(tag => {
             const fullName = `${model.name}:${tag.toLowerCase()}`
             const installed = isInstalled(fullName)
+            const info = TAG_INFO[tag.toLowerCase()]
             return (
               <button
                 key={tag}
                 onClick={() => { if (!installed) pullModel(fullName); setOpen(false) }}
-                disabled={installed || isPulling}
-                className="w-full flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-gray-200 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+                disabled={installed || isPullingModel(fullName)}
+                className="w-full flex items-start justify-between gap-3 px-3 py-2 text-xs hover:bg-gray-200 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+                title={info || `Install ${fullName}`}
               >
-                <span className="text-gray-800 dark:text-white font-medium">{tag}</span>
+                <div className="text-left">
+                  <span className="text-gray-800 dark:text-white font-medium">{tag}</span>
+                  {info && <p className="text-[0.6rem] text-gray-500 mt-0.5">{info}</p>}
+                </div>
                 {installed ? (
-                  <CheckCircle size={12} className="text-green-500" />
+                  <CheckCircle size={12} className="text-green-500 shrink-0 mt-0.5" />
                 ) : (
-                  <Download size={12} className="text-gray-400" />
+                  <Download size={12} className="text-gray-400 shrink-0 mt-0.5" />
                 )}
               </button>
             )
@@ -89,13 +102,13 @@ function VariantPullButton({ model, pullModel, isPulling, isInstalled }: {
   )
 }
 
-function ModelDiscoverCard({ model, index, isText, getModelDownloadState, pullModel, isPulling, isInstalled, handleDownload }: {
+function ModelDiscoverCard({ model, index, isText, getModelDownloadState, pullModel, isPullingModel, isInstalled, handleDownload }: {
   model: DiscoverModel
   index: number
   isText: boolean
   getModelDownloadState: (m: DiscoverModel) => DownloadProgress | null
   pullModel: (name: string) => void
-  isPulling: boolean
+  isPullingModel: (name: string) => boolean
   isInstalled: (name: string) => boolean
   handleDownload: (m: DiscoverModel) => void
 }) {
@@ -155,7 +168,7 @@ function ModelDiscoverCard({ model, index, isText, getModelDownloadState, pullMo
 
           <div className="flex items-center gap-1 shrink-0">
             {isText ? (
-              <VariantPullButton model={model} pullModel={pullModel} isPulling={isPulling} isInstalled={isInstalled} />
+              <VariantPullButton model={model} pullModel={pullModel} isPullingModel={isPullingModel} isInstalled={isInstalled} />
             ) : (
               <>
                 {isComplete ? (
@@ -200,7 +213,7 @@ export function DiscoverModels({ category }: Props) {
   const [downloadMeta, setDownloadMeta] = useState<Record<string, { url: string; subfolder: string }>>({})
   const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
   const [subTab, setSubTab] = useState<'uncensored' | 'mainstream'>('uncensored')
-  const { pullModel, isPulling, pullProgress, models: installedModels } = useModels()
+  const { pullModel, isPullingModel, models: installedModels } = useModels()
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Load text models from Ollama search
@@ -377,9 +390,7 @@ export function DiscoverModels({ category }: Props) {
     return downloads[model.filename] ?? null
   }
 
-  const progress = pullProgress?.total && pullProgress?.completed
-    ? (pullProgress.completed / pullProgress.total) * 100
-    : 0
+  // Progress calculation moved to DownloadBadge in Header
 
   const handleOllamaSearch = async () => {
     if (!search.trim() || !isText) return
@@ -470,20 +481,7 @@ export function DiscoverModels({ category }: Props) {
         </GlassCard>
       )}
 
-      {/* Ollama pull progress */}
-      {isText && isPulling && pullProgress && (
-        <GlassCard className="p-3">
-          <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">{pullProgress.status}</p>
-          {pullProgress.total && pullProgress.completed !== undefined && (
-            <>
-              <ProgressBar progress={progress} />
-              <p className="text-xs text-gray-500 mt-1">
-                {formatBytes(pullProgress.completed || 0)} / {formatBytes(pullProgress.total)}
-              </p>
-            </>
-          )}
-        </GlassCard>
-      )}
+      {/* Download progress moved to DownloadBadge in Header */}
 
       {!isText && (
         <p className="text-[0.65rem] text-gray-500">
@@ -665,7 +663,7 @@ export function DiscoverModels({ category }: Props) {
           {subTab === 'uncensored' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {filteredUncensored.map((model, i) => (
-                <ModelDiscoverCard key={model.name} model={model} index={i} isText={isText} getModelDownloadState={getModelDownloadState} pullModel={pullModel} isPulling={isPulling} isInstalled={isInstalled} handleDownload={handleDownload} />
+                <ModelDiscoverCard key={model.name} model={model} index={i} isText={isText} getModelDownloadState={getModelDownloadState} pullModel={pullModel} isPullingModel={isPullingModel} isInstalled={isInstalled} handleDownload={handleDownload} />
               ))}
               {filteredUncensored.length === 0 && (
                 <p className="text-center text-gray-500 py-4 col-span-2">No uncensored models match your search</p>
@@ -675,7 +673,7 @@ export function DiscoverModels({ category }: Props) {
           {subTab === 'mainstream' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {filteredMainstream.map((model, i) => (
-                <ModelDiscoverCard key={model.name} model={model} index={i} isText={isText} getModelDownloadState={getModelDownloadState} pullModel={pullModel} isPulling={isPulling} isInstalled={isInstalled} handleDownload={handleDownload} />
+                <ModelDiscoverCard key={model.name} model={model} index={i} isText={isText} getModelDownloadState={getModelDownloadState} pullModel={pullModel} isPullingModel={isPullingModel} isInstalled={isInstalled} handleDownload={handleDownload} />
               ))}
               {filteredMainstream.length === 0 && (
                 <p className="text-center text-gray-500 py-4 col-span-2">No mainstream models match your search</p>
@@ -689,7 +687,7 @@ export function DiscoverModels({ category }: Props) {
               <h3 className="text-[0.7rem] font-semibold text-gray-500 uppercase tracking-wider">Search Results</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {filtered.filter(m => !uncensoredModels.some(u => u.name === m.name) && !mainstreamModels.some(u => u.name === m.name)).map((model, i) => (
-                  <ModelDiscoverCard key={model.name} model={model} index={i} isText={isText} getModelDownloadState={getModelDownloadState} pullModel={pullModel} isPulling={isPulling} isInstalled={isInstalled} handleDownload={handleDownload} />
+                  <ModelDiscoverCard key={model.name} model={model} index={i} isText={isText} getModelDownloadState={getModelDownloadState} pullModel={pullModel} isPullingModel={isPullingModel} isInstalled={isInstalled} handleDownload={handleDownload} />
                 ))}
               </div>
             </div>
@@ -698,7 +696,7 @@ export function DiscoverModels({ category }: Props) {
       ) : !isVideo && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filtered.map((model, i) => (
-            <ModelDiscoverCard key={model.name} model={model} index={i} isText={false} getModelDownloadState={getModelDownloadState} pullModel={pullModel} isPulling={isPulling} isInstalled={isInstalled} handleDownload={handleDownload} />
+            <ModelDiscoverCard key={model.name} model={model} index={i} isText={false} getModelDownloadState={getModelDownloadState} pullModel={pullModel} isPullingModel={isPullingModel} isInstalled={isInstalled} handleDownload={handleDownload} />
           ))}
         </div>
       )}

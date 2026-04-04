@@ -1,3 +1,5 @@
+use tauri::Emitter;
+
 /// Validate that an external URL is safe to fetch (no SSRF).
 /// Blocks private IP ranges, non-HTTP schemes, and localhost.
 fn validate_external_url(raw: &str) -> Result<(), String> {
@@ -168,6 +170,112 @@ pub async fn proxy_localhost_stream(url: String, method: Option<String>, body: O
     }
 
     resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+}
+
+/// Streaming Ollama model pull — emits per-model progress events.
+/// Each event is a JSON object: { "model": "name", "data": { ...ollama progress... } }
+#[tauri::command]
+pub async fn pull_model_stream(app: tauri::AppHandle, state: tauri::State<'_, crate::state::AppState>, name: String) -> Result<(), String> {
+    use futures_util::StreamExt;
+
+    // Create cancellation token for this pull
+    let token = tokio_util::sync::CancellationToken::new();
+    {
+        let mut tokens = state.pull_tokens.lock().unwrap();
+        // Cancel any existing pull for same model
+        if let Some(old) = tokens.remove(&name) {
+            old.cancel();
+        }
+        tokens.insert(name.clone(), token.clone());
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent("LocallyUncensored/2.0")
+        .timeout(std::time::Duration::from_secs(7200))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .post("http://localhost:11434/api/pull")
+        .header("Content-Type", "application/json")
+        .body(format!(r#"{{"name":"{}","stream":true}}"#, name))
+        .send()
+        .await
+        .map_err(|e| format!("pull_model_stream: {}", e))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+        state.pull_tokens.lock().unwrap().remove(&name);
+        return Err(format!("HTTP {}: {}", status, text));
+    }
+
+    let mut stream = resp.bytes_stream();
+    let mut buffer = String::new();
+
+    let mut was_cancelled = false;
+
+    loop {
+        tokio::select! {
+            _ = token.cancelled() => {
+                was_cancelled = true;
+                break;
+            }
+            chunk = stream.next() => {
+                match chunk {
+                    Some(Ok(bytes)) => {
+                        buffer.push_str(&String::from_utf8_lossy(&bytes));
+                        while let Some(pos) = buffer.find('\n') {
+                            let line = buffer[..pos].trim().to_string();
+                            buffer = buffer[pos + 1..].to_string();
+                            if !line.is_empty() {
+                                // Emit with model name so frontend can route
+                                let payload = format!(r#"{{"model":"{}","data":{}}}"#, name, line);
+                                let _ = app.emit("pull-progress", &payload);
+                            }
+                        }
+                    }
+                    Some(Err(e)) => {
+                        let _ = app.emit("pull-progress", &format!(
+                            r#"{{"model":"{}","data":{{"status":"Error: {}"}}}}"#, name, e
+                        ));
+                        break;
+                    }
+                    None => break, // Stream finished
+                }
+            }
+        }
+    }
+
+    // Flush remaining (only if not cancelled)
+    if !was_cancelled {
+        let remaining = buffer.trim().to_string();
+        if !remaining.is_empty() {
+            let payload = format!(r#"{{"model":"{}","data":{}}}"#, name, remaining);
+            let _ = app.emit("pull-progress", &payload);
+        }
+    }
+
+    // Cleanup token
+    state.pull_tokens.lock().unwrap().remove(&name);
+
+    if was_cancelled {
+        Err("cancelled".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+/// Cancel an active Ollama model pull
+#[tauri::command]
+pub fn cancel_model_pull(state: tauri::State<'_, crate::state::AppState>, name: String) -> Result<(), String> {
+    let mut tokens = state.pull_tokens.lock().unwrap();
+    if let Some(token) = tokens.remove(&name) {
+        token.cancel();
+        Ok(())
+    } else {
+        Ok(()) // Already finished or never started
+    }
 }
 
 /// Proxy search requests to ollama.com (needed because frontend can't CORS to ollama.com)

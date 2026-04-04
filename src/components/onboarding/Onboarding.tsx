@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Sun, Moon, ArrowRight, Download, Check, ChevronRight, Loader2 } from 'lucide-react'
+import { Sun, Moon, ArrowRight, Download, Check, ChevronRight, Loader2, Pause } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { useModels } from '../../hooks/useModels'
@@ -16,7 +16,7 @@ export function Onboarding() {
   const [step, setStep] = useState<Step>('welcome')
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const { settings, updateSettings } = useSettingsStore()
-  const { pullModel, isPulling, pullProgress, models: installedModels } = useModels()
+  const { pullModel, pausePull, isPulling, activePulls, models: installedModels } = useModels()
   const [pullingModel, setPullingModel] = useState<string | null>(null)
   const [pulledModels, setPulledModels] = useState<string[]>([])
   const [detectedBackends, setDetectedBackends] = useState<DetectedBackend[]>([])
@@ -49,6 +49,8 @@ export function Onboarding() {
     updateSettings({ onboardingDone: true })
   }
 
+  const currentPull = pullingModel ? activePulls[pullingModel] : null
+  const pullProgress = currentPull?.progress ?? null
   const progress =
     pullProgress?.total && pullProgress?.completed
       ? (pullProgress.completed / pullProgress.total) * 100
@@ -233,9 +235,18 @@ export function Onboarding() {
 
             {isPulling && pullingModel && (
               <div className={`p-2.5 rounded-lg border ${cardClass}`}>
-                <p className="text-[0.7rem] mb-1">
-                  Installing <span className="font-mono font-medium">{pullingModel}</span>...
-                </p>
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[0.7rem]">
+                    Installing <span className="font-mono font-medium">{pullingModel}</span>...
+                  </p>
+                  <button
+                    onClick={() => pullingModel && pausePull(pullingModel)}
+                    className="p-0.5 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
+                    title="Pause download"
+                  >
+                    <Pause size={12} />
+                  </button>
+                </div>
                 <p className={`text-[0.6rem] mb-1.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>{pullProgress?.status}</p>
                 {pullProgress?.total && pullProgress?.completed !== undefined && (
                   <ProgressBar progress={progress} />

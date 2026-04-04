@@ -46,6 +46,15 @@ describe('isAgentCompatible', () => {
       expect(isAgentCompatible('gemma4:26b-a4b-it-q4_K_M')).toBe(true)
     })
 
+    it('qwen3-coder models are compatible (native tool calling)', () => {
+      expect(isAgentCompatible('qwen3-coder:30b')).toBe(true)
+      expect(isAgentCompatible('qwen3-coder:latest')).toBe(true)
+    })
+
+    it('qwen3-coder abliterated retains native tool calling', () => {
+      expect(isAgentCompatible('huihui_ai/qwen3-coder-abliterated:latest')).toBe(true)
+    })
+
     it('other compatible models', () => {
       expect(isAgentCompatible('command-r:35b')).toBe(true)
       expect(isAgentCompatible('phi-4:14b')).toBe(true)
