@@ -27,7 +27,7 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 
 ## Current Work: v2.3.0 (branch: full-comfyui-fix)
 
-### What's DONE (160 tests passing, committed c27d20c):
+### What's DONE (601 tests passing):
 1. **7 new ModelTypes:** mochi, cosmos, cogvideo, svd, framepack, pyramidflow, allegro
 2. **7 new WorkflowStrategies** with complete node chains for each model
 3. **14 video bundles + 6 image bundles** in discover.ts with HuggingFace URLs
@@ -46,10 +46,13 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 16. **Default view = chat homepage** (Startseite with LU logo), not Model Manager
 17. **6 uncensored video bundles** (Wan 2.1 x2, HunyuanVideo, CogVideoX x2, FramePack)
 18. **LTX bug fixed** — workflow was 'wan' instead of 'ltx'
+19. **Text model download UX complete** — Ollama pull with streaming progress, HF GGUF with auto-fallback path, both tracked in unified DownloadBadge
+20. **isInstalled prefix-match** — Ollama models without tag (hermes3) match installed variants (hermes3:8b)
+21. **All 3 download flows Tauri-verified** — Ollama pull (events), HF GGUF (invoke), ComfyUI bundles (invoke) — all arg mappings, command registrations, progress polling confirmed
 
 ### What's LEFT to finish v2.3.0:
-1. **Text model download UX** — Ollama pull works, HF GGUF downloads need LM Studio or compatible provider path. Error message added but could be more user-friendly.
-2. **E2E workflow test** — verify that downloaded models actually generate images/videos in ComfyUI (all files confirmed on disk in correct paths)
+1. **E2E workflow test** — verify that downloaded models actually generate images/videos in ComfyUI (all files confirmed on disk in correct paths)
+2. **Tauri build E2E test** — build .exe, run all 3 download flows (Ollama pull, HF GGUF, ComfyUI bundle), verify in production
 
 ### What was FIXED (download overhaul):
 1. **install_custom_node camelCase bug** — Tauri 2 expects camelCase args (repoUrl/nodeName), was sending snake_case. Fixed in discover.ts + vite.config.ts
@@ -62,8 +65,12 @@ src-tauri/src/commands/      — Rust commands: install, process, download, prox
 8. **Dev-mode endpoints added** — detect_model_path + download_model_to_path for HF GGUF downloads
 9. **All 38 ComfyUI URLs verified HTTP 200, all 24 HF GGUF URLs verified, all 29 Ollama models exist**
 10. **All 19 bundles tested in live app — 0 errors, all files confirmed on disk**
+11. **setHfModels runtime error** — handleRefresh() called undefined setHfModels(). Fixed: HF refresh now clears search + re-detects model path
+12. **Dev-mode detect-model-path fallback** — returned null without LM Studio. Now falls back to ~/locally-uncensored/models/ (parity with Rust)
+13. **isInstalled prefix-match for Ollama** — `hermes3` now matches installed `hermes3:8b`. Was: exact match only, never showed INSTALLED badge
+14. **pullModel fetchModels error isolation** — fetchModels() error after completePull() no longer swallows the entire success path
 
-### Files modified in this branch (23 files, +3051 lines):
+### Files modified in this branch (23+ files):
 - `src/api/comfyui.ts` — 7 new ModelTypes, COMPONENT_REGISTRY, uploadImage(), inputImage in VideoParams
 - `src/api/dynamic-workflow.ts` — 7 new strategies, 5 wrapper builders, inputImage support in SVD/FramePack
 - `src/api/comfyui-nodes.ts` — 30+ new nodes in categorization mapping

@@ -92,7 +92,7 @@ export function useModels() {
         try {
           await promise
           completePull(name)
-          await fetchModels()
+          try { await fetchModels() } catch { /* model list refresh failed — non-critical */ }
           // Auto-dismiss after 5s
           setTimeout(() => dismissPull(name), 5000)
         } catch {

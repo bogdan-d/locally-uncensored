@@ -317,7 +317,13 @@ export function DiscoverModels({ category }: Props) {
     : vramFilteredBundles
 
   const isInstalled = (name: string) => {
-    return installedModels.some((m) => m.name === name)
+    // Exact match (e.g., "hermes3:8b" === "hermes3:8b")
+    if (installedModels.some((m) => m.name === name)) return true
+    // Prefix match for Ollama models without tag (e.g., "hermes3" matches "hermes3:8b" or "hermes3:latest")
+    if (!name.includes(':')) {
+      return installedModels.some((m) => m.name === name + ':latest' || m.name.startsWith(name + ':'))
+    }
+    return false
   }
 
   const handleDownload = async (model: DiscoverModel) => {
@@ -440,15 +446,22 @@ export function DiscoverModels({ category }: Props) {
 
   const handleRefresh = () => {
     setLoading(true)
-    if (isOllama) fetchAbliteratedModels().then(m => { setTextModels(m); setLoading(false) })
-    else { setHfModels(getHuggingFaceModels()); setLoading(false) }
+    if (isOllama) {
+      fetchAbliteratedModels().then(m => { setTextModels(m); setLoading(false) })
+    } else {
+      // HF curated lists are static — just re-detect model path and clear search results
+      setHfSearchResults([])
+      const providerName = providers.openai?.name || 'LM Studio'
+      detectProviderModelPath(providerName).then(path => setHfModelPath(path))
+      setLoading(false)
+    }
   }
 
   const handleHfDownload = async (model: DiscoverModel) => {
     if (!model.downloadUrl || !model.filename) return
-    const destDir = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'fallback'))
+    const destDir = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
     if (!destDir) {
-      setInstallError('No model directory found. Install LM Studio or configure an OpenAI-compatible provider with a local model path first.')
+      setInstallError('Could not determine model directory. Please check app permissions.')
       return
     }
     setHfModelPath(destDir)

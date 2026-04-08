@@ -455,8 +455,12 @@ function comfyLauncher(): Plugin {
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify(found))
             } else {
+              // Fallback: create LU models directory (same as Rust backend)
+              const { mkdirSync } = require('fs')
+              const fallback = join(home, 'locally-uncensored', 'models')
+              try { mkdirSync(fallback, { recursive: true }) } catch {}
               res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify(null))
+              res.end(JSON.stringify(fallback))
             }
           } catch {
             res.writeHead(200, { 'Content-Type': 'application/json' })
