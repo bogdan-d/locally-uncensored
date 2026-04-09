@@ -239,19 +239,19 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
   mochi: {
     loader: 'UNETLoader',
     vae: { patterns: ['mochi'], downloadName: 'mochi_vae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/vae/mochi_vae.safetensors', subfolder: 'vae' },
-    clip: { patterns: ['t5'], downloadName: 't5xxl_fp16.safetensors', downloadUrl: 'https://huggingface.co/Kijai/CogVideoX_comfy/resolve/main/t5xxl_fp16.safetensors', subfolder: 'text_encoders' },
+    clip: { patterns: ['t5'], downloadName: 't5xxl_fp16.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/text_encoders/t5xxl_fp16.safetensors', subfolder: 'text_encoders' },
     needsSeparateVAE: true, needsSeparateCLIP: true,
   },
   cosmos: {
     loader: 'UNETLoader',
-    vae: { patterns: ['cosmos'], downloadName: 'cosmos_cv8x8x8_1.0.safetensors', downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text2world_safetensors/resolve/main/cosmos_cv8x8x8_1.0.safetensors', subfolder: 'vae' },
-    clip: { patterns: ['oldt5'], downloadName: 'oldt5_xxl_fp8_e4m3fn_scaled.safetensors', downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text2world_safetensors/resolve/main/oldt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders' },
+    vae: { patterns: ['cosmos'], downloadName: 'cosmos_cv8x8x8_1.0.safetensors', downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text_encoder_and_VAE_ComfyUI/resolve/main/vae/cosmos_cv8x8x8_1.0.safetensors', subfolder: 'vae' },
+    clip: { patterns: ['oldt5'], downloadName: 'oldt5_xxl_fp8_e4m3fn_scaled.safetensors', downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text_encoder_and_VAE_ComfyUI/resolve/main/text_encoders/oldt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders' },
     needsSeparateVAE: true, needsSeparateCLIP: true,
   },
   cogvideo: {
     loader: 'UNETLoader',
-    vae: { patterns: ['cogvideox', 'cogvideo'], downloadName: 'cogvideox_vae.safetensors', downloadUrl: 'https://huggingface.co/Kijai/CogVideoX_comfy/resolve/main/cogvideox_vae.safetensors', subfolder: 'vae' },
-    clip: { patterns: ['t5'], downloadName: 't5xxl_fp16.safetensors', downloadUrl: 'https://huggingface.co/Kijai/CogVideoX_comfy/resolve/main/t5xxl_fp16.safetensors', subfolder: 'text_encoders' },
+    vae: { patterns: ['cogvideox', 'cogvideo'], downloadName: 'cogvideox_vae_bf16.safetensors', downloadUrl: 'https://huggingface.co/Kijai/CogVideoX-comfy/resolve/main/cogvideox_vae_bf16.safetensors', subfolder: 'vae' },
+    clip: { patterns: ['t5'], downloadName: 't5xxl_fp16.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/mochi_preview_repackaged/resolve/main/split_files/text_encoders/t5xxl_fp16.safetensors', subfolder: 'text_encoders' },
     needsSeparateVAE: true, needsSeparateCLIP: true,
   },
   svd: { loader: 'ImageOnlyCheckpointLoader', needsSeparateVAE: false, needsSeparateCLIP: false },
@@ -263,7 +263,7 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
   },
   pyramidflow: {
     loader: 'UNETLoader',
-    vae: { patterns: ['pyramid'], downloadName: 'pyramid_flow_vae.safetensors', downloadUrl: 'https://huggingface.co/Kijai/pyramid-flow-comfy/resolve/main/pyramid_flow_vae.safetensors', subfolder: 'vae' },
+    vae: { patterns: ['pyramid'], downloadName: 'pyramid_flow_vae_bf16.safetensors', downloadUrl: 'https://huggingface.co/Kijai/pyramid-flow-comfy/resolve/main/pyramid_flow_vae_bf16.safetensors', subfolder: 'vae' },
     needsSeparateVAE: true, needsSeparateCLIP: false,
   },
   allegro: { loader: 'UNETLoader', needsSeparateVAE: false, needsSeparateCLIP: false },

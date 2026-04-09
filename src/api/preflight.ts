@@ -62,9 +62,37 @@ export async function preflightCheck(
     return { ready: false, modelType, warnings, errors: [{ type: 'missing_nodes', message: 'Cannot reach ComfyUI to verify nodes.' }] }
   }
 
+  // Models with custom wrapper nodes (Kijai/community custom_nodes)
+  const customNodeModels: Record<string, { nodes: string[]; installHint: string }> = {
+    cogvideo: {
+      nodes: ['CogVideoXModelLoader', 'CogVideoXSampler'],
+      installHint: 'ComfyUI-CogVideoXWrapper custom nodes. Install from Model Manager.',
+    },
+    pyramidflow: {
+      nodes: ['PyramidFlowModelLoader', 'PyramidFlowSampler'],
+      installHint: 'ComfyUI-PyramidFlowWrapper custom nodes. Install from Model Manager.',
+    },
+    allegro: {
+      nodes: ['AllegroModelLoader', 'AllegroSampler'],
+      installHint: 'ComfyUI-Allegro custom nodes. Install from Model Manager.',
+    },
+  }
+
+  const customCheck = customNodeModels[modelType]
+  if (customCheck) {
+    const allNodeNames = [...nodes.loaders, ...nodes.samplers, ...nodes.conditioning, ...nodes.decoders]
+    const missing = customCheck.nodes.filter(n => !allNodeNames.includes(n))
+    if (missing.length > 0) {
+      errors.push({
+        type: 'missing_nodes',
+        message: `Missing custom nodes: ${missing.join(', ')}. Install ${customCheck.installHint}`,
+      })
+    }
+  }
+
   const needsUnet = modelType === 'flux' || modelType === 'flux2' || modelType === 'wan' || modelType === 'hunyuan'
-    || modelType === 'ltx' || modelType === 'mochi' || modelType === 'cosmos' || modelType === 'cogvideo'
-    || modelType === 'framepack' || modelType === 'pyramidflow' || modelType === 'allegro'
+    || modelType === 'ltx' || modelType === 'mochi' || modelType === 'cosmos'
+    || modelType === 'framepack'
   if (needsUnet) {
     const hasUNET = nodes.loaders.includes('UNETLoader')
     const hasCLIPLoader = nodes.loaders.includes('CLIPLoader')
@@ -76,7 +104,7 @@ export async function preflightCheck(
         message: `Missing required nodes: ${missing.join(', ')}. Update ComfyUI to the latest version.`,
       })
     }
-  } else {
+  } else if (!customCheck) {
     if (!nodes.loaders.includes('CheckpointLoaderSimple')) {
       errors.push({
         type: 'missing_nodes',
@@ -85,8 +113,8 @@ export async function preflightCheck(
     }
   }
 
-  // Check VAE availability (only for UNET-based models — checkpoints include VAE)
-  if (needsUnet) {
+  // Check VAE availability (models with separate VAE files)
+  if (registry?.needsSeparateVAE) {
     try {
       resolvedVAE = await findMatchingVAE(modelType)
     } catch (err) {
@@ -101,8 +129,8 @@ export async function preflightCheck(
     }
   }
 
-  // Check CLIP/text encoder availability (only for UNET-based models)
-  if (needsUnet) {
+  // Check CLIP/text encoder availability (models with separate CLIP files)
+  if (registry?.needsSeparateCLIP) {
     try {
       resolvedCLIP = await findMatchingCLIP(modelType)
     } catch (err) {
