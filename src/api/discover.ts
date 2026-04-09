@@ -489,6 +489,25 @@ export async function startModelDownloadToPath(url: string, destDir: string, fil
   return backendCall('download_model_to_path', { url, destDir, filename, expectedBytes: expectedBytes ?? null })
 }
 
+/** Look up download URL + subfolder for a file by filename — searches all bundles + text models */
+export function lookupFileMeta(filename: string): { url: string; subfolder: string } | null {
+  // Search image + video bundles
+  for (const bundle of [...getImageBundles(), ...getVideoBundles()]) {
+    for (const f of bundle.files) {
+      if (f.filename === filename && f.downloadUrl && f.subfolder) {
+        return { url: f.downloadUrl, subfolder: f.subfolder }
+      }
+    }
+  }
+  // Search text models
+  for (const m of [...getUncensoredTextModels(), ...getMainstreamTextModels()]) {
+    if (m.filename === filename && m.downloadUrl && m.subfolder) {
+      return { url: m.downloadUrl, subfolder: m.subfolder }
+    }
+  }
+  return null
+}
+
 // ─── Image Model Bundles ───
 
 export function getImageBundles(): ModelBundle[] {

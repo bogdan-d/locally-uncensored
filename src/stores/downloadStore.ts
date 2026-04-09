@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { getDownloadProgress, pauseDownload, cancelDownload, resumeDownload, startModelDownload, startModelDownloadToPath, type DownloadProgress } from '../api/discover'
+import { getDownloadProgress, pauseDownload, cancelDownload, resumeDownload, startModelDownload, startModelDownloadToPath, lookupFileMeta, type DownloadProgress } from '../api/discover'
 
 // Maps filename → bundle name for grouped display
 type BundleMap = Record<string, string>
@@ -119,15 +119,31 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
   },
 
   resume: async (id: string) => {
-    const meta = get().downloadMeta[id]
-    if (!meta) return
+    let meta = get().downloadMeta[id]
+    if (!meta) {
+      const found = lookupFileMeta(id)
+      if (found) {
+        meta = { url: found.url, subfolder: found.subfolder }
+        get().setMeta(id, found.url, found.subfolder)
+      } else return
+    }
     await resumeDownload(id, meta.url, meta.subfolder)
     get().startPolling()
   },
 
   retry: async (id: string) => {
-    const meta = get().downloadMeta[id]
-    if (!meta) return
+    let meta = get().downloadMeta[id]
+    // If meta is missing (e.g. after error/restart), try to recover from bundle definitions
+    if (!meta) {
+      const found = lookupFileMeta(id)
+      if (found) {
+        meta = { url: found.url, subfolder: found.subfolder }
+        get().setMeta(id, found.url, found.subfolder)
+      } else {
+        console.warn('[downloadStore] retry: no meta found for', id)
+        return
+      }
+    }
     // Clear the error state first
     set(s => {
       const updated = { ...s.downloads }
