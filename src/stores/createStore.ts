@@ -139,7 +139,32 @@ export const useCreateStore = create<CreateState>()(
       promptHistory: [],
 
       setPreflightStatus: (ready, errors, warnings) => set({ preflightReady: ready, preflightErrors: errors, preflightWarnings: warnings }),
-      setMode: (mode) => set({ mode }),
+      setMode: (mode) => set((state) => {
+        // Reset parameters to the correct defaults when switching modes
+        // This prevents image resolution (1024x1024) leaking into video mode (causes HTTP 500)
+        if (mode === 'video' && state.videoModel) {
+          const type = classifyModel(state.videoModel)
+          const defaults = MODEL_TYPE_DEFAULTS[type] || MODEL_TYPE_DEFAULTS.unknown
+          return {
+            mode,
+            steps: defaults.steps, cfgScale: defaults.cfgScale,
+            sampler: defaults.sampler, scheduler: defaults.scheduler,
+            width: defaults.width, height: defaults.height,
+            ...(defaults.frames ? { frames: defaults.frames } : {}),
+            ...(defaults.fps ? { fps: defaults.fps } : {}),
+          }
+        }
+        if (mode === 'image' && state.imageModel) {
+          const defaults = MODEL_TYPE_DEFAULTS[state.imageModelType] || MODEL_TYPE_DEFAULTS.unknown
+          return {
+            mode,
+            steps: defaults.steps, cfgScale: defaults.cfgScale,
+            sampler: defaults.sampler, scheduler: defaults.scheduler,
+            width: defaults.width, height: defaults.height,
+          }
+        }
+        return { mode }
+      }),
       setPrompt: (prompt) => set({ prompt }),
       setNegativePrompt: (negativePrompt) => set({ negativePrompt }),
       setImageModel: (model, type) => {

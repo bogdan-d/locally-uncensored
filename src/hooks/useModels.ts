@@ -8,11 +8,19 @@ import { useProviderStore } from '../stores/providerStore'
 import { getEnabledProviders, prefixModelName } from '../api/providers'
 import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, CloudModel } from '../types/models'
 
-const VIDEO_PATTERNS = [/wan/, /svd/, /animatediff/, /animate/, /video/, /cogvideo/, /ltx/i]
+const VIDEO_PATTERNS = [/wan/, /svd/, /animatediff/, /animate/, /video/, /cogvideo/, /ltx/i, /framepack/, /mochi/, /cosmos/, /hunyuan/, /pyramidflow/, /allegro/]
+
+// Embedding models that should never appear in the chat model dropdown
+const EMBEDDING_PATTERNS = [/embed/, /nomic-embed/, /bge-/, /e5-/, /gte-/, /sentence-/]
 
 function isVideoModel(name: string): boolean {
   const lower = name.toLowerCase()
   return VIDEO_PATTERNS.some((p) => p.test(lower))
+}
+
+function isEmbeddingModel(name: string): boolean {
+  const lower = name.toLowerCase()
+  return EMBEDDING_PATTERNS.some((p) => p.test(lower))
 }
 
 export function useModels() {
@@ -49,14 +57,19 @@ export function useModels() {
         })
       )
       for (const result of providerResults) {
-        if (result.status === 'fulfilled') allModels.push(...result.value)
+        if (result.status === 'fulfilled') {
+          // Filter out embedding models (e.g. nomic-embed-text) — not usable for chat
+          allModels.push(...result.value.filter(m => !isEmbeddingModel(m.name)))
+        }
       }
       const ollamaEnabled = useProviderStore.getState().providers.ollama.enabled
       const hasOllamaModels = allModels.some(m => m.provider === 'ollama')
       if (ollamaEnabled && !hasOllamaModels) {
         try {
           const ollamaModels = await listModels()
-          allModels.push(...ollamaModels.map(m => ({ ...m, provider: 'ollama' as const, providerName: 'Ollama' })))
+          allModels.push(...ollamaModels
+            .filter(m => !isEmbeddingModel(m.name))
+            .map(m => ({ ...m, provider: 'ollama' as const, providerName: 'Ollama' })))
         } catch { /* Ollama might not be running */ }
       }
       let comfyModels: AIModel[] = []

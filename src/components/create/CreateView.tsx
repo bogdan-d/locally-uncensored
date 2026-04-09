@@ -196,6 +196,13 @@ export function CreateView() {
     }, 3000)
   }
 
+  // Re-run preflight when mode or video model changes
+  useEffect(() => {
+    if (connected === true && modelsLoaded) {
+      runPreflight()
+    }
+  }, [mode, videoModel, connected, modelsLoaded, runPreflight])
+
   // Detect I2V model (SVD, FramePack need an input image)
   const videoModelType = videoModel ? classifyModel(videoModel) : null
   const isI2V = mode === 'video' && (videoModelType === 'svd' || videoModelType === 'framepack')

@@ -1,4 +1,5 @@
 import { backendCall, fetchExternal } from "./backend"
+import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels } from "./comfyui"
 import type { ProviderId } from "./providers/types"
 
 export interface DiscoverModel {
@@ -112,6 +113,38 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
     // If check fails (e.g. no ComfyUI), all bundles are not installed
     for (const b of bundles) result[b.name] = false
   }
+
+  // Fallback: for bundles not detected by exact filename, check ComfyUI's model lists
+  // This catches variant files (e.g. fp8 version of a model with different filename)
+  const undetected = bundles.filter(b => !result[b.name])
+  if (undetected.length > 0) {
+    try {
+      const [checkpoints, diffModels, vaes, clips] = await Promise.all([
+        getCheckpoints(), getDiffusionModels(), getVAEModels(), getCLIPModels(),
+      ])
+      const modelsBySubfolder: Record<string, string[]> = {
+        checkpoints, diffusion_models: diffModels, vae: vaes, text_encoders: clips,
+      }
+      for (const bundle of undetected) {
+        const allFound = bundle.files.every(f => {
+          if (!f.filename || !f.subfolder) return true
+          const models = modelsBySubfolder[f.subfolder] || []
+          // Strip extension and common quant suffixes for fuzzy matching
+          const base = f.filename.replace(/\.[^.]+$/, '').toLowerCase()
+            .replace(/[-_](fp4|fp8|fp16|bf16|e4m3fn|scaled|fp8_e4m3fn_scaled)$/g, '')
+          return models.some(m => {
+            const mBase = m.replace(/\.[^.]+$/, '').toLowerCase()
+              .replace(/[-_](fp4|fp8|fp16|bf16|e4m3fn|scaled|fp8_e4m3fn_scaled)$/g, '')
+            return mBase === base || mBase.includes(base) || base.includes(mBase)
+          })
+        })
+        if (allFound) result[bundle.name] = true
+      }
+    } catch {
+      // ComfyUI not reachable — keep exact-match results
+    }
+  }
+
   return result
 }
 
@@ -135,9 +168,29 @@ export async function installCustomNodes(nodeKeys: string[]): Promise<void> {
 export async function installBundleComplete(bundle: ModelBundle): Promise<void> {
   const errors: string[] = []
 
-  // Step 1: Start ALL downloads IMMEDIATELY (don't wait for custom nodes)
+  // Pre-check: which files already exist on disk (skip re-downloading them)
+  let installedFiles = new Set<string>()
+  try {
+    const checkFiles = bundle.files
+      .filter(f => f.subfolder && f.filename)
+      .map(f => ({ subfolder: f.subfolder!, filename: f.filename!, expectedBytes: f.sizeGB ? Math.round(f.sizeGB * 1_073_741_824) : 0 }))
+    if (checkFiles.length > 0) {
+      const results: Array<{ filename: string; exists: boolean; complete: boolean }> =
+        await backendCall('check_model_sizes', { files: checkFiles })
+      for (const r of results) {
+        if (r.complete) installedFiles.add(r.filename)
+      }
+    }
+  } catch { /* can't check — download everything */ }
+
+  // Step 1: Start downloads only for files NOT already installed
   for (const file of bundle.files) {
     if (!file.downloadUrl || !file.filename || !file.subfolder) continue
+    if (installedFiles.has(file.filename)) {
+      console.log(`[discover] Skipping ${file.filename} — already installed`)
+      window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
+      continue
+    }
     try {
       const expectedBytes = file.sizeGB ? Math.round(file.sizeGB * 1_073_741_824) : undefined
       const result = await startModelDownload(file.downloadUrl, file.subfolder, file.filename, expectedBytes)

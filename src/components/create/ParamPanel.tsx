@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useCreateStore } from '../../stores/createStore'
 import { SliderControl } from '../settings/SliderControl'
 import { WorkflowFinder } from './WorkflowFinder'
@@ -69,6 +69,16 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
     ? videoModels.filter(m => videoSubTab === 'i2v' ? isI2VModel(m.name) : !isI2VModel(m.name))
     : videoModels
   const models = isVideo ? filteredVideoModels : imageModels
+
+  // Auto-select first model in filtered list when switching video sub-tabs
+  useEffect(() => {
+    if (!isVideo || filteredVideoModels.length === 0) return
+    const currentModel = store.videoModel
+    const isCurrentInList = filteredVideoModels.some(m => m.name === currentModel)
+    if (!isCurrentInList) {
+      store.setVideoModel(filteredVideoModels[0].name)
+    }
+  }, [videoSubTab, isVideo])
 
   const sel = 'w-full px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/8 text-gray-900 dark:text-white text-[11px] focus:outline-none focus:border-gray-400 dark:focus:border-white/20 cursor-pointer'
   const lbl = 'text-[10px] font-medium text-gray-500 dark:text-gray-600 uppercase tracking-widest mb-1 block'

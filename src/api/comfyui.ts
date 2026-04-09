@@ -401,6 +401,8 @@ export async function getImageModels(): Promise<ClassifiedModel[]> {
   for (const name of checkpoints) {
     if (!complete.has(name)) continue
     const type = classifyModel(name)
+    // Skip video-type checkpoints (e.g. SVD) — they belong in getVideoModels()
+    if (isVideoModelType(type)) continue
     result.push({ name, type: isImageModelType(type) ? type : 'sdxl', source: 'checkpoint' })
   }
 
@@ -416,9 +418,18 @@ export async function getImageModels(): Promise<ClassifiedModel[]> {
 }
 
 export async function getVideoModels(): Promise<ClassifiedModel[]> {
-  const diffModels = await getDiffusionModels()
-  const complete = await filterPartialFiles(diffModels)
+  const [checkpoints, diffModels] = await Promise.all([getCheckpoints(), getDiffusionModels()])
+  const complete = await filterPartialFiles([...checkpoints, ...diffModels])
   const result: ClassifiedModel[] = []
+
+  // Video checkpoints (e.g. SVD)
+  for (const name of checkpoints) {
+    if (!complete.has(name)) continue
+    const type = classifyModel(name)
+    if (isVideoModelType(type)) {
+      result.push({ name, type, source: 'checkpoint' })
+    }
+  }
 
   for (const name of diffModels) {
     if (!complete.has(name)) continue
