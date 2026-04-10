@@ -20,4 +20,34 @@
   <url><loc>https://locallyuncensored.com/blog/comfyui-beginners-guide.html</loc><lastmod>2026-04-02</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://locallyuncensored.com/blog/why-run-ai-locally.html</loc><lastmod>2026-04-02</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
   <url><loc>https://locallyuncensored.com/blog/index.html</loc><lastmod>2026-04-04</lastmod><changefreq>monthly</changefreq><priority>0.9</priority></url>
+
+  <!-- v2.3.0 Release Blog Post -->
+  <url>
+    <loc>https://locallyuncensored.com/blog/locally-uncensored-v2-3-0-release.html</loc>
+    <lastmod>2026-04-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- Dev.to Articles (April 10, 2026) -->
+  <url>
+    <loc>https://dev.to/purpledoubled/v230-comfyui-plug-play-image-to-video-on-6-gb-vram-and-uncensored-image-gen-in-a-local-ai-21a4</loc>
+    <lastmod>2026-04-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+  <url>
+    <loc>https://dev.to/purpledoubled/glm-51-just-dropped-754b-open-weight-moe-model-under-mit-license-heres-how-to-run-it-27b1</loc>
+    <lastmod>2026-04-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <!-- Reddit Post (April 10, 2026) -->
+  <url>
+    <loc>https://www.reddit.com/r/selfhosted/comments/1shhp6r/built_a_local_ai_desktop_app_chat_code_agent/</loc>
+    <lastmod>2026-04-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.4</priority>
+  </url>
 </urlset>
