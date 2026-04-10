@@ -43,11 +43,5 @@
     <priority>0.6</priority>
   </url>
 
-  <!-- Reddit Post (April 10, 2026) -->
-  <url>
-    <loc>https://www.reddit.com/r/selfhosted/comments/1shhp6r/built_a_local_ai_desktop_app_chat_code_agent/</loc>
-    <lastmod>2026-04-10</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.4</priority>
-  </url>
+
 </urlset>
