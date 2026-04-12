@@ -15,6 +15,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
   onboardingDone: false,
   thinkingEnabled: true,
+  cavemanMode: 'off',
   searchProvider: 'auto',
   braveApiKey: '',
   tavilyApiKey: '',
@@ -22,6 +23,13 @@ export const DEFAULT_SETTINGS: Settings = {
   claudeCodeModel: '',
   claudeCodeAutoApprove: false,
   claudeCodePath: '',
+}
+
+/** Caveman mode system prompt prefixes — credit: github.com/JuliusBrussee/caveman (MIT) */
+export const CAVEMAN_PROMPTS: Record<'lite' | 'full' | 'ultra', string> = {
+  lite: 'Be concise and direct. Drop filler words (just, really, basically, actually, simply), hedging, and pleasantries. Retain full grammar and articles. Keep code blocks, file paths, URLs, and commands unchanged. Every response follows this style.',
+  full: 'Respond terse like smart caveman. All technical substance stay. Only fluff die. Drop: articles, filler (just/really/basically/actually/simply), pleasantries, hedging. Fragments OK. Short synonyms preferred. Code unchanged. Pattern: [thing] [action] [reason]. [next step]. ACTIVE EVERY RESPONSE.',
+  ultra: 'Telegraphic. Abbreviate (DB/auth/config/fn/impl/req/res). Strip conjunctions. Arrows for flow (X -> Y). No articles, no filler, no pleasantries. Fragments only. Code/paths/URLs unchanged. ACTIVE EVERY RESPONSE.',
 }
 
 export const BUILT_IN_PERSONAS: Persona[] = [

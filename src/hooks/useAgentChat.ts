@@ -279,6 +279,15 @@ export function useAgentChat() {
       // Memory injection is non-critical
     }
 
+    // Caveman mode: prepend terse-style prompt
+    if (settings.cavemanMode && settings.cavemanMode !== 'off') {
+      const { CAVEMAN_PROMPTS } = await import('../lib/constants')
+      const cavemanPrompt = CAVEMAN_PROMPTS[settings.cavemanMode]
+      if (cavemanPrompt) {
+        systemPrompt = cavemanPrompt + '\n\n' + (systemPrompt || '')
+      }
+    }
+
     // Get effective permissions for this conversation
     const permissions = usePermissionStore.getState().getEffectivePermissions(convId!)
 

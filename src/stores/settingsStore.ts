@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { Settings, Persona } from '../types/settings'
 import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 
-const STORE_VERSION = 3
+const STORE_VERSION = 4
 
 interface SettingsState {
   settings: Settings

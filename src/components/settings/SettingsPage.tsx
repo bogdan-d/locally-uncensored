@@ -11,6 +11,7 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { getRecommendedAgentModels } from '../../lib/model-compatibility'
 import { MemorySettings } from './MemorySettings'
+import { RemoteAccessSettings } from './RemoteAccessSettings'
 import { ProviderSettings } from './ProviderConfig'
 import { PermissionSettings } from './PermissionSettings'
 import { MCPServerSettings } from './MCPServerSettings'
@@ -425,6 +426,11 @@ export function SettingsPage() {
         {/* ── ComfyUI (Image & Video Engine) ─────────── */}
         <Section title="ComfyUI (Image & Video)">
           <ComfyUISettings />
+        </Section>
+
+        {/* ── Remote Access ─────────────────────────── */}
+        <Section title="Remote Access">
+          <RemoteAccessSettings />
         </Section>
 
         {/* ── Claude Code ────────────────────────────── */}

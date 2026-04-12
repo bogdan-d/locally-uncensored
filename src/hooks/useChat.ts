@@ -119,6 +119,15 @@ export function useChat() {
       systemPrompt = (systemPrompt || '') + '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
     }
 
+    // Caveman mode: prepend terse-style prompt
+    if (settings.cavemanMode && settings.cavemanMode !== 'off') {
+      const { CAVEMAN_PROMPTS } = await import('../lib/constants')
+      const cavemanPrompt = CAVEMAN_PROMPTS[settings.cavemanMode]
+      if (cavemanPrompt) {
+        systemPrompt = cavemanPrompt + '\n\n' + (systemPrompt || '')
+      }
+    }
+
     const messages = [
       ...(systemPrompt ? [{ role: "system" as const, content: systemPrompt }] : []),
       ...conv.messages

@@ -5,6 +5,7 @@ pub mod filesystem;
 pub mod install;
 pub mod process;
 pub mod proxy;
+pub mod remote;
 pub mod search;
 pub mod shell;
 pub mod system;

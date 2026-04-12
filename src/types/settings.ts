@@ -1,5 +1,7 @@
 export type SearchProvider = 'auto' | 'brave' | 'tavily'
 
+export type CavemanMode = 'off' | 'lite' | 'full' | 'ultra'
+
 export interface Settings {
   apiEndpoint: string
   temperature: number
@@ -9,6 +11,7 @@ export interface Settings {
   theme: 'light' | 'dark'
   onboardingDone: boolean
   thinkingEnabled: boolean
+  cavemanMode: CavemanMode
   searchProvider: SearchProvider
   braveApiKey: string
   tavilyApiKey: string

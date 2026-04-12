@@ -75,6 +75,17 @@ fn main() {
             commands::claude_code::start_claude_code,
             commands::claude_code::stop_claude_code,
             commands::claude_code::send_claude_code_input,
+            // Remote Access
+            commands::remote::start_remote_server,
+            commands::remote::stop_remote_server,
+            commands::remote::remote_server_status,
+            commands::remote::regenerate_remote_token,
+            commands::remote::remote_qr_code,
+            commands::remote::remote_connected_devices,
+            commands::remote::set_remote_permissions,
+            commands::remote::start_tunnel,
+            commands::remote::stop_tunnel,
+            commands::remote::tunnel_status,
             // Proxy
             commands::proxy::ollama_search,
             commands::proxy::fetch_external,

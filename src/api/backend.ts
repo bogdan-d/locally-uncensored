@@ -152,6 +152,17 @@ export async function backendCall<T = any>(
     ollama_search: { path: "/ollama-search" },
     fetch_external: { path: "/local-api/proxy-download" },
     fetch_external_bytes: { path: "/local-api/proxy-download" },
+    // Remote Access
+    start_remote_server: { path: "/local-api/start-remote-server", method: "POST" },
+    stop_remote_server: { path: "/local-api/stop-remote-server", method: "POST" },
+    remote_server_status: { path: "/local-api/remote-server-status" },
+    regenerate_remote_token: { path: "/local-api/regenerate-remote-token", method: "POST" },
+    remote_qr_code: { path: "/local-api/remote-qr-code" },
+    remote_connected_devices: { path: "/local-api/remote-connected-devices" },
+    set_remote_permissions: { path: "/local-api/set-remote-permissions", method: "POST" },
+    start_tunnel: { path: "/local-api/start-tunnel", method: "POST" },
+    stop_tunnel: { path: "/local-api/stop-tunnel", method: "POST" },
+    tunnel_status: { path: "/local-api/tunnel-status" },
     // Claude Code
     detect_claude_code: { path: "/local-api/detect-claude-code" },
     install_claude_code: { path: "/local-api/install-claude-code", method: "POST" },

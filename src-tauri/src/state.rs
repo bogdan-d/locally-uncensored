@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use crate::commands::whisper::WhisperServer;
+use crate::commands::remote::RemoteServer;
 use crate::python::get_python_bin;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -56,6 +57,8 @@ pub struct AppState {
     // Claude Code
     pub claude_code_process: Mutex<Option<Child>>,
     pub claude_code_install: Arc<Mutex<InstallState>>,
+    // Remote Access
+    pub remote: Mutex<RemoteServer>,
 }
 
 impl AppState {
@@ -79,6 +82,8 @@ impl AppState {
             // Claude Code
             claude_code_process: Mutex::new(None),
             claude_code_install: Arc::new(Mutex::new(InstallState::default())),
+            // Remote Access
+            remote: Mutex::new(RemoteServer::new()),
         }
     }
 }
