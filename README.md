@@ -34,23 +34,28 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.3.0 — Current Release
+## v2.3.2 — Current Release
 
-**ComfyUI Plug & Play, 20 Model Bundles, Image-to-Image, Z-Image, FramePack I2V**
+**GLM-4.7-Flash, Model Loading Fix, Agent Badge Audit, 75+ Downloadable Models**
+
+- **GLM-4.7-Flash** — ZhipuAI's strongest 30B class model. 11 variants across uncensored (Heretic) and mainstream, IQ2 to Q8. Fits 12GB VRAM (IQ2_M). Native tool calling.
+- **GLM 5.1 754B MoE** — Frontier agentic engineering model listed as cloud-available via Ollama.
+- **Model Loading Fix** — Fixed 3 bugs causing "0 models loaded" in ComfyUI Create View (race condition at startup, broken auto-retry logic, stale cache after download). Models now load reliably within seconds.
+- **Agent Badge Audit** — Consistent agent flags across all 75+ models. Models with native tool calling are correctly marked.
+- **Removed HOT Badges** — Cleaner UI, only AGENT badges shown for tool-calling models.
+
+### v2.3.0 Features (included)
 
 - **ComfyUI Plug & Play** — Auto-detect, one-click install, auto-start. Zero config image and video generation.
-- **20 Model Bundles** — 8 image + 12 video bundles with one-click download. Verified models marked, untested show "Coming Soon".
-- **Z-Image Turbo/Base** — Uncensored image model. 8-15 seconds per image. No safety filters. Text-to-Image and Image-to-Image.
-- **FLUX 2 Klein** — Next-gen FLUX architecture with Qwen 3 text encoder. Fastest FLUX model.
-- **Image-to-Image (I2I)** — Upload a source image, adjust denoise strength (0.0-1.0), transform with any prompt. Works with all image models (SDXL, FLUX, Z-Image).
-- **Image-to-Video (I2V)** — FramePack F1 and CogVideoX support with drag & drop image upload.
-- **FramePack F1** — Revolutionary I2V: runs on 6 GB VRAM via next-frame prediction.
-- **Dynamic Workflow Builder** — 14 strategies. Auto-detects installed nodes and builds the correct pipeline.
-- **VRAM-Aware Model Filtering** — Lightweight / Mid-Range / High-End tabs based on GPU VRAM.
-- **Unified Download Manager** — Track all downloads with progress, speed, retry for failed files.
+- **20 Model Bundles** — 8 image + 12 video bundles with one-click download.
+- **Z-Image Turbo/Base** — Uncensored image model. 8-15 seconds per image. No safety filters.
+- **FLUX 2 Klein** — Next-gen FLUX architecture with Qwen 3 text encoder.
+- **Image-to-Image (I2I)** — Upload a source image, adjust denoise strength, transform with any image model.
+- **Image-to-Video (I2V)** — FramePack F1, CogVideoX, SVD with drag & drop image upload.
+- **Dynamic Workflow Builder** — 14 strategies. Auto-detects installed nodes.
+- **Unified Download Manager** — Track all downloads with progress, speed, retry.
 - **Think Mode in Chat Input** — Toggle thinking mode directly from the message input area.
 - **Process Cleanup** — ComfyUI auto-terminates when app is closed (Windows Job Object).
-- **Hardware-Aware Onboarding** — Recommends Gemma 4, Qwen 3.5, and other models based on your GPU VRAM.
 
 ---
 
@@ -176,9 +181,10 @@ Open the **Create** tab. ComfyUI is auto-detected or one-click installed. Models
 
 | Model | VRAM | Best For |
 |-------|------|----------|
+| **GLM-4.7-Flash IQ2** | 12 GB | Strongest 30B class. Tool calling. 198K context. |
 | **Gemma 4 E4B** | 4 GB | Lightweight, fast, great for small GPUs. |
 | **Qwen 3.5 9B** | 8 GB | Strongest reasoning + coding at 9B. |
-| **Gemma 4 27B** | 16 GB | Frontier dense model, native tools + vision. |
+| **Gemma 4 31B** | 16 GB | Frontier dense model, native tools + vision. |
 | **Qwen 3.5 35B MoE** | 16 GB | Best agentic, 256K context. SWE-bench leader. |
 | Hermes 3 8B | 6 GB | Agent Mode. Uncensored + tool calling. |
 | DeepSeek R1 (8B-70B) | 6-48 GB | Chain-of-thought reasoning. |

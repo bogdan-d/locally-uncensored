@@ -235,6 +235,16 @@ export async function checkComfyConnection(): Promise<boolean> {
   }
 }
 
+/** Force ComfyUI to re-scan model directories. Works on ComfyUI 2024+ with /api/refresh. */
+export async function refreshComfyModels(): Promise<boolean> {
+  try {
+    const res = await localFetch(comfyuiUrl('/api/refresh'), { method: 'POST' })
+    return res.ok
+  } catch {
+    return false // Older ComfyUI versions without /api/refresh — non-fatal
+  }
+}
+
 // ─── System VRAM Detection ───
 
 let cachedVRAM: number | null = null
@@ -269,27 +279,17 @@ async function nodeExists(nodeName: string): Promise<boolean> {
 }
 
 export async function getCheckpoints(): Promise<string[]> {
-  try {
-    const res = await localFetch(comfyuiUrl('/object_info/CheckpointLoaderSimple'))
-    if (!res.ok) return []
-    const data = await res.json()
-    return data?.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0] ?? []
-  } catch (err) {
-    console.warn('[ComfyUI] Failed to fetch checkpoints:', err)
-    return []
-  }
+  const res = await localFetch(comfyuiUrl('/object_info/CheckpointLoaderSimple'))
+  if (!res.ok) throw new Error(`ComfyUI /object_info/CheckpointLoaderSimple failed (HTTP ${res.status})`)
+  const data = await res.json()
+  return data?.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0] ?? []
 }
 
 export async function getDiffusionModels(): Promise<string[]> {
-  try {
-    const res = await localFetch(comfyuiUrl('/object_info/UNETLoader'))
-    if (!res.ok) return []
-    const data = await res.json()
-    return data?.UNETLoader?.input?.required?.unet_name?.[0] ?? []
-  } catch (err) {
-    console.warn('[ComfyUI] Failed to fetch diffusion models:', err)
-    return []
-  }
+  const res = await localFetch(comfyuiUrl('/object_info/UNETLoader'))
+  if (!res.ok) throw new Error(`ComfyUI /object_info/UNETLoader failed (HTTP ${res.status})`)
+  const data = await res.json()
+  return data?.UNETLoader?.input?.required?.unet_name?.[0] ?? []
 }
 
 export async function getVAEModels(): Promise<string[]> {

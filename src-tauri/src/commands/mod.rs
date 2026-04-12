@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod claude_code;
 pub mod download;
 pub mod filesystem;
 pub mod install;

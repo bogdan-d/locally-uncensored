@@ -12,6 +12,8 @@ interface Props {
   samplerList: string[]
   schedulerList: string[]
   modelsLoaded: boolean
+  modelLoadError?: string | null
+  onRetryModels?: () => void
 }
 
 const IMG_SIZE_PRESETS_SD15 = [
@@ -59,7 +61,7 @@ const TYPE_BADGE: Record<ModelType, { label: string; color: string }> = {
   unknown: { label: 'Model', color: 'bg-white/10 text-gray-400' },
 }
 
-export function ParamPanel({ imageModels, videoModels, samplerList, schedulerList, modelsLoaded }: Props) {
+export function ParamPanel({ imageModels, videoModels, samplerList, schedulerList, modelsLoaded, modelLoadError, onRetryModels }: Props) {
   const store = useCreateStore()
   const isVideo = store.mode === 'video'
   const isI2I = store.mode === 'image' && store.imageSubMode === 'img2img'
@@ -158,13 +160,24 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
       {/* Model */}
       <div>
         <label className={lbl}>{isVideo ? (videoSubTab === 'i2v' ? 'I2V Model' : 'Video Model') : 'Image Model'}</label>
-        {!modelsLoaded ? (
+        {modelLoadError ? (
+          <div className="space-y-1">
+            <div className="px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px]">
+              {modelLoadError}
+            </div>
+            {onRetryModels && (
+              <button onClick={onRetryModels} className="text-[9px] text-gray-500 hover:text-gray-300 transition-colors">
+                Retry
+              </button>
+            )}
+          </div>
+        ) : !modelsLoaded ? (
           <div className="px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/8 text-gray-400 dark:text-gray-600 text-[10px] animate-pulse">
-            Loading...
+            Loading models from ComfyUI...
           </div>
         ) : models.length === 0 ? (
           <div className="px-2.5 py-1.5 rounded-lg bg-yellow-500/5 border border-yellow-500/10 text-yellow-400 text-[10px]">
-            No models found
+            No models found. Download models in the Model Manager.
           </div>
         ) : (
           <>

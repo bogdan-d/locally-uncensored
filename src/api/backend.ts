@@ -152,6 +152,13 @@ export async function backendCall<T = any>(
     ollama_search: { path: "/ollama-search" },
     fetch_external: { path: "/local-api/proxy-download" },
     fetch_external_bytes: { path: "/local-api/proxy-download" },
+    // Claude Code
+    detect_claude_code: { path: "/local-api/detect-claude-code" },
+    install_claude_code: { path: "/local-api/install-claude-code", method: "POST" },
+    install_claude_code_status: { path: "/local-api/install-claude-code-status" },
+    start_claude_code: { path: "/local-api/start-claude-code", method: "POST" },
+    stop_claude_code: { path: "/local-api/stop-claude-code", method: "POST" },
+    send_claude_code_input: { path: "/local-api/send-claude-code-input", method: "POST" },
     // Agent tools (Phase 1 — new commands)
     shell_execute: { path: "/local-api/shell-execute", method: "POST" },
     fs_read: { path: "/local-api/fs-read", method: "POST" },

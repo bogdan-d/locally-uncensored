@@ -79,6 +79,30 @@ export function isThinkingCompatible(modelName: string | null): boolean {
   return THINKING_COMPATIBLE.some(f => baseName.startsWith(f))
 }
 
+/**
+ * Models recommended for Claude Code (Anthropic API compat via Ollama 0.14+).
+ * These models handle agentic tool-use loops well with the Claude Code CLI.
+ */
+const CLAUDE_CODE_COMPATIBLE = [
+  'glm5', 'glm-5', 'glm4.7', 'glm-4.7',
+  'qwen3.5-coder', 'qwen3-coder',
+  'qwen3.5', 'qwen3',
+  'hermes3', 'hermes-3', 'hermes',
+  'deepseek-v3', 'deepseek-v2.5',
+  'gemma4', 'gemma3',
+]
+
+/**
+ * Check if a model works well with Claude Code via Ollama 0.14+.
+ * Only relevant for Ollama provider since Claude Code uses Anthropic API format.
+ */
+export function isClaudeCodeCompatible(modelName: string | null): boolean {
+  if (!modelName) return false
+  const name = modelName.toLowerCase()
+  const baseName = name.replace(/^[^/]+\//, '').replace(/:.*$/, '').replace(/-abliterated/g, '').replace(/-uncensored/g, '')
+  return CLAUDE_CODE_COMPATIBLE.some(f => baseName.startsWith(f))
+}
+
 export type ToolCallingStrategy = 'native' | 'template_fix' | 'hermes_xml'
 
 /**

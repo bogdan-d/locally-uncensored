@@ -53,6 +53,9 @@ pub struct AppState {
     pub searxng_install: Mutex<InstallState>,
     pub searxng_available: AtomicBool,
     pub python_bin: String,
+    // Claude Code
+    pub claude_code_process: Mutex<Option<Child>>,
+    pub claude_code_install: Arc<Mutex<InstallState>>,
 }
 
 impl AppState {
@@ -73,6 +76,9 @@ impl AppState {
             searxng_install: Mutex::new(InstallState::default()),
             searxng_available: AtomicBool::new(false),
             python_bin,
+            // Claude Code
+            claude_code_process: Mutex::new(None),
+            claude_code_install: Arc::new(Mutex::new(InstallState::default())),
         }
     }
 }
@@ -93,6 +99,21 @@ impl Drop for AppState {
                     }
                 }
                 println!("[ComfyUI] Stopped");
+            }
+        }
+
+        // Kill Claude Code process
+        if let Ok(mut proc) = self.claude_code_process.lock() {
+            if let Some(ref mut child) = *proc {
+                let pid = child.id();
+                if cfg!(target_os = "windows") {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/pid", &pid.to_string(), "/T", "/F"])
+                        .output();
+                } else {
+                    let _ = child.kill();
+                }
+                println!("[ClaudeCode] Stopped");
             }
         }
 

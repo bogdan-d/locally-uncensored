@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react'
 import { v4 as uuid } from 'uuid'
 import {
   checkComfyConnection,
+  refreshComfyModels,
   getImageModels,
   getVideoModels,
   getSamplers,
@@ -37,6 +38,7 @@ export function useCreate() {
   const [schedulerList, setSchedulerList] = useState<string[]>([])
   const [videoBackend, setVideoBackend] = useState<VideoBackend>('none')
   const [modelsLoaded, setModelsLoaded] = useState(false)
+  const [modelLoadError, setModelLoadError] = useState<string | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -72,8 +74,23 @@ export function useCreate() {
     }
   }, [])
 
+  const zeroModelRetries = useRef(0)
+
   const fetchModels = useCallback(async () => {
+    setModelLoadError(null)
     try {
+      // Check connection first — if ComfyUI is down, don't waste time on model queries
+      const comfyOk = await checkComfyConnection()
+      if (!comfyOk) {
+        setModelLoadError('ComfyUI is not running. Start it from Settings or wait for auto-start.')
+        return
+      }
+
+      // Force ComfyUI to re-scan model directories before querying.
+      // This fixes the case where models were downloaded while ComfyUI was running
+      // and its internal cache hasn't updated yet.
+      await refreshComfyModels()
+
       const [imgModels, vidModels, samplers, schedulers, vBackend, _nodeInfo] = await Promise.all([
         getImageModels(),
         getVideoModels(),
@@ -87,6 +104,26 @@ export function useCreate() {
       setSamplerList(samplers)
       setSchedulerList(schedulers)
       setVideoBackend(vBackend)
+
+      // If ComfyUI is connected but returns 0 models, do NOT set modelsLoaded — keep retrying.
+      // ComfyUI may still be scanning directories (race condition on startup).
+      if (imgModels.length === 0 && vidModels.length === 0) {
+        zeroModelRetries.current++
+        if (zeroModelRetries.current <= 12) {
+          // Still retrying — ComfyUI might not be done scanning yet
+          console.log(`[useCreate] 0 models found, retry ${zeroModelRetries.current}/12...`)
+          setModelLoadError('ComfyUI is loading models... This can take a moment after startup.')
+          // Don't set modelsLoaded — auto-retry will keep running
+        } else {
+          // Give up retrying — show actionable error
+          setModelsLoaded(true)
+          setModelLoadError('ComfyUI is running but found 0 models. Make sure models are in ComfyUI/models/ subfolders (checkpoints/, diffusion_models/). Try Refresh or restart ComfyUI in Settings.')
+        }
+        return
+      }
+
+      // Models found — reset retry counter and mark loaded
+      zeroModelRetries.current = 0
       setModelsLoaded(true)
 
       const state = useCreateStore.getState()
@@ -118,6 +155,7 @@ export function useCreate() {
       setTimeout(() => runPreflight(), 100)
     } catch (err) {
       console.error('[useCreate] Failed to fetch models:', err)
+      setModelLoadError(`Failed to load models: ${err instanceof Error ? err.message : 'ComfyUI API error'}`)
     }
   }, [runPreflight])
 
@@ -130,6 +168,20 @@ export function useCreate() {
     window.addEventListener('comfyui-model-downloaded', handler)
     return () => window.removeEventListener('comfyui-model-downloaded', handler)
   }, [fetchModels])
+
+  // Auto-retry model loading when ComfyUI reconnects OR when 0 models found (startup race)
+  useEffect(() => {
+    if (!modelLoadError) return  // No error — nothing to retry
+    if (modelsLoaded) return     // modelsLoaded + error = gave up after max retries, don't loop
+    const retryInterval = setInterval(async () => {
+      const ok = await checkComfyConnection()
+      if (ok) {
+        console.log('[useCreate] Retrying model fetch...')
+        fetchModels()
+      }
+    }, 3000)
+    return () => clearInterval(retryInterval)
+  }, [modelLoadError, modelsLoaded, fetchModels])
 
   const generate = useCallback(async () => {
     const state = useCreateStore.getState()
@@ -555,6 +607,7 @@ export function useCreate() {
     schedulerList,
     videoBackend,
     modelsLoaded,
+    modelLoadError,
     checkConnection,
     fetchModels,
     runPreflight,

@@ -8,7 +8,7 @@ import { createSafeStorage } from '../lib/storage-quota'
 interface ChatState {
   conversations: Conversation[]
   activeConversationId: string | null
-  createConversation: (model: string, systemPrompt: string, mode?: 'lu' | 'codex' | 'openclaw') => string
+  createConversation: (model: string, systemPrompt: string, mode?: 'lu' | 'codex' | 'openclaw' | 'claude-code') => string
   deleteConversation: (id: string) => void
   renameConversation: (id: string, title: string) => void
   setActiveConversation: (id: string | null) => void
@@ -31,7 +31,7 @@ export const useChatStore = create<ChatState>()(
         const id = uuid()
         const conversation: Conversation = {
           id,
-          title: mode === 'codex' ? 'Codex Chat' : 'New Chat',
+          title: mode === 'codex' ? 'Codex Chat' : mode === 'claude-code' ? 'Claude Code' : 'New Chat',
           messages: [],
           model,
           systemPrompt,

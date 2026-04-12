@@ -12,6 +12,10 @@ export interface Settings {
   searchProvider: SearchProvider
   braveApiKey: string
   tavilyApiKey: string
+  // Claude Code
+  claudeCodeModel: string
+  claudeCodeAutoApprove: boolean
+  claudeCodePath: string
 }
 
 export interface Persona {

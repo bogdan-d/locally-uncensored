@@ -17,6 +17,7 @@ interface Props {
   pendingApproval?: AgentToolCall | null
   onApprove?: () => void
   onReject?: () => void
+  disabled?: boolean
 }
 
 function fileToImageAttachment(file: File): Promise<ImageAttachment> {
@@ -32,7 +33,7 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
   })
 }
 
-export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject }: Props) {
+export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject, disabled }: Props) {
   const [input, setInput] = useState('')
   const [images, setImages] = useState<ImageAttachment[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
@@ -65,7 +66,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
 
   const handleSend = () => {
     const trimmed = input.trim()
-    if ((!trimmed && images.length === 0) || isGenerating) return
+    if ((!trimmed && images.length === 0) || isGenerating || disabled) return
     onSend(trimmed || '(image)', images.length > 0 ? images : undefined)
     setInput('')
     setImages([])
@@ -186,9 +187,10 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder={isDragOver ? "Drop images here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
+            placeholder={disabled ? "Claude Code not installed" : isDragOver ? "Drop images here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
+            disabled={disabled}
             rows={1}
-            className="flex-1 bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[0.75rem] leading-relaxed max-h-[200px]"
+            className="flex-1 bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[0.75rem] leading-relaxed max-h-[200px] disabled:opacity-50"
           />
 
           {/* Think toggle */}

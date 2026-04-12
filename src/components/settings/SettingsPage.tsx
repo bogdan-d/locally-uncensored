@@ -17,6 +17,8 @@ import { MCPServerSettings } from './MCPServerSettings'
 import { WorkflowList } from '../agents/WorkflowList'
 import { WorkflowBuilder } from '../agents/WorkflowBuilder'
 import { useUpdateStore } from '../../stores/updateStore'
+import { useClaudeCodeStore, CLAUDE_CODE_RECOMMENDED_MODELS } from '../../stores/claudeCodeStore'
+import { backendCall } from '../../api/backend'
 import { ArrowUpCircle } from 'lucide-react'
 
 // ── Collapsible Section ─────────────────────────────────────────
@@ -266,6 +268,71 @@ function ComfyUISettings() {
   )
 }
 
+// ── Claude Code Settings ────────────────────────────────────────
+
+function ClaudeCodeSettings() {
+  const installed = useClaudeCodeStore((s) => s.installed)
+  const version = useClaudeCodeStore((s) => s.version)
+  const { settings, updateSettings } = useSettingsStore()
+  const [detecting, setDetecting] = useState(false)
+
+  async function handleDetect() {
+    setDetecting(true)
+    try {
+      const result = await backendCall<{ installed: boolean; version: string; path: string }>('detect_claude_code')
+      useClaudeCodeStore.getState().setInstalled(result.installed, result.version, result.path)
+    } catch { /* ignore */ }
+    setDetecting(false)
+  }
+
+  return (
+    <div className="space-y-3">
+      {/* Status */}
+      <div className="flex items-center gap-2 text-[0.65rem]">
+        <span className="flex items-center gap-1">
+          <span className={`w-1.5 h-1.5 rounded-full ${installed ? 'bg-green-500' : 'bg-red-500'}`} />
+          <span className="text-gray-500">{installed ? `Installed (${version || 'unknown'})` : 'Not installed'}</span>
+        </span>
+        <button onClick={handleDetect} disabled={detecting} className="text-[0.55rem] text-gray-500 hover:text-gray-300 transition-colors">
+          {detecting ? 'Detecting...' : 'Re-detect'}
+        </button>
+      </div>
+
+      {/* Model selector */}
+      <div className="space-y-1">
+        <label className="text-[0.6rem] text-gray-500">Model</label>
+        <select
+          value={settings.claudeCodeModel}
+          onChange={(e) => updateSettings({ claudeCodeModel: e.target.value })}
+          className="w-full text-[0.65rem] px-2 py-1 rounded bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-200"
+        >
+          <option value="">Auto (default)</option>
+          {CLAUDE_CODE_RECOMMENDED_MODELS.map(m => (
+            <option key={m.name} value={m.name}>{m.label} — {m.reason}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Auto-approve toggle */}
+      <InlineToggle
+        label="Auto-approve all permissions"
+        enabled={settings.claudeCodeAutoApprove}
+        onChange={() => updateSettings({ claudeCodeAutoApprove: !settings.claudeCodeAutoApprove })}
+        icon={<Shield size={10} className="text-amber-400" />}
+      />
+      {settings.claudeCodeAutoApprove && (
+        <p className="text-[0.5rem] text-amber-400/70 ml-4">
+          Warning: This allows Claude Code to execute any tool without asking. Use with caution.
+        </p>
+      )}
+
+      <p className="text-[0.5rem] text-gray-600">
+        Requires Ollama 0.14+ for local Anthropic API compatibility.
+      </p>
+    </div>
+  )
+}
+
 // ── Main Component ──────────────────────────────────────────────
 
 export function SettingsPage() {
@@ -358,6 +425,11 @@ export function SettingsPage() {
         {/* ── ComfyUI (Image & Video Engine) ─────────── */}
         <Section title="ComfyUI (Image & Video)">
           <ComfyUISettings />
+        </Section>
+
+        {/* ── Claude Code ────────────────────────────── */}
+        <Section title="Claude Code">
+          <ClaudeCodeSettings />
         </Section>
 
         {/* ── Voice ──────────────────────────────────── */}

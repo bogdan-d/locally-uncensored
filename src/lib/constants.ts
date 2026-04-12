@@ -18,6 +18,10 @@ export const DEFAULT_SETTINGS: Settings = {
   searchProvider: 'auto',
   braveApiKey: '',
   tavilyApiKey: '',
+  // Claude Code
+  claudeCodeModel: '',
+  claudeCodeAutoApprove: false,
+  claudeCodePath: '',
 }
 
 export const BUILT_IN_PERSONAS: Persona[] = [

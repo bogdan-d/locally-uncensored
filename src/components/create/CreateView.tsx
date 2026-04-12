@@ -111,7 +111,7 @@ interface ComfyStatus {
 export function CreateView() {
   const {
     connected, imageModels, videoModels, samplerList, schedulerList,
-    videoBackend, modelsLoaded, checkConnection, fetchModels, runPreflight, generate, cancel,
+    videoBackend, modelsLoaded, modelLoadError, checkConnection, fetchModels, runPreflight, generate, cancel,
   } = useCreate()
   const { mode, setMode, imageSubMode, error, preflightReady, preflightErrors, preflightWarnings, videoModel, i2vImage, setI2vImage, i2iImage, setI2iImage, denoise, setDenoise } = useCreateStore()
 
@@ -625,6 +625,8 @@ export function CreateView() {
             samplerList={samplerList}
             schedulerList={schedulerList}
             modelsLoaded={modelsLoaded}
+            modelLoadError={modelLoadError}
+            onRetryModels={fetchModels}
           />
         </div>
 
