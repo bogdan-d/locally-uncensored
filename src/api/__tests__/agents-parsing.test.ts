@@ -11,13 +11,15 @@ describe('agents — pure functions', () => {
   // ─── AGENT_TOOLS ───
 
   describe('AGENT_TOOLS', () => {
-    it('has exactly 5 tools', () => {
-      expect(AGENT_TOOLS).toHaveLength(5)
+    it('has exactly 7 tools (web_search, web_fetch, get_current_time, file_read, file_write, code_execute, image_generate)', () => {
+      expect(AGENT_TOOLS).toHaveLength(7)
     })
 
-    it('contains web_search, file_read, file_write, code_execute, image_generate', () => {
+    it('contains all 7 tool names', () => {
       const names = AGENT_TOOLS.map((t) => t.name)
       expect(names).toContain('web_search')
+      expect(names).toContain('web_fetch')
+      expect(names).toContain('get_current_time')
       expect(names).toContain('file_read')
       expect(names).toContain('file_write')
       expect(names).toContain('code_execute')
@@ -31,7 +33,12 @@ describe('agents — pure functions', () => {
         expect(typeof tool.description).toBe('string')
         expect(tool.description.length).toBeGreaterThan(0)
         expect(Array.isArray(tool.parameters)).toBe(true)
-        expect(tool.parameters.length).toBeGreaterThan(0)
+        // get_current_time takes zero args — everything else has at least one.
+        if (tool.name !== 'get_current_time') {
+          expect(tool.parameters.length).toBeGreaterThan(0)
+        } else {
+          expect(tool.parameters.length).toBe(0)
+        }
       }
     })
 
@@ -53,8 +60,8 @@ describe('agents — pure functions', () => {
       expect(codeExec?.requiresApproval).toBe(true)
     })
 
-    it('web_search, file_read, image_generate do not require approval', () => {
-      const noApproval = ['web_search', 'file_read', 'image_generate']
+    it('web_search, web_fetch, file_read, image_generate do not require approval', () => {
+      const noApproval = ['web_search', 'web_fetch', 'file_read', 'image_generate']
       for (const name of noApproval) {
         const tool = AGENT_TOOLS.find((t) => t.name === name)
         expect(tool?.requiresApproval).toBe(false)

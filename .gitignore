@@ -47,3 +47,8 @@ test-codex.txt
 Thumbs.db
 analytics/
 producthunt-launch.md
+
+# Dev preview artifacts
+.preview-mobile/
+.claude/plans/
+BLOCKED.md

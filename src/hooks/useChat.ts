@@ -24,6 +24,9 @@ export function useChat() {
   const contentRef = useRef("")
   const thinkingRef = useRef("")
   const isThinkingRef = useRef(false)
+  // Buffer for <think>…</think> chars we're throwing away because the
+  // user toggled Thinking OFF — we still need to detect the closing tag.
+  const discardedThinkBufRef = useRef("")
 
   // Agent mode composition
   const agentChat = useAgentChat()
@@ -154,12 +157,20 @@ export function useChat() {
     contentRef.current = ""
     thinkingRef.current = ""
     isThinkingRef.current = false
+    discardedThinkBufRef.current = ""
 
     try {
       // ── Multi-Provider: resolve provider for active model ──
       const { provider, modelId } = getProviderForModel(activeModel)
 
-      const useThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+      // Tri-state: only thinking-compatible models get an explicit flag
+      // (true or false). For every other model we leave `thinking`
+      // undefined so the provider omits `think` entirely and Ollama does
+      // whatever it normally does.
+      const canThink = isThinkingCompatible(activeModel)
+      const useThinking: boolean | undefined = canThink
+        ? settings.thinkingEnabled === true
+        : undefined
       const chatOpts = {
         temperature: settings.temperature,
         topP: settings.topP,
@@ -169,13 +180,14 @@ export function useChat() {
         signal: abort.signal,
       }
 
-      // Helper: create stream, retrying without thinking if model rejects it
+      // Helper: create stream, retrying without the think field if the
+      // provider rejects it (old Ollama builds, edge-case models).
       async function* createStreamWithFallback() {
         try {
           yield* provider.chatStream(modelId, messages, chatOpts)
         } catch (err: any) {
-          if (useThinking && (err?.message?.includes('does not support thinking') || err?.statusCode === 400)) {
-            yield* provider.chatStream(modelId, messages, { ...chatOpts, thinking: false })
+          if (useThinking !== undefined && (err?.message?.includes('does not support thinking') || err?.statusCode === 400)) {
+            yield* provider.chatStream(modelId, messages, { ...chatOpts, thinking: undefined })
           } else {
             throw err
           }
@@ -194,8 +206,16 @@ export function useChat() {
           useModelStore.getState().setIsModelLoading(false)
         }
 
+        // Thinking visibility is driven by the toggle. When OFF, we still
+        // have to parse <think>…</think> so the state-machine closes
+        // correctly, but we discard the captured text instead of rendering
+        // it. Thinking-native models (QwQ, DeepSeek-R1) emit tags / the
+        // native `thinking` field regardless of the `think: true` flag —
+        // without this gate the block would show up even with the toggle OFF.
+        const keepThinking = useThinking === true
+
         // Ollama native thinking field (Gemma 4, Qwen 3.5, etc.)
-        if (chunk.thinking) {
+        if (chunk.thinking && keepThinking) {
           thinkingRef.current += chunk.thinking
         }
 
@@ -210,10 +230,20 @@ export function useChat() {
                 isThinkingRef.current = true
               }
             } else {
-              thinkingRef.current += char
-              if (thinkingRef.current.endsWith("</think>")) {
-                thinkingRef.current = thinkingRef.current.slice(0, -8)
-                isThinkingRef.current = false
+              if (keepThinking) {
+                thinkingRef.current += char
+                if (thinkingRef.current.endsWith("</think>")) {
+                  thinkingRef.current = thinkingRef.current.slice(0, -8)
+                  isThinkingRef.current = false
+                }
+              } else {
+                // Discard char-by-char but still detect tag close so the
+                // state machine resumes sending to content afterwards.
+                discardedThinkBufRef.current += char
+                if (discardedThinkBufRef.current.endsWith("</think>")) {
+                  discardedThinkBufRef.current = ""
+                  isThinkingRef.current = false
+                }
               }
             }
           }
@@ -224,7 +254,7 @@ export function useChat() {
               const cId = convId!
               const mId = assistantMessage.id
               useChatStore.getState().updateMessageContent(cId, mId, contentRef.current)
-              if (thinkingRef.current) {
+              if (keepThinking && thinkingRef.current) {
                 useChatStore.getState().updateMessageThinking(cId, mId, thinkingRef.current)
               }
               frameScheduled = false

@@ -9,8 +9,8 @@ import {
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
 describe('AGENT_TOOL_DEFS', () => {
-  it('contains exactly 13 tool definitions', () => {
-    expect(AGENT_TOOL_DEFS).toHaveLength(13)
+  it('contains exactly 14 tool definitions', () => {
+    expect(AGENT_TOOL_DEFS).toHaveLength(14)
   })
 
   const expectedTools = [
@@ -27,6 +27,7 @@ describe('AGENT_TOOL_DEFS', () => {
     'screenshot',
     'process_list',
     'system_info',
+    'get_current_time',
   ]
 
   it.each(expectedTools)('includes the "%s" tool', (name) => {
@@ -46,10 +47,10 @@ describe('AGENT_TOOL_DEFS', () => {
     }
   })
 
-  it('auto-permission tools are process_list, system_info, web_fetch, web_search', () => {
+  it('auto-permission tools are get_current_time, process_list, system_info, web_fetch, web_search', () => {
     const autoTools = AGENT_TOOL_DEFS.filter((t) => t.permission === 'auto')
     const autoNames = autoTools.map((t) => t.name).sort()
-    expect(autoNames).toEqual(['process_list', 'system_info', 'web_fetch', 'web_search'])
+    expect(autoNames).toEqual(['get_current_time', 'process_list', 'system_info', 'web_fetch', 'web_search'])
   })
 
   it('confirm-permission tools include file ops, code, shell, image, workflow, screenshot', () => {

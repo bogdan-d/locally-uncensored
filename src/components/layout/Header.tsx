@@ -113,46 +113,54 @@ export function Header() {
         </button>
       </div>
 
-      {/* Center: Model Selector + Load/Unload */}
+      {/* Center: Model Selector + Light-switch toggle (replaces the old
+          Power/PowerOff pair). Green = loaded, red = unloaded, spinner =
+          transitioning. Click flips the state. */}
       <div className="flex items-center gap-1">
         <ModelSelector />
         {isOllamaModel && (
-          <div className="flex items-center gap-0.5">
-            {/* Load model (green when loaded, gray when not) */}
-            <button
-              onClick={handleLoad}
-              disabled={loadingState !== 'idle'}
-              className={`p-1 rounded-md transition-colors ${
-                isModelLoaded
-                  ? 'text-green-400 bg-green-500/10'
-                  : 'text-gray-600 hover:text-green-400 hover:bg-green-500/10'
-              }`}
-              title={isModelLoaded ? 'Model loaded in VRAM' : 'Load model into VRAM'}
-            >
-              {loadingState === 'loading' ? (
-                <Loader2 size={13} className="animate-spin text-green-400" />
-              ) : (
-                <Power size={13} />
-              )}
-            </button>
-            {/* Unload model (red on hover, gray default) */}
-            <button
-              onClick={handleUnload}
-              disabled={loadingState !== 'idle'}
-              className={`p-1 rounded-md transition-colors ${
-                !isModelLoaded
-                  ? 'text-gray-700 opacity-30'
-                  : 'text-gray-600 hover:text-red-400 hover:bg-red-500/10'
-              }`}
-              title="Unload model from VRAM"
-            >
-              {loadingState === 'unloading' ? (
-                <Loader2 size={13} className="animate-spin text-red-400" />
-              ) : (
-                <PowerOff size={13} />
-              )}
-            </button>
-          </div>
+          (() => {
+            const busy = loadingState !== 'idle'
+            const onClick = () => {
+              if (busy) return
+              if (isModelLoaded) handleUnload()
+              else handleLoad()
+            }
+            const title = busy
+              ? (loadingState === 'loading' ? 'Loading model…' : 'Unloading model…')
+              : (isModelLoaded ? 'Model loaded — click to unload' : 'Model not loaded — click to load into VRAM')
+            return (
+              <button
+                onClick={onClick}
+                disabled={busy}
+                title={title}
+                aria-label={title}
+                className={`relative flex items-center h-[18px] w-[34px] rounded-full transition-colors duration-200 ${
+                  busy
+                    ? 'bg-amber-500/25 border border-amber-400/40'
+                    : isModelLoaded
+                      ? 'bg-green-500/25 border border-green-400/50'
+                      : 'bg-red-500/20 border border-red-400/40 hover:bg-red-500/30'
+                }`}
+              >
+                <span
+                  className={`absolute top-[1px] flex items-center justify-center w-[14px] h-[14px] rounded-full shadow-sm transition-all duration-200 ${
+                    busy
+                      ? 'left-[9px] bg-amber-400'
+                      : isModelLoaded
+                        ? 'left-[18px] bg-green-400'
+                        : 'left-[1px] bg-red-400'
+                  }`}
+                >
+                  {busy ? (
+                    <Loader2 size={9} className="animate-spin text-gray-900" />
+                  ) : (
+                    <Power size={9} className="text-gray-900" />
+                  )}
+                </span>
+              </button>
+            )
+          })()
         )}
       </div>
 

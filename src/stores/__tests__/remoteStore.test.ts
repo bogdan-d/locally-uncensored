@@ -25,6 +25,7 @@ describe('remoteStore', () => {
       tunnelLoading: false,
       loading: false,
       error: null,
+      qrVisible: false,
     })
   })
 
@@ -58,7 +59,7 @@ describe('remoteStore', () => {
     it('calls backendCall with start_remote_server', async () => {
       mockBackendCall.mockResolvedValue({ port: 0, passcode: '', passcodeExpiresAt: 0, lanUrl: '', mobileUrl: '' })
       await useRemoteStore.getState().startServer()
-      expect(mockBackendCall).toHaveBeenCalledWith('start_remote_server')
+      expect(mockBackendCall).toHaveBeenCalledWith('start_remote_server', {})
     })
 
     it('auto-fetches QR code after starting', async () => {
@@ -144,16 +145,19 @@ describe('remoteStore', () => {
       expect(state.passcodeExpiresAt).toBeLessThanOrEqual(before + 301)
     })
 
-    it('clears connected devices', async () => {
+    it('leaves connected devices intact on regen (Bug #7: decoupled from JWT rotation)', async () => {
       useRemoteStore.setState({
         connectedDevices: [{ id: 'd1', ip: '1.1.1.1', user_agent: 'test', last_seen: 1 }],
       })
       mockBackendCall
         .mockResolvedValueOnce('NEW')
+        // fetchQrCode
         .mockResolvedValueOnce({ qr_png_base64: '', url: '', passcode: '' })
+        // refreshDevices — returns same device because JWT still valid
+        .mockResolvedValueOnce([{ id: 'd1', ip: '1.1.1.1', user_agent: 'test', last_seen: 2 }])
 
       await useRemoteStore.getState().regenerateToken()
-      expect(useRemoteStore.getState().connectedDevices).toEqual([])
+      expect(useRemoteStore.getState().connectedDevices.length).toBeGreaterThan(0)
     })
 
     it('calls fetchQrCode after regenerating', async () => {

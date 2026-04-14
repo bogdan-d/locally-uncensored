@@ -152,6 +152,8 @@ fn html_decode(s: &str) -> String {
      .replace("&quot;", "\"")
      .replace("&#39;", "'")
      .replace("&#x27;", "'")
+     .replace("&apos;", "'")
+     .replace("&nbsp;", " ")
 }
 
 fn strip_html(s: &str) -> String {
@@ -251,4 +253,180 @@ pub fn searxng_status(state: State<'_, AppState>) -> Result<serde_json::Value, S
         "status": install.status,
         "logs": install.logs,
     }))
+}
+
+/// Fetch a URL and return plain readable text. The agent loop calls this
+/// AFTER `web_search` to actually read a page — without it, the model
+/// only ever sees titles + snippets which is useless for anything
+/// research-heavy. Strips HTML aggressively:
+///   - Drops <script>, <style>, <nav>, <header>, <footer>, <aside>, <noscript>
+///   - Replaces block-level tags with newlines
+///   - Removes remaining tags
+///   - Collapses whitespace
+///   - Caps at ~24 000 chars so we don't blow the context window
+#[tauri::command]
+pub async fn web_fetch(url: String) -> Result<serde_json::Value, String> {
+    // Basic URL hardening: must start http(s) and not point at localhost /
+    // private IPs. The agent should fetch public pages, not poke internal
+    // services (Ollama, ComfyUI, LAN boxes).
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err("URL must start with http:// or https://".into());
+    }
+    let lower = trimmed.to_lowercase();
+    if lower.contains("://localhost")
+        || lower.contains("://127.")
+        || lower.contains("://0.0.0.0")
+        || lower.contains("://10.")
+        || lower.contains("://192.168.")
+        || lower.contains("://169.254.")
+    {
+        return Err("Refusing to fetch private / loopback addresses from the agent.".into());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::limited(6))
+        .user_agent("Mozilla/5.0 (compatible; LocallyUncensored-Agent/1.0)")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get(trimmed)
+        .header("Accept", "text/html,text/plain,application/xhtml+xml;q=0.9,*/*;q=0.5")
+        .header("Accept-Language", "en,de;q=0.8")
+        .send()
+        .await
+        .map_err(|e| format!("Fetch failed: {}", e))?;
+
+    let status = resp.status().as_u16();
+    let final_url = resp.url().to_string();
+    let content_type = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    let raw = resp
+        .text()
+        .await
+        .map_err(|e| format!("Read body failed: {}", e))?;
+
+    let (title, text) = extract_readable_text(&raw, &content_type);
+    let capped: String = text.chars().take(24_000).collect();
+
+    Ok(serde_json::json!({
+        "url": final_url,
+        "status": status,
+        "contentType": content_type,
+        "title": title,
+        "text": capped,
+        "truncated": text.chars().count() > 24_000,
+    }))
+}
+
+/// Convert a raw HTML (or plain) body into readable text + try to grab the
+/// <title> tag. Not a perfect readability engine, but enough to give the
+/// agent real substance instead of just a snippet.
+fn extract_readable_text(body: &str, content_type: &str) -> (String, String) {
+    // Not HTML? Treat as plain text.
+    if !content_type.contains("html") && !body.trim_start().to_lowercase().starts_with("<!doctype") && !body.contains("<html") {
+        let text = collapse_whitespace(body);
+        return (String::new(), text);
+    }
+
+    // Title
+    let title = capture_first(body, "<title", "</title>")
+        .map(|t| html_decode(&strip_tags(&t)).trim().to_string())
+        .unwrap_or_default();
+
+    // Drop noisy sections entirely
+    let mut cleaned = body.to_string();
+    for tag in &["script", "style", "noscript", "svg", "header", "footer", "nav", "aside", "form", "template"] {
+        cleaned = strip_block_tag(&cleaned, tag);
+    }
+
+    // Replace common block-level tags with newlines so paragraph boundaries survive
+    for tag in &[
+        "</p>", "</div>", "</li>", "</h1>", "</h2>", "</h3>", "</h4>", "</h5>", "</h6>",
+        "</section>", "</article>", "</blockquote>", "</pre>", "<br>", "<br/>", "<br />",
+    ] {
+        cleaned = cleaned.replace(tag, &format!("{}\n", tag));
+    }
+
+    // Remove all remaining tags
+    let no_tags = strip_tags(&cleaned);
+    let decoded = html_decode(&no_tags);
+    let text = collapse_whitespace(&decoded);
+    (title, text)
+}
+
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for ch in s.chars() {
+        if ch == '<' { in_tag = true; continue; }
+        if ch == '>' { in_tag = false; continue; }
+        if !in_tag { out.push(ch); }
+    }
+    out
+}
+
+fn strip_block_tag(s: &str, tag: &str) -> String {
+    let open = format!("<{}", tag);
+    let close = format!("</{}>", tag);
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    loop {
+        match rest.to_lowercase().find(&open) {
+            Some(start_idx) => {
+                out.push_str(&rest[..start_idx]);
+                let after = &rest[start_idx..];
+                match after.to_lowercase().find(&close) {
+                    Some(end_rel) => {
+                        rest = &after[end_rel + close.len()..];
+                    }
+                    None => break,
+                }
+            }
+            None => {
+                out.push_str(rest);
+                break;
+            }
+        }
+    }
+    out
+}
+
+fn capture_first<'a>(s: &'a str, open: &str, close: &str) -> Option<String> {
+    let lower = s.to_lowercase();
+    let start = lower.find(&open.to_lowercase())?;
+    let rest = &s[start..];
+    let open_end = rest.find('>')? + 1;
+    let inner = &rest[open_end..];
+    let end = inner.to_lowercase().find(&close.to_lowercase())?;
+    Some(inner[..end].to_string())
+}
+
+fn collapse_whitespace(s: &str) -> String {
+    // Preserve paragraph breaks (2+ newlines) but collapse runs of spaces.
+    let mut out = String::with_capacity(s.len());
+    let mut newline_run = 0;
+    let mut space_run = false;
+    for ch in s.chars() {
+        if ch == '\n' || ch == '\r' {
+            newline_run += 1;
+            space_run = false;
+            if newline_run <= 2 { out.push('\n'); }
+        } else if ch == '\t' || ch == ' ' {
+            newline_run = 0;
+            if !space_run { out.push(' '); space_run = true; }
+        } else {
+            newline_run = 0;
+            space_run = false;
+            out.push(ch);
+        }
+    }
+    out.trim().to_string()
 }

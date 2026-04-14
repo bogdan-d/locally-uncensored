@@ -30,7 +30,7 @@ export const useSettingsStore = create<SettingsState>()(
       updateSettings: (partial) =>
         set((state) => ({ settings: { ...state.settings, ...partial } })),
 
-      resetSettings: () => set({ settings: DEFAULT_SETTINGS }),
+      resetSettings: () => set((state) => ({ settings: { ...DEFAULT_SETTINGS, onboardingDone: state.settings.onboardingDone } })),
 
       addPersona: (persona) =>
         set((state) => ({ personas: [...state.personas, persona] })),

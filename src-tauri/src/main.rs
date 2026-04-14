@@ -50,6 +50,7 @@ fn main() {
             commands::filesystem::fs_list,
             commands::filesystem::fs_search,
             commands::filesystem::fs_info,
+            commands::filesystem::save_text_file_dialog,
             // System
             commands::system::system_info,
             commands::system::process_list,
@@ -57,6 +58,9 @@ fn main() {
             commands::system::pick_folder,
             commands::system::is_onboarding_done,
             commands::system::set_onboarding_done,
+            commands::system::get_current_time,
+            commands::system::backup_stores,
+            commands::system::restore_stores,
             commands::system::exit_app,
             // Downloads
             commands::download::download_model,
@@ -69,6 +73,7 @@ fn main() {
             commands::download::check_model_sizes,
             // Web search
             commands::search::web_search,
+            commands::search::web_fetch,
             commands::search::search_status,
             commands::search::install_searxng,
             commands::search::searxng_status,
@@ -82,10 +87,12 @@ fn main() {
             // Remote Access
             commands::remote::start_remote_server,
             commands::remote::stop_remote_server,
+            commands::remote::restart_remote_server,
             commands::remote::remote_server_status,
             commands::remote::regenerate_remote_token,
             commands::remote::remote_qr_code,
             commands::remote::remote_connected_devices,
+            commands::remote::disconnect_remote_device,
             commands::remote::set_remote_permissions,
             commands::remote::start_tunnel,
             commands::remote::stop_tunnel,

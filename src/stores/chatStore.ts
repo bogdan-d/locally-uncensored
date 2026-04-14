@@ -8,7 +8,7 @@ import { createSafeStorage } from '../lib/storage-quota'
 interface ChatState {
   conversations: Conversation[]
   activeConversationId: string | null
-  createConversation: (model: string, systemPrompt: string, mode?: 'lu' | 'codex' | 'openclaw' | 'claude-code') => string
+  createConversation: (model: string, systemPrompt: string, mode?: 'lu' | 'codex' | 'openclaw' | 'claude-code' | 'remote') => string
   deleteConversation: (id: string) => void
   renameConversation: (id: string, title: string) => void
   setActiveConversation: (id: string | null) => void
@@ -29,9 +29,18 @@ export const useChatStore = create<ChatState>()(
 
       createConversation: (model, systemPrompt, mode) => {
         const id = uuid()
+        // Auto-number remote chats so users can distinguish sessions in the sidebar
+        let title: string
+        if (mode === 'codex') title = 'Codex Chat'
+        else if (mode === 'claude-code') title = 'Claude Code'
+        else if (mode === 'remote') {
+          const state = get()
+          const nextNum = state.conversations.filter((c) => c.mode === 'remote').length + 1
+          title = `Remote Chat ${nextNum}`
+        } else title = 'New Chat'
         const conversation: Conversation = {
           id,
-          title: mode === 'codex' ? 'Codex Chat' : mode === 'claude-code' ? 'Claude Code' : 'New Chat',
+          title,
           messages: [],
           model,
           systemPrompt,

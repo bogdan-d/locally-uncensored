@@ -15,10 +15,12 @@ export type TaskStatus =
 
 export type ToolName =
   | "web_search"
+  | "web_fetch"
   | "file_read"
   | "file_write"
   | "code_execute"
-  | "image_generate";
+  | "image_generate"
+  | "get_current_time";
 
 export interface ToolParameter {
   name: string;

@@ -1,6 +1,6 @@
 [package]
 name = "locally-uncensored"
-version = "2.3.2"
+version = "2.3.3"
 description = "Private, local AI chat & image/video generation"
 authors = ["purpledoubled"]
 edition = "2021"
@@ -42,6 +42,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 rand = "0.8"
 sha2 = "0.10"
 local-ip-address = "0.6"
+socket2 = "0.5"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_Security"] }

@@ -356,7 +356,13 @@ export function useAgentChat() {
           topP: settings.topP,
           topK: settings.topK,
           maxTokens: settings.maxTokens || undefined,
-          thinking: settings.thinkingEnabled === true && isThinkingCompatible(activeModel),
+          // Tri-state: thinking-compatible models get an explicit true|false
+          // (OFF → tell Ollama `think: false` so the model stops thinking
+          // instead of secretly thinking + hiding it). Non-thinking models
+          // get `undefined` so the field is omitted entirely.
+          thinking: isThinkingCompatible(activeModel)
+            ? settings.thinkingEnabled === true
+            : (undefined as unknown as boolean),
           signal: abort.signal,
         }
 
@@ -387,9 +393,11 @@ export function useAgentChat() {
           try {
             turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
           } catch (thinkErr: any) {
-            // If thinking is rejected by model, retry without it
+            // If thinking is rejected by model, retry WITHOUT the field at
+            // all (`undefined` — old Ollama / non-thinking models reject
+            // both `think: true` AND `think: false`).
             if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
-              const retryOptions = { ...chatOptions, thinking: false }
+              const retryOptions = { ...chatOptions, thinking: undefined as unknown as boolean }
               turn = await provider.chatWithTools(modelToUse, agentMessages, tools, retryOptions)
             } else {
               throw thinkErr
@@ -422,12 +430,24 @@ export function useAgentChat() {
           }
         }
 
-        // Parse think tags
-        const thinkMatch = turnContent.match(/<think>([\s\S]*?)<\/think>/)
-        if (thinkMatch) {
-          turnThinking = thinkMatch[1]
-          turnContent = turnContent.replace(/<think>[\s\S]*?<\/think>/, '').trim()
-        }
+        // Parse <think>…</think> tags. Always strip them from the content
+        // (otherwise raw tags land in the assistant bubble). Only ROUTE
+        // them into the collapsible thinking block when the user actually
+        // toggled Thinking on — thinking-only models (QwQ, DeepSeek-R1)
+        // emit these tags unconditionally, and we must not surface them
+        // when the user asked for thinking to be OFF.
+        const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+        turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_match, inner) => {
+          if (keepThinking) {
+            turnThinking = turnThinking
+              ? `${turnThinking}\n\n${inner}`
+              : inner
+          }
+          return ''
+        }).trim()
+        // Also drop any orphan native-thinking that leaked through when the
+        // toggle is OFF (e.g. provider returned `turn.thinking` anyway).
+        if (!keepThinking) turnThinking = ''
 
         // Update UI
         contentRef.current = turnContent

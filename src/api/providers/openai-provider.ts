@@ -107,13 +107,30 @@ export class OpenAIProvider implements ProviderClient {
     if (options?.temperature !== undefined) body.temperature = options.temperature
     if (options?.topP !== undefined) body.top_p = options.topP
     if (options?.maxTokens) body.max_tokens = options.maxTokens
+    // Reasoning-model knob (o1, o3, gpt-5-thinking, etc.). Toggle OFF →
+    // "minimal" (least reasoning the API allows). Toggle ON → "high".
+    // Non-reasoning models simply ignore this field; older APIs may 400 on
+    // it — we handle that with a retry below.
+    if (options?.thinking === true) body.reasoning_effort = 'high'
+    else if (options?.thinking === false) body.reasoning_effort = 'minimal'
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+    let res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
       signal: options?.signal,
     })
+
+    // Retry without reasoning_effort if the model/endpoint rejects it.
+    if (!res.ok && res.status === 400 && 'reasoning_effort' in body) {
+      delete body.reasoning_effort
+      res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+        signal: options?.signal,
+      })
+    }
 
     if (!res.ok) {
       throw await this.parseError(res)
@@ -194,13 +211,26 @@ export class OpenAIProvider implements ProviderClient {
     if (options?.temperature !== undefined) body.temperature = options.temperature
     if (options?.topP !== undefined) body.top_p = options.topP
     if (options?.maxTokens) body.max_tokens = options.maxTokens
+    // Same reasoning_effort gate as chatStream.
+    if (options?.thinking === true) body.reasoning_effort = 'high'
+    else if (options?.thinking === false) body.reasoning_effort = 'minimal'
 
-    const res = await fetch(`${this.baseUrl}/chat/completions`, {
+    let res = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
       signal: options?.signal,
     })
+
+    if (!res.ok && res.status === 400 && 'reasoning_effort' in body) {
+      delete body.reasoning_effort
+      res = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+        signal: options?.signal,
+      })
+    }
 
     if (!res.ok) {
       throw await this.parseError(res)

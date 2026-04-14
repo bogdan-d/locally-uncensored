@@ -153,7 +153,10 @@ export function useCodex() {
         const chatOptions = {
           temperature: 0.1, // Low temp for coding precision
           maxTokens: settings.maxTokens || undefined,
-          thinking: settings.thinkingEnabled === true && isThinkingCompatible(activeModel),
+          // Tri-state think flag — see useChat.ts for rationale.
+          thinking: isThinkingCompatible(activeModel)
+            ? settings.thinkingEnabled === true
+            : (undefined as unknown as boolean),
           signal: abort.signal,
         }
 
@@ -170,7 +173,10 @@ export function useCodex() {
             turn = await provider.chatWithTools(modelToUse, messages, tools, chatOptions)
           } catch (thinkErr: any) {
             if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
-              turn = await provider.chatWithTools(modelToUse, messages, tools, { ...chatOptions, thinking: false })
+              // Retry with `undefined` so the provider omits the think
+              // field entirely (old Ollama builds reject both `think: true`
+              // and `think: false`).
+              turn = await provider.chatWithTools(modelToUse, messages, tools, { ...chatOptions, thinking: undefined as unknown as boolean })
             } else {
               throw thinkErr
             }
@@ -178,7 +184,11 @@ export function useCodex() {
 
           toolCalls = turn.toolCalls
           turnContent = turn.content || ''
-          if ((turn as any).thinking) {
+          // Codex parity with Agent / Chat: Thinking visibility is driven
+          // by the toggle. Native Ollama `thinking` field is only surfaced
+          // when the user asked for it. Drop it silently otherwise.
+          const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+          if (keepThinking && (turn as any).thinking) {
             thinkingContent += (thinkingContent ? '\n\n' : '') + (turn as any).thinking
             useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
           }
@@ -206,7 +216,23 @@ export function useCodex() {
           .replace(/<\|?channel>?\s*thought\s*/gi, '')
           .replace(/<\|?channel\|?>/gi, '')
           .replace(/<channel\|>/gi, '')
-          .trim()
+
+        // Inline <think>…</think> tags — always remove from content so the
+        // assistant bubble never shows raw tags. Route the inner text into
+        // the thinking block only when the toggle is ON (QwQ / DeepSeek-R1
+        // emit these unconditionally; we must not leak them when the user
+        // asked for thinking to be OFF).
+        {
+          const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+          turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_m, inner) => {
+            if (keepThinking) {
+              thinkingContent += (thinkingContent ? '\n\n' : '') + inner
+              useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
+            }
+            return ''
+          })
+        }
+        turnContent = turnContent.trim()
 
         if (turnContent) {
           fullContent += (fullContent ? '\n\n' : '') + turnContent
@@ -329,8 +355,24 @@ export function useCodex() {
 
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        const msg = (err as Error).message || 'Codex error'
-        fullContent += `\n\nError: ${msg}`
+        const e = err as any
+        const parts: string[] = []
+        if (e?.code) parts.push(`[${e.code}]`)
+        if (typeof e?.statusCode === 'number') parts.push(`HTTP ${e.statusCode}`)
+        parts.push(e?.message || String(err) || 'Codex error')
+        const msg = parts.join(' ')
+        // Surface common causes so the user can see WHY it failed instead of
+        // a bare "Connection error" — previously we only printed `.message`,
+        // which for a TypeError from fetch is just "Failed to fetch".
+        let hint = ''
+        if (/Failed to fetch|NetworkError|net::ERR/i.test(msg)) {
+          hint = '\n\nHint: the Ollama server is unreachable. Is `ollama serve` running on localhost:11434?'
+        } else if (/does not support tools|tool.*not.*support/i.test(msg)) {
+          hint = '\n\nHint: this model does not support native tool calling. Pick a tool-capable model (Qwen 3, Llama 3.1+, Gemma 4) or switch to a model without the coder-only restriction.'
+        } else if (/timed out/i.test(msg)) {
+          hint = '\n\nHint: the tool call took longer than 60 s. Try a smaller model or a more targeted prompt.'
+        }
+        fullContent += `\n\nError: ${msg}${hint}`
         useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent)
         codexStore.addEvent(convId, {
           id: uuid(), type: 'error', content: msg, timestamp: Date.now(),

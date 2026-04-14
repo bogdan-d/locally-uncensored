@@ -54,10 +54,18 @@ const TOOL_GROUPS: ToolGroup[] = [
     keywords: ['workflow', 'run workflow', 'automate'],
     tools: ['run_workflow'],
   },
+  {
+    keywords: ['time', 'date', 'day', 'today', 'datum', 'heute', 'tag', 'uhrzeit', 'jetzt', 'now', 'clock', 'hour', 'minute', 'timezone', 'zeitzone'],
+    tools: ['get_current_time'],
+  },
 ]
 
-// Tools that should always be available as they're lightweight
-const ALWAYS_INCLUDE = ['file_read', 'file_write']
+// Tools that should always be available regardless of the prompt — they're
+// cheap to include, commonly useful, and often needed mid-run (e.g. after
+// a tool result reveals the user really wanted a file read). Keeping
+// `get_current_time` here means the agent NEVER has to fall back to web
+// for a trivial date question just because the keyword list missed.
+const ALWAYS_INCLUDE = ['file_read', 'file_write', 'get_current_time']
 
 /**
  * Select relevant tools based on user message content.

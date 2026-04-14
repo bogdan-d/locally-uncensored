@@ -21,7 +21,7 @@ interface AnthropicStreamEvent {
   type: string
   index?: number
   content_block?: { type: string; id?: string; name?: string; input?: any; text?: string }
-  delta?: { type: string; text?: string; partial_json?: string }
+  delta?: { type: string; text?: string; partial_json?: string; thinking?: string }
   message?: { id: string; usage?: { input_tokens: number; output_tokens: number } }
 }
 
@@ -83,13 +83,32 @@ export class AnthropicProvider implements ProviderClient {
     if (options?.temperature !== undefined) body.temperature = options.temperature
     if (options?.topP !== undefined) body.top_p = options.topP
     if (options?.topK !== undefined) body.top_k = options.topK
+    // Claude Extended Thinking (Sonnet 3.7+, Opus 4). Opt-in: only when the
+    // user actually toggled Thinking ON. Default stays OFF, so toggle OFF
+    // simply omits the field. 5000 tokens is a sensible default budget —
+    // the model may produce less, but won't exceed it.
+    if (options?.thinking === true) {
+      body.thinking = { type: 'enabled', budget_tokens: 5000 }
+    }
 
-    const res = await fetch(`${this.baseUrl}/v1/messages`, {
+    let res = await fetch(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
       signal: options?.signal,
     })
+
+    // Retry without extended thinking if the model rejects it (e.g. older
+    // Claude versions don't support `thinking`).
+    if (!res.ok && res.status === 400 && 'thinking' in body) {
+      delete body.thinking
+      res = await fetch(`${this.baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+        signal: options?.signal,
+      })
+    }
 
     if (!res.ok) {
       throw await this.parseError(res)
@@ -114,11 +133,16 @@ export class AnthropicProvider implements ProviderClient {
         }
 
         case 'content_block_delta': {
-          if (data.delta?.type === 'text_delta' && data.delta.text) {
-            yield { content: data.delta.text, done: false }
-          } else if (data.delta?.type === 'input_json_delta' && data.delta.partial_json) {
+          const dtype = (data.delta as any)?.type
+          if (dtype === 'text_delta' && (data.delta as any).text) {
+            yield { content: (data.delta as any).text, done: false }
+          } else if (dtype === 'thinking_delta' && (data.delta as any).thinking) {
+            // Claude Extended Thinking stream — route to `thinking` so the
+            // ThinkingBlock UI picks it up (same field as Ollama's native).
+            yield { content: '', thinking: (data.delta as any).thinking, done: false }
+          } else if (dtype === 'input_json_delta' && (data.delta as any).partial_json) {
             const block = toolUseBlocks.get(data.index!)
-            if (block) block.input += data.delta.partial_json
+            if (block) block.input += (data.delta as any).partial_json
           }
           break
         }
@@ -161,6 +185,10 @@ export class AnthropicProvider implements ProviderClient {
     if (options?.temperature !== undefined) body.temperature = options.temperature
     if (options?.topP !== undefined) body.top_p = options.topP
     if (options?.topK !== undefined) body.top_k = options.topK
+    // Same extended-thinking gate as chatStream.
+    if (options?.thinking === true) {
+      body.thinking = { type: 'enabled', budget_tokens: 5000 }
+    }
 
     // Convert OpenAI tool format to Anthropic format
     if (tools.length > 0) {
@@ -171,12 +199,23 @@ export class AnthropicProvider implements ProviderClient {
       }))
     }
 
-    const res = await fetch(`${this.baseUrl}/v1/messages`, {
+    let res = await fetch(`${this.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
       signal: options?.signal,
     })
+
+    // Retry without extended thinking if the model rejects it.
+    if (!res.ok && res.status === 400 && 'thinking' in body) {
+      delete body.thinking
+      res = await fetch(`${this.baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: this.headers,
+        body: JSON.stringify(body),
+        signal: options?.signal,
+      })
+    }
 
     if (!res.ok) {
       throw await this.parseError(res)
