@@ -18,6 +18,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             // Process management
@@ -49,11 +50,18 @@ fn main() {
             commands::filesystem::fs_list,
             commands::filesystem::fs_search,
             commands::filesystem::fs_info,
+            commands::filesystem::save_text_file_dialog,
             // System
             commands::system::system_info,
             commands::system::process_list,
             commands::system::screenshot,
             commands::system::pick_folder,
+            commands::system::is_onboarding_done,
+            commands::system::set_onboarding_done,
+            commands::system::get_current_time,
+            commands::system::backup_stores,
+            commands::system::restore_stores,
+            commands::system::exit_app,
             // Downloads
             commands::download::download_model,
             commands::download::download_model_to_path,
@@ -65,6 +73,7 @@ fn main() {
             commands::download::check_model_sizes,
             // Web search
             commands::search::web_search,
+            commands::search::web_fetch,
             commands::search::search_status,
             commands::search::install_searxng,
             commands::search::searxng_status,
@@ -75,6 +84,19 @@ fn main() {
             commands::claude_code::start_claude_code,
             commands::claude_code::stop_claude_code,
             commands::claude_code::send_claude_code_input,
+            // Remote Access
+            commands::remote::start_remote_server,
+            commands::remote::stop_remote_server,
+            commands::remote::restart_remote_server,
+            commands::remote::remote_server_status,
+            commands::remote::regenerate_remote_token,
+            commands::remote::remote_qr_code,
+            commands::remote::remote_connected_devices,
+            commands::remote::disconnect_remote_device,
+            commands::remote::set_remote_permissions,
+            commands::remote::start_tunnel,
+            commands::remote::stop_tunnel,
+            commands::remote::tunnel_status,
             // Proxy
             commands::proxy::ollama_search,
             commands::proxy::fetch_external,

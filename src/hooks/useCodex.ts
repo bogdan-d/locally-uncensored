@@ -13,6 +13,7 @@ import { chatNonStreaming } from '../api/agents'
 import type { CodexEvent } from '../types/codex'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
 import { selectRelevantTools } from '../lib/tool-selection'
+import { isThinkingCompatible } from '../lib/model-compatibility'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 
 const CODEX_SYSTEM_PROMPT = `You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks by reading files, writing code, and running shell commands. You MUST use tools to interact with the filesystem — never guess file contents.
@@ -104,6 +105,20 @@ export function useCodex() {
       systemPrompt += '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
     }
 
+    // Caveman mode: append as response style modifier after Codex instructions
+    if (settings.cavemanMode && settings.cavemanMode !== 'off') {
+      const { CAVEMAN_PROMPTS } = await import('../lib/constants')
+      const cavemanPrompt = CAVEMAN_PROMPTS[settings.cavemanMode]
+      if (cavemanPrompt) {
+        systemPrompt += `\n\nResponse style: ${cavemanPrompt}`
+      }
+    }
+
+    // Per-message Caveman reminder for non-thinking models
+    const cavemanReminder = (settings.cavemanMode && settings.cavemanMode !== 'off')
+      ? (await import('../lib/constants')).CAVEMAN_REMINDERS?.[settings.cavemanMode as 'lite' | 'full' | 'ultra'] || ''
+      : ''
+
     // Build message history
     const conv = useChatStore.getState().conversations.find(c => c.id === convId)
     if (!conv) return
@@ -112,7 +127,12 @@ export function useCodex() {
       { role: 'system', content: systemPrompt },
       ...conv.messages
         .filter(m => m.role !== 'system' && m.content.trim())
-        .map(m => ({ role: m.role as 'user' | 'assistant' | 'tool', content: m.content })),
+        .map(m => ({
+          role: m.role as 'user' | 'assistant' | 'tool',
+          content: m.role === 'user' && cavemanReminder
+            ? `${cavemanReminder}\n${m.content}`
+            : m.content,
+        })),
     ]
 
     // Setup
@@ -133,7 +153,10 @@ export function useCodex() {
         const chatOptions = {
           temperature: 0.1, // Low temp for coding precision
           maxTokens: settings.maxTokens || undefined,
-          thinking: settings.thinkingEnabled === true ? true : false,
+          // Tri-state think flag — see useChat.ts for rationale.
+          thinking: isThinkingCompatible(activeModel)
+            ? settings.thinkingEnabled === true
+            : (undefined as unknown as boolean),
           signal: abort.signal,
         }
 
@@ -144,10 +167,28 @@ export function useCodex() {
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
           }))
-          const turn = await provider.chatWithTools(modelToUse, messages, tools, chatOptions)
+
+          let turn: { content: string; toolCalls: ToolCall[] }
+          try {
+            turn = await provider.chatWithTools(modelToUse, messages, tools, chatOptions)
+          } catch (thinkErr: any) {
+            if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
+              // Retry with `undefined` so the provider omits the think
+              // field entirely (old Ollama builds reject both `think: true`
+              // and `think: false`).
+              turn = await provider.chatWithTools(modelToUse, messages, tools, { ...chatOptions, thinking: undefined as unknown as boolean })
+            } else {
+              throw thinkErr
+            }
+          }
+
           toolCalls = turn.toolCalls
           turnContent = turn.content || ''
-          if ((turn as any).thinking) {
+          // Codex parity with Agent / Chat: Thinking visibility is driven
+          // by the toggle. Native Ollama `thinking` field is only surfaced
+          // when the user asked for it. Drop it silently otherwise.
+          const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+          if (keepThinking && (turn as any).thinking) {
             thinkingContent += (thinkingContent ? '\n\n' : '') + (turn as any).thinking
             useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
           }
@@ -175,7 +216,23 @@ export function useCodex() {
           .replace(/<\|?channel>?\s*thought\s*/gi, '')
           .replace(/<\|?channel\|?>/gi, '')
           .replace(/<channel\|>/gi, '')
-          .trim()
+
+        // Inline <think>…</think> tags — always remove from content so the
+        // assistant bubble never shows raw tags. Route the inner text into
+        // the thinking block only when the toggle is ON (QwQ / DeepSeek-R1
+        // emit these unconditionally; we must not leak them when the user
+        // asked for thinking to be OFF).
+        {
+          const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+          turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_m, inner) => {
+            if (keepThinking) {
+              thinkingContent += (thinkingContent ? '\n\n' : '') + inner
+              useChatStore.getState().updateMessageThinking(convId!, assistantMsg.id, thinkingContent)
+            }
+            return ''
+          })
+        }
+        turnContent = turnContent.trim()
 
         if (turnContent) {
           fullContent += (fullContent ? '\n\n' : '') + turnContent
@@ -298,8 +355,24 @@ export function useCodex() {
 
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        const msg = (err as Error).message || 'Codex error'
-        fullContent += `\n\nError: ${msg}`
+        const e = err as any
+        const parts: string[] = []
+        if (e?.code) parts.push(`[${e.code}]`)
+        if (typeof e?.statusCode === 'number') parts.push(`HTTP ${e.statusCode}`)
+        parts.push(e?.message || String(err) || 'Codex error')
+        const msg = parts.join(' ')
+        // Surface common causes so the user can see WHY it failed instead of
+        // a bare "Connection error" — previously we only printed `.message`,
+        // which for a TypeError from fetch is just "Failed to fetch".
+        let hint = ''
+        if (/Failed to fetch|NetworkError|net::ERR/i.test(msg)) {
+          hint = '\n\nHint: the Ollama server is unreachable. Is `ollama serve` running on localhost:11434?'
+        } else if (/does not support tools|tool.*not.*support/i.test(msg)) {
+          hint = '\n\nHint: this model does not support native tool calling. Pick a tool-capable model (Qwen 3, Llama 3.1+, Gemma 4) or switch to a model without the coder-only restriction.'
+        } else if (/timed out/i.test(msg)) {
+          hint = '\n\nHint: the tool call took longer than 60 s. Try a smaller model or a more targeted prompt.'
+        }
+        fullContent += `\n\nError: ${msg}${hint}`
         useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent)
         codexStore.addEvent(convId, {
           id: uuid(), type: 'error', content: msg, timestamp: Date.now(),

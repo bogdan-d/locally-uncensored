@@ -187,6 +187,19 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     category: 'workflow',
     source: 'builtin',
   },
+
+  // Local clock — so the agent never googles "what day is it".
+  {
+    name: 'get_current_time',
+    description: 'Return the user\'s current local date, time and timezone. Use this FIRST for any "what day / time / date is it" question — do NOT web_search for it. Zero arguments.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    category: 'system',
+    source: 'builtin',
+  },
 ]
 
 // ── Executors ────────────────────────────────────────────────────
@@ -211,15 +224,39 @@ async function executeWebSearch(args: Record<string, any>): Promise<string> {
 
 async function executeWebFetch(args: Record<string, any>): Promise<string> {
   const url = args.url
-  const maxLength = args.maxLength || 4000
   if (!url) return 'Error: No URL provided'
 
-  const html = await fetchExternal(url)
-  const text = htmlToText(html)
-  if (text.length > maxLength) {
-    return text.substring(0, maxLength) + '\n\n[...truncated]'
+  // Preferred path: use the Rust `web_fetch` command which strips HTML
+  // aggressively (<script>/<style>/<nav>/<footer> gone, paragraphs kept)
+  // and caps at ~24 000 chars. The old path only gave the model the first
+  // ~4 000 chars of a half-cleaned body — that's why the agent kept
+  // complaining it "only sees the header" of the page.
+  try {
+    const data = await backendCall<{ url: string; status: number; contentType: string; title: string; text: string; truncated: boolean }>(
+      'web_fetch',
+      { url }
+    )
+    const parts: string[] = []
+    if (data.title) parts.push(`Title: ${data.title}`)
+    parts.push(`URL: ${data.url}`)
+    parts.push(`Status: ${data.status}`)
+    parts.push('')
+    parts.push(data.text || '(empty body)')
+    if (data.truncated) parts.push('\n…(truncated to 24 000 chars)')
+    return parts.join('\n')
+  } catch (e) {
+    // Fallback: legacy fetchExternal + htmlToText (used in browser / dev mode
+    // where the Rust command isn't reachable).
+    try {
+      const maxLength = args.maxLength || 24000
+      const html = await fetchExternal(url)
+      const text = htmlToText(html)
+      if (text.length > maxLength) return text.substring(0, maxLength) + '\n\n[...truncated]'
+      return text || 'Error: Page returned empty content'
+    } catch (fallbackErr) {
+      return `Error: web_fetch failed — ${e instanceof Error ? e.message : String(e)}`
+    }
   }
-  return text || 'Error: Page returned empty content'
 }
 
 async function executeFileRead(args: Record<string, any>): Promise<string> {
@@ -345,6 +382,18 @@ async function executeImageGenerate(args: Record<string, any>): Promise<string> 
   }
 }
 
+async function executeGetCurrentTime(_args: Record<string, any>): Promise<string> {
+  try {
+    const data = await backendCall<{ unix: number; iso_local: string; iso_utc: string; timezone: string; timezone_offset: number }>(
+      'get_current_time',
+      {},
+    )
+    return `Local: ${data.iso_local} ${data.timezone}\nUTC:   ${data.iso_utc}\nUnix:  ${data.unix}`
+  } catch (e) {
+    return `Error: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
 let _workflowDepth = 0
 
 async function executeRunWorkflow(args: Record<string, any>): Promise<string> {
@@ -443,6 +492,7 @@ const EXECUTOR_MAP: Record<string, (args: Record<string, any>) => Promise<string
   screenshot: executeScreenshot,
   image_generate: executeImageGenerate,
   run_workflow: executeRunWorkflow,
+  get_current_time: executeGetCurrentTime,
 }
 
 export function registerBuiltinTools(registry: ToolRegistry) {

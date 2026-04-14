@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react'
-import { ArrowLeft, RotateCcw, Sun, Moon, Mic, Volume2, Check, X, Loader2, Bot, Shield, Terminal, Search, FileText, ChevronRight } from 'lucide-react'
+import { ArrowLeft, RotateCcw, Sun, Moon, Mic, Volume2, Check, X, Loader2, Shield, ChevronRight } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -11,6 +11,7 @@ import { useAgentModeStore } from '../../stores/agentModeStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { getRecommendedAgentModels } from '../../lib/model-compatibility'
 import { MemorySettings } from './MemorySettings'
+import { RemoteAccessSettings } from './RemoteAccessSettings'
 import { ProviderSettings } from './ProviderConfig'
 import { PermissionSettings } from './PermissionSettings'
 import { MCPServerSettings } from './MCPServerSettings'
@@ -374,8 +375,7 @@ export function SettingsPage() {
           <h1 className="text-[0.8rem] font-semibold text-gray-800 dark:text-gray-200">Settings</h1>
         </div>
 
-        {/* ── Appearance ─────────────────────────────── */}
-        <Section title="Appearance" defaultOpen>
+        <Section title="Appearance">
           <div className="flex items-center justify-between">
             <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Theme</span>
             <div className="flex gap-1">
@@ -399,7 +399,6 @@ export function SettingsPage() {
           </div>
         </Section>
 
-        {/* ── Generation Parameters ──────────────────── */}
         <Section title="Generation">
           <SliderControl label="Temperature" value={settings.temperature} min={0} max={2} step={0.1} onChange={(v) => updateSettings({ temperature: v })} />
           <SliderControl label="Top P" value={settings.topP} min={0} max={1} step={0.05} onChange={(v) => updateSettings({ topP: v })} />
@@ -417,62 +416,26 @@ export function SettingsPage() {
           </div>
         </Section>
 
-        {/* ── Providers ──────────────────────────────── */}
-        <Section title="Providers" defaultOpen>
-          <ProviderSettings />
-        </Section>
-
-        {/* ── ComfyUI (Image & Video Engine) ─────────── */}
-        <Section title="ComfyUI (Image & Video)">
-          <ComfyUISettings />
-        </Section>
-
-        {/* ── Claude Code ────────────────────────────── */}
-        <Section title="Claude Code">
-          <ClaudeCodeSettings />
-        </Section>
-
-        {/* ── Voice ──────────────────────────────────── */}
-        <Section title="Voice">
-          <div className="flex items-center gap-3 text-[0.65rem]">
-            <span className="flex items-center gap-1">
-              {whisperLoading ? <Loader2 size={10} className="animate-spin text-gray-500" /> : whisperStatus?.available ? <Check size={10} className="text-green-500" /> : <X size={10} className="text-red-500" />}
-              <span className="text-gray-500">STT</span>
-            </span>
-            <span className="flex items-center gap-1">
-              {ttsSupported ? <Check size={10} className="text-green-500" /> : <X size={10} className="text-red-500" />}
-              <span className="text-gray-500">TTS</span>
-            </span>
-          </div>
-          <InlineToggle label="TTS Enabled" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
-          <div className="flex items-center justify-between">
-            <span className="text-[0.7rem] text-gray-500">Voice</span>
-            <select
-              value={voiceSettings.ttsVoice}
-              onChange={(e) => voiceSettings.updateVoiceSettings({ ttsVoice: e.target.value })}
-              className="max-w-[180px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none"
-            >
-              <option value="">Default</option>
-              {voices.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
-            </select>
-          </div>
-          <SliderControl label="Rate" value={voiceSettings.ttsRate} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsRate: v })} />
-          <SliderControl label="Pitch" value={voiceSettings.ttsPitch} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsPitch: v })} />
-          <InlineToggle label="Auto-send on Transcribe" enabled={voiceSettings.autoSendOnTranscribe} onChange={() => voiceSettings.updateVoiceSettings({ autoSendOnTranscribe: !voiceSettings.autoSendOnTranscribe })} icon={<Mic size={11} className="text-gray-500" />} />
-        </Section>
-
-        {/* ── Memory ─────────────────────────────────── */}
-        <Section title="Memory">
-          <MemorySettings />
-        </Section>
-
-        {/* ── Personas ───────────────────────────────── */}
         <Section title="Personas">
           <PersonaPanel />
         </Section>
 
+        <Section title="Memory">
+          <MemorySettings />
+        </Section>
 
-        {/* ── Agent Mode ─────────────────────────────── */}
+        <Section title="Providers">
+          <ProviderSettings />
+        </Section>
+
+        <Section title="ComfyUI (Image & Video)">
+          <ComfyUISettings />
+        </Section>
+
+        <Section title="Claude Code">
+          <ClaudeCodeSettings />
+        </Section>
+
         {FEATURE_FLAGS.AGENT_MODE && (
           <Section title="Agent Permissions">
             <PermissionSettings />
@@ -485,21 +448,18 @@ export function SettingsPage() {
           </Section>
         )}
 
-        {/* ── Agent Workflows ────────────────────────── */}
         {FEATURE_FLAGS.AGENT_WORKFLOWS && (
           <Section title="Agent Workflows">
             <WorkflowSection />
           </Section>
         )}
 
-        {/* ── MCP Servers ─────────────────────────────── */}
         {FEATURE_FLAGS.AGENT_MODE && (
           <Section title="MCP Servers">
             <MCPServerSettings />
           </Section>
         )}
 
-        {/* ── Search Provider ────────────────────────── */}
         {FEATURE_FLAGS.AGENT_MODE && (
           <Section title="Search Provider">
             <div className="space-y-3">
@@ -547,7 +507,38 @@ export function SettingsPage() {
           </Section>
         )}
 
-        {/* ── Updates ──────────────────────────────── */}
+        <Section title="Speech">
+          <div className="flex items-center gap-3 text-[0.65rem]">
+            <span className="flex items-center gap-1">
+              {whisperLoading ? <Loader2 size={10} className="animate-spin text-gray-500" /> : whisperStatus?.available ? <Check size={10} className="text-green-500" /> : <X size={10} className="text-red-500" />}
+              <span className="text-gray-500">STT</span>
+            </span>
+            <span className="flex items-center gap-1">
+              {ttsSupported ? <Check size={10} className="text-green-500" /> : <X size={10} className="text-red-500" />}
+              <span className="text-gray-500">TTS</span>
+            </span>
+          </div>
+          <InlineToggle label="TTS Enabled" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
+          <div className="flex items-center justify-between">
+            <span className="text-[0.7rem] text-gray-500">Voice</span>
+            <select
+              value={voiceSettings.ttsVoice}
+              onChange={(e) => voiceSettings.updateVoiceSettings({ ttsVoice: e.target.value })}
+              className="max-w-[180px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none"
+            >
+              <option value="">Default</option>
+              {voices.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
+            </select>
+          </div>
+          <SliderControl label="Rate" value={voiceSettings.ttsRate} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsRate: v })} />
+          <SliderControl label="Pitch" value={voiceSettings.ttsPitch} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsPitch: v })} />
+          <InlineToggle label="Auto-send on Transcribe" enabled={voiceSettings.autoSendOnTranscribe} onChange={() => voiceSettings.updateVoiceSettings({ autoSendOnTranscribe: !voiceSettings.autoSendOnTranscribe })} icon={<Mic size={11} className="text-gray-500" />} />
+        </Section>
+
+        <Section title="Remote Access">
+          <RemoteAccessSettings />
+        </Section>
+
         <UpdateSection />
 
         {/* ── Reset ──────────────────────────────────── */}

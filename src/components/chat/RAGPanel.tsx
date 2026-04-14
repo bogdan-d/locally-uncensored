@@ -11,9 +11,11 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronRight,
+  ChevronsRight,
   AlertTriangle,
   Download,
   MessageSquarePlus,
+  Eraser,
 } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { useRAG } from '../../hooks/useRAG'
@@ -21,6 +23,7 @@ import { useRAGStore } from '../../stores/ragStore'
 
 interface Props {
   conversationId: string | null
+  onClose?: () => void
 }
 
 const ACCEPT = '.pdf,.docx,.txt'
@@ -42,32 +45,47 @@ function ScoreBadge({ score }: { score: number }) {
   )
 }
 
-export function RAGPanel({ conversationId }: Props) {
+export function RAGPanel({ conversationId, onClose }: Props) {
   // Show placeholder when no conversation is active
   if (!conversationId) {
     return (
       <motion.div
-        className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#2a2a2a] flex flex-col items-center justify-center"
+        className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#2a2a2a] flex flex-col"
         initial={{ width: 0, opacity: 0 }}
         animate={{ width: 280, opacity: 1 }}
         exit={{ width: 0, opacity: 0 }}
         transition={{ duration: 0.2 }}
       >
-        <MessageSquarePlus size={32} className="text-gray-300 dark:text-gray-600 mb-3" />
-        <p className="text-sm text-gray-400 dark:text-gray-500 text-center px-6">
-          Start a conversation first
-        </p>
-        <p className="text-[0.6rem] text-gray-300 dark:text-gray-600 text-center px-6 mt-1">
-          Document chat will be available once a conversation is active.
-        </p>
+        <div className="px-3 py-2.5 border-b border-gray-200 dark:border-white/5 flex items-center justify-between">
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Document Chat</span>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="p-0.5 rounded hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"
+              title="Collapse panel"
+              aria-label="Collapse panel"
+            >
+              <ChevronsRight size={14} />
+            </button>
+          )}
+        </div>
+        <div className="flex-1 flex flex-col items-center justify-center">
+          <MessageSquarePlus size={32} className="text-gray-300 dark:text-gray-600 mb-3" />
+          <p className="text-sm text-gray-400 dark:text-gray-500 text-center px-6">
+            Start a conversation first
+          </p>
+          <p className="text-[0.6rem] text-gray-300 dark:text-gray-600 text-center px-6 mt-1">
+            Document chat will be available once a conversation is active.
+          </p>
+        </div>
       </motion.div>
     )
   }
 
-  return <RAGPanelInner conversationId={conversationId} />
+  return <RAGPanelInner conversationId={conversationId} onClose={onClose} />
 }
 
-function RAGPanelInner({ conversationId }: { conversationId: string }) {
+function RAGPanelInner({ conversationId, onClose }: { conversationId: string; onClose?: () => void }) {
   const rag = useRAG(conversationId)
   const documents = rag.documents ?? []
   const isEnabled = rag.isEnabled ?? false
@@ -79,6 +97,7 @@ function RAGPanelInner({ conversationId }: { conversationId: string }) {
   const uploadDocument = rag.uploadDocument
   const removeDocument = rag.removeDocument
   const toggleRAG = rag.toggleRAG
+  const clearAll = rag.clearAll
 
   const { embeddingModelReactive, lastRetrievedChunksReactive } = useRAGStore(
     useShallow((s) => ({
@@ -174,13 +193,13 @@ function RAGPanelInner({ conversationId }: { conversationId: string }) {
       exit={{ width: 0, opacity: 0 }}
       transition={{ duration: 0.2 }}
     >
-      {/* Header with toggle */}
-      <div className="px-3 py-2.5 border-b border-gray-200 dark:border-white/5 flex items-center justify-between">
-        <span className="text-xs font-medium text-gray-700 dark:text-gray-200">Document Chat</span>
+      {/* Header: Title + on/off toggle + Clear-all + Collapse */}
+      <div className="px-3 py-2.5 border-b border-gray-200 dark:border-white/5 flex items-center justify-between gap-2">
+        <span className="text-xs font-medium text-gray-700 dark:text-gray-200 flex-1">Document Chat</span>
         <button
           onClick={toggleRAG}
-          className="flex items-center gap-1 text-xs"
-          title={isEnabled ? 'Disable RAG' : 'Enable RAG'}
+          className="flex items-center text-xs"
+          title={isEnabled ? 'Disable RAG (keeps files)' : 'Enable RAG'}
           aria-label={isEnabled ? 'Disable RAG' : 'Enable RAG'}
         >
           {isEnabled ? (
@@ -189,6 +208,30 @@ function RAGPanelInner({ conversationId }: { conversationId: string }) {
             <ToggleLeft size={20} className="text-gray-400" />
           )}
         </button>
+        {documents.length > 0 && (
+          <button
+            onClick={() => {
+              if (confirm(`Remove all ${documents.length} document${documents.length === 1 ? '' : 's'} from this chat? This cannot be undone.`)) {
+                clearAll()
+              }
+            }}
+            className="p-1 rounded hover:bg-red-500/15 text-gray-500 dark:text-gray-400 hover:text-red-500 transition-colors"
+            title="Clear all documents from this chat"
+            aria-label="Clear all documents"
+          >
+            <Eraser size={13} />
+          </button>
+        )}
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-white transition-colors"
+            title="Collapse panel"
+            aria-label="Collapse panel"
+          >
+            <ChevronsRight size={14} />
+          </button>
+        )}
       </div>
 
       {/* Context window warning */}

@@ -203,3 +203,36 @@ pub fn fs_info(path: String) -> Result<serde_json::Value, String> {
         "readonly": meta.permissions().readonly(),
     }))
 }
+
+/// Show a native "Save As…" dialog and write the given text content to the
+/// chosen path. Used by Export Chat (markdown / JSON). Returns the chosen
+/// path, or null when the user cancelled.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn save_text_file_dialog(
+    content: String,
+    defaultName: Option<String>,
+    extension: Option<String>,
+    ext_label: Option<String>,
+) -> Result<Option<String>, String> {
+    let default_name = defaultName.unwrap_or_else(|| "export.txt".to_string());
+    let ext = extension.unwrap_or_else(|| "txt".to_string());
+    let label = ext_label.unwrap_or_else(|| format!("{} file", ext.to_uppercase()));
+
+    // rfd::AsyncFileDialog runs the native Windows/macOS/Linux save dialog
+    // without any extra Tauri plugin.
+    let file = rfd::AsyncFileDialog::new()
+        .set_file_name(&default_name)
+        .add_filter(&label, &[ext.as_str()])
+        .save_file()
+        .await;
+
+    match file {
+        Some(handle) => {
+            let path = handle.path().to_path_buf();
+            std::fs::write(&path, content).map_err(|e| format!("Write failed: {}", e))?;
+            Ok(Some(path.to_string_lossy().into_owned()))
+        }
+        None => Ok(None),
+    }
+}

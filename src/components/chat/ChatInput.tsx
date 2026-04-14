@@ -198,7 +198,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             onClick={() => {
               if (canThink) updateSettings({ thinkingEnabled: !thinkingEnabled })
             }}
-            className={`flex items-center gap-1 px-1.5 py-1 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ${
+            className={`flex items-center gap-1 px-1.5 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ${
               thinkingEnabled && canThink
                 ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
                 : !canThink

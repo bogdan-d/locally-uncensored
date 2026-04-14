@@ -5,7 +5,7 @@ export const AGENT_TOOLS: Tool[] = [
   {
     name: "web_search",
     description:
-      "Search the web for information using a multi-tier approach. SearXNG (if installed locally) gives the best results with full search capabilities. Falls back to DuckDuckGo Instant Answers and Wikipedia. Returns results with titles, snippets, and URLs.",
+      "Search the web. Returns a LIST of candidate results (title + URL + short snippet). The snippet alone is almost never enough — when the user needs an answer grounded in a specific page, follow up with `web_fetch(url)` on the best match to read the actual content.",
     parameters: [
       {
         name: "query",
@@ -20,6 +20,27 @@ export const AGENT_TOOLS: Tool[] = [
         required: false,
       },
     ],
+    requiresApproval: false,
+  },
+  {
+    name: "web_fetch",
+    description:
+      "Fetch a web page and return its readable text content (up to ~24 000 characters). Use this AFTER web_search when you need the actual article / documentation / page body, not just the snippet. HTML is stripped, <script>/<style>/<nav>/<footer> are removed, paragraphs preserved. Refuses private / loopback addresses.",
+    parameters: [
+      {
+        name: "url",
+        type: "string",
+        description: "Full URL to fetch (must start with http:// or https://)",
+        required: true,
+      },
+    ],
+    requiresApproval: false,
+  },
+  {
+    name: "get_current_time",
+    description:
+      "Return the user's current local date, time and timezone. Use this FIRST for any 'what day / time / date is it' question — do NOT web_search for it. Zero arguments.",
+    parameters: [],
     requiresApproval: false,
   },
   {
@@ -301,6 +322,39 @@ export async function executeTool(
           .join("\n\n");
       }
       return JSON.stringify(data);
+    }
+
+    case "web_fetch": {
+      const url = typeof args.url === 'string' ? args.url.trim() : ''
+      if (!url) return "Error: web_fetch requires a `url` argument."
+      try {
+        const data = await backendCall<{ url: string; status: number; contentType: string; title: string; text: string; truncated: boolean }>(
+          "web_fetch",
+          { url }
+        )
+        const parts: string[] = []
+        if (data.title) parts.push(`Title: ${data.title}`)
+        parts.push(`URL: ${data.url}`)
+        parts.push(`Status: ${data.status}${data.contentType ? ` (${data.contentType.split(';')[0]})` : ''}`)
+        parts.push('')
+        parts.push(data.text || '(empty body)')
+        if (data.truncated) parts.push('\n…(truncated to 24 000 chars)')
+        return parts.join('\n')
+      } catch (e) {
+        return `Error: web_fetch failed — ${e instanceof Error ? e.message : String(e)}`
+      }
+    }
+
+    case "get_current_time": {
+      try {
+        const data = await backendCall<{ unix: number; iso_local: string; iso_utc: string; timezone: string; timezone_offset: number }>(
+          "get_current_time",
+          {}
+        )
+        return `Local: ${data.iso_local} ${data.timezone}\nUTC:   ${data.iso_utc}\nUnix:  ${data.unix}`
+      } catch (e) {
+        return `Error: get_current_time failed — ${e instanceof Error ? e.message : String(e)}`
+      }
     }
 
     case "image_generate": {

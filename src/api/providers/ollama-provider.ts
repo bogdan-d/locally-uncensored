@@ -77,13 +77,29 @@ export class OllamaProvider implements ProviderClient {
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens) ollamaOptions.num_predict = options.maxTokens
     body.options = ollamaOptions
-    body.think = options?.thinking === true
+    // Tri-state: true → explicit think on, false → explicit think off
+    // (saves tokens on QwQ / DeepSeek-R1 / Gemma 4 etc.), undefined →
+    // omit the field and let Ollama pick the default.
+    if (options?.thinking === true) body.think = true
+    else if (options?.thinking === false) body.think = false
 
-    const res = await localFetchStream(this.apiUrl('/chat'), {
+    let res = await localFetchStream(this.apiUrl('/chat'), {
       method: 'POST',
       body: JSON.stringify(body),
       signal: options?.signal,
     })
+
+    // Older Ollama builds / non-thinking models reject ANY `think` field
+    // with HTTP 400. Retry once without it so the user's request still
+    // succeeds — we just fall back to model-default behaviour.
+    if (!res.ok && res.status === 400 && 'think' in body) {
+      delete body.think
+      res = await localFetchStream(this.apiUrl('/chat'), {
+        method: 'POST',
+        body: JSON.stringify(body),
+        signal: options?.signal,
+      })
+    }
 
     if (!res.ok) {
       throw new ProviderError(
@@ -134,16 +150,25 @@ export class OllamaProvider implements ProviderClient {
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens) ollamaOptions.num_predict = options.maxTokens
     body.options = ollamaOptions
-    body.think = options?.thinking === true
+    // Tri-state think flag — see chatStream() for details.
+    if (options?.thinking === true) body.think = true
+    else if (options?.thinking === false) body.think = false
 
-    const fetchOptions: any = {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const fetchOptions = (bodyObj: Record<string, any>): any => {
+      const opts: any = {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyObj),
+      }
+      if (options?.signal) opts.signal = options.signal
+      return opts
     }
-    if (options?.signal) fetchOptions.signal = options.signal
 
-    const res = await localFetch(this.apiUrl('/chat'), fetchOptions)
+    let res = await localFetch(this.apiUrl('/chat'), fetchOptions(body))
+    if (!res.ok && res.status === 400 && 'think' in body) {
+      delete body.think
+      res = await localFetch(this.apiUrl('/chat'), fetchOptions(body))
+    }
 
     if (!res.ok) {
       throw new ProviderError(

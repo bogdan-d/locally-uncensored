@@ -1,8 +1,13 @@
 /**
  * Chat Export — Markdown and JSON formats.
+ *
+ * When running inside Tauri, the user gets a native "Save As…" dialog to
+ * pick the destination. In a plain browser context we fall back to a
+ * blob-download.
  */
 
 import type { Conversation } from '../types/chat'
+import { isTauri, backendCall } from '../api/backend'
 
 export function exportAsMarkdown(conversation: Conversation): string {
   const lines: string[] = []
@@ -72,13 +77,42 @@ export function downloadFile(content: string, filename: string, type: string) {
   URL.revokeObjectURL(url)
 }
 
-export function exportConversation(conversation: Conversation, format: 'markdown' | 'json') {
+/**
+ * Export a conversation. Returns:
+ *  - "saved" + the chosen path (Tauri dialog)
+ *  - "cancelled" (user closed the dialog)
+ *  - "downloaded" (browser fallback — file landed in the default Downloads folder)
+ */
+export async function exportConversation(
+  conversation: Conversation,
+  format: 'markdown' | 'json',
+): Promise<{ status: 'saved' | 'cancelled' | 'downloaded'; path?: string; error?: string }> {
   const safeTitle = conversation.title.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 50)
-  if (format === 'markdown') {
-    const content = exportAsMarkdown(conversation)
-    downloadFile(content, `${safeTitle}.md`, 'text/markdown')
-  } else {
-    const content = exportAsJSON(conversation)
-    downloadFile(content, `${safeTitle}.json`, 'application/json')
+  const ext = format === 'markdown' ? 'md' : 'json'
+  const extLabel = format === 'markdown' ? 'Markdown' : 'JSON'
+  const mime = format === 'markdown' ? 'text/markdown' : 'application/json'
+  const filename = `${safeTitle}.${ext}`
+  const content = format === 'markdown' ? exportAsMarkdown(conversation) : exportAsJSON(conversation)
+
+  // Inside Tauri → native Save As dialog + real disk write
+  if (isTauri()) {
+    try {
+      const chosenPath = await backendCall<string | null>('save_text_file_dialog', {
+        content,
+        defaultName: filename,
+        extension: ext,
+        extLabel,
+      })
+      if (!chosenPath) return { status: 'cancelled' }
+      return { status: 'saved', path: chosenPath }
+    } catch (e) {
+      // Fall through to blob download if the Tauri command fails for any reason
+      downloadFile(content, filename, mime)
+      return { status: 'downloaded', error: String(e) }
+    }
   }
+
+  // Plain browser fallback
+  downloadFile(content, filename, mime)
+  return { status: 'downloaded' }
 }

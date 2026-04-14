@@ -11,6 +11,7 @@ import { retrieveContext } from '../api/rag'
 import { speakStreaming, isSpeechSynthesisSupported, getVoicesAsync } from '../api/voice'
 import { toolRegistry } from '../api/mcp'
 import { usePermissionStore } from '../stores/permissionStore'
+import { isThinkingCompatible } from '../lib/model-compatibility'
 // Legacy compat imports (still used by some callers)
 import { getToolPermission, executeAgentTool, AGENT_TOOL_DEFS } from '../api/tool-registry'
 import { getToolCallingStrategy, type ToolCallingStrategy } from '../lib/model-compatibility'
@@ -282,11 +283,26 @@ export function useAgentChat() {
     // Get effective permissions for this conversation
     const permissions = usePermissionStore.getState().getEffectivePermissions(convId!)
 
-    // Build agent system prompt
+    // Build agent system prompt FIRST, then append caveman style as a modifier
     const hermesToolDefs = toolRegistry.toHermesToolDefs(permissions)
-    const agentSystemPrompt = strategy === 'hermes_xml'
+    let agentSystemPrompt = strategy === 'hermes_xml'
       ? buildHermesToolPrompt(hermesToolDefs) + (systemPrompt ? `\n\n${systemPrompt}` : '')
       : buildAgentSystemPrompt(systemPrompt)
+
+    // Caveman mode: append as response style modifier AFTER agent instructions
+    // This ensures the model understands its agent role first, then applies terse style
+    if (settings.cavemanMode && settings.cavemanMode !== 'off') {
+      const { CAVEMAN_PROMPTS } = await import('../lib/constants')
+      const cavemanPrompt = CAVEMAN_PROMPTS[settings.cavemanMode]
+      if (cavemanPrompt) {
+        agentSystemPrompt += `\n\nResponse style: ${cavemanPrompt}`
+      }
+    }
+
+    // Per-message Caveman reminder for non-thinking models
+    const cavemanReminder = (settings.cavemanMode && settings.cavemanMode !== 'off')
+      ? (await import('../lib/constants')).CAVEMAN_REMINDERS?.[settings.cavemanMode as 'lite' | 'full' | 'ultra'] || ''
+      : ''
 
     // Build messages array
     let agentMessages: ChatMessage[] = [
@@ -295,7 +311,9 @@ export function useAgentChat() {
         .filter((m) => m.role !== 'system' && m.content.trim() !== '')
         .map((m) => ({
           role: m.role as 'user' | 'assistant' | 'tool',
-          content: m.content,
+          content: m.role === 'user' && cavemanReminder
+            ? `${cavemanReminder}\n${m.content}`
+            : m.content,
           ...(m.images?.length ? { images: m.images.map(img => ({ data: img.data, mimeType: img.mimeType })) } : {}),
         })),
     ]
@@ -338,7 +356,13 @@ export function useAgentChat() {
           topP: settings.topP,
           topK: settings.topK,
           maxTokens: settings.maxTokens || undefined,
-          thinking: settings.thinkingEnabled === true ? true : false,
+          // Tri-state: thinking-compatible models get an explicit true|false
+          // (OFF → tell Ollama `think: false` so the model stops thinking
+          // instead of secretly thinking + hiding it). Non-thinking models
+          // get `undefined` so the field is omitted entirely.
+          thinking: isThinkingCompatible(activeModel)
+            ? settings.thinkingEnabled === true
+            : (undefined as unknown as boolean),
           signal: abort.signal,
         }
 
@@ -364,7 +388,21 @@ export function useAgentChat() {
             type: 'function' as const,
             function: { name: t.name, description: t.description, parameters: t.inputSchema },
           }))
-          const turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
+
+          let turn: { content: string; toolCalls: ToolCall[] }
+          try {
+            turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
+          } catch (thinkErr: any) {
+            // If thinking is rejected by model, retry WITHOUT the field at
+            // all (`undefined` — old Ollama / non-thinking models reject
+            // both `think: true` AND `think: false`).
+            if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
+              const retryOptions = { ...chatOptions, thinking: undefined as unknown as boolean }
+              turn = await provider.chatWithTools(modelToUse, agentMessages, tools, retryOptions)
+            } else {
+              throw thinkErr
+            }
+          }
 
           // Remove thinking indicator
           removeBlock(convId!, assistantMessage.id, thinkingBlockId)
@@ -392,12 +430,24 @@ export function useAgentChat() {
           }
         }
 
-        // Parse think tags
-        const thinkMatch = turnContent.match(/<think>([\s\S]*?)<\/think>/)
-        if (thinkMatch) {
-          turnThinking = thinkMatch[1]
-          turnContent = turnContent.replace(/<think>[\s\S]*?<\/think>/, '').trim()
-        }
+        // Parse <think>…</think> tags. Always strip them from the content
+        // (otherwise raw tags land in the assistant bubble). Only ROUTE
+        // them into the collapsible thinking block when the user actually
+        // toggled Thinking on — thinking-only models (QwQ, DeepSeek-R1)
+        // emit these tags unconditionally, and we must not surface them
+        // when the user asked for thinking to be OFF.
+        const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+        turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_match, inner) => {
+          if (keepThinking) {
+            turnThinking = turnThinking
+              ? `${turnThinking}\n\n${inner}`
+              : inner
+          }
+          return ''
+        }).trim()
+        // Also drop any orphan native-thinking that leaked through when the
+        // toggle is OFF (e.g. provider returned `turn.thinking` anyway).
+        if (!keepThinking) turnThinking = ''
 
         // Update UI
         contentRef.current = turnContent
@@ -584,6 +634,12 @@ export function useAgentChat() {
           useChatStore.getState().updateMessageContent(
             convId!, assistantMessage.id,
             `This model does not support tool calling.\n\nThe auto-fix could not be applied. Try pulling a standard model like:\n• qwen2.5:7b\n• llama3.1:8b\n• mistral:7b`
+          )
+        } else if (errorMsg.includes('does not support thinking')) {
+          // Graceful message for thinking errors (shouldn't reach here after retry, but just in case)
+          useChatStore.getState().updateMessageContent(
+            convId!, assistantMessage.id,
+            `This model does not support thinking mode. Disable the Think button or switch to a compatible model (Qwen 3, DeepSeek-R1, Gemma 4).`
           )
         } else {
           useChatStore.getState().updateMessageContent(

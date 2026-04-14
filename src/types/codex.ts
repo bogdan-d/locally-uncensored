@@ -1,4 +1,4 @@
-export type ChatMode = 'lu' | 'codex' | 'openclaw' | 'claude-code'
+export type ChatMode = 'lu' | 'codex' | 'openclaw' | 'claude-code' | 'remote'
 
 export type CodexEventType = 'instruction' | 'file_change' | 'terminal_output' | 'reasoning' | 'error' | 'done'
 

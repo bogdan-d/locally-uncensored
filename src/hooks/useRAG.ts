@@ -182,6 +182,13 @@ export function useRAG(conversationId: string | null) {
     [conversationId]
   )
 
+  const clearAll = useCallback(() => {
+    if (!conversationId) return
+    const { clearConversationDocs, setLastRetrievedChunks } = useRAGStore.getState()
+    clearConversationDocs(conversationId)
+    setLastRetrievedChunks([])
+  }, [conversationId])
+
   return {
     documents,
     isEnabled,
@@ -193,6 +200,7 @@ export function useRAG(conversationId: string | null) {
     uploadDocument,
     removeDocument: removeDoc,
     toggleRAG,
+    clearAll,
     getContextForQuery,
   }
 }

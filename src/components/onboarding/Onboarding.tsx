@@ -127,6 +127,8 @@ export function Onboarding() {
 
   const finish = () => {
     updateSettings({ onboardingDone: true })
+    // Persist to filesystem so NSIS updates don't reset onboarding
+    if (isTauri) backendCall('set_onboarding_done').catch(() => {})
   }
 
   /* ── Scan for backends ──────────────────────────────────── */

@@ -1,6 +1,6 @@
 [package]
 name = "locally-uncensored"
-version = "2.3.2"
+version = "2.3.3"
 description = "Private, local AI chat & image/video generation"
 authors = ["purpledoubled"]
 edition = "2021"
@@ -11,6 +11,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["devtools", "tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
@@ -31,6 +32,17 @@ tokio-util = "0.7"
 urlencoding = "2"
 url = "2"
 rfd = "0.15"
+# Remote Access
+axum = { version = "0.8", features = ["ws"] }
+tokio-tungstenite = "0.26"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+jsonwebtoken = "9"
+qrcode = "0.14"
+image = { version = "0.25", default-features = false, features = ["png"] }
+rand = "0.8"
+sha2 = "0.10"
+local-ip-address = "0.6"
+socket2 = "0.5"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_Security"] }
