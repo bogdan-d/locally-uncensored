@@ -34,28 +34,40 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.3.2 — Current Release
+## v2.3.3 — Current Release
 
-**GLM-4.7-Flash, Model Loading Fix, Agent Badge Audit, 75+ Downloadable Models**
+**Remote Access, Codex Streaming, Qwen 3.6 Day-0, ERNIE-Image, 2105 Tests**
 
-- **GLM-4.7-Flash** — ZhipuAI's strongest 30B class model. 11 variants across uncensored (Heretic) and mainstream, IQ2 to Q8. Fits 12GB VRAM (IQ2_M). Native tool calling.
-- **GLM 5.1 754B MoE** — Frontier agentic engineering model listed as cloud-available via Ollama.
-- **Model Loading Fix** — Fixed 3 bugs causing "0 models loaded" in ComfyUI Create View (race condition at startup, broken auto-retry logic, stale cache after download). Models now load reliably within seconds.
-- **Agent Badge Audit** — Consistent agent flags across all 75+ models. Models with native tool calling are correctly marked.
-- **Removed HOT Badges** — Cleaner UI, only AGENT badges shown for tool-calling models.
+### Remote Access + Mobile Web App
+- **Access your AI from your phone** — Dispatch via LAN or Cloudflare Tunnel (Internet)
+- **Full mobile web app** — Hamburger drawer, chat list, Codex mode, file attach, thinking toggle, Plugins (Caveman + Personas)
+- **Mobile Agent Mode** — 13 tools with Thought/Action/Observation cards
+- **Security hardened** — 6-digit passcodes, rate limiting, JWT auth, permissions enforced, CSP headers
 
-### v2.3.0 Features (included)
+### Codex Coding Agent — Major Upgrade
+- **Live streaming** between tool calls — see tokens as they generate
+- **Continue capability** — tool-call history persisted, model remembers previous actions
+- **AUTONOMY CONTRACT** — model completes ALL steps without premature stopping
+- **Fallback answer** — never shows empty bubble after tool calls
 
-- **ComfyUI Plug & Play** — Auto-detect, one-click install, auto-start. Zero config image and video generation.
-- **20 Model Bundles** — 8 image + 12 video bundles with one-click download.
-- **Z-Image Turbo/Base** — Uncensored image model. 8-15 seconds per image. No safety filters.
-- **FLUX 2 Klein** — Next-gen FLUX architecture with Qwen 3 text encoder.
-- **Image-to-Image (I2I)** — Upload a source image, adjust denoise strength, transform with any image model.
-- **Image-to-Video (I2V)** — FramePack F1, CogVideoX, SVD with drag & drop image upload.
-- **Dynamic Workflow Builder** — 14 strategies. Auto-detects installed nodes.
-- **Unified Download Manager** — Track all downloads with progress, speed, retry.
-- **Think Mode in Chat Input** — Toggle thinking mode directly from the message input area.
-- **Process Cleanup** — ComfyUI auto-terminates when app is closed (Windows Job Object).
+### Agent Mode — 13-Phase Rewrite
+- **Parallel tool execution** with side-effect grouping
+- **Budget system** — max 50 tool calls / 25 iterations per task
+- **Sub-agent delegation** — `delegate_task` spawns isolated sub-agents
+- **MCP integration** — external tools via ToolRegistry
+- **Filesystem awareness** — agent uses file_list/system_info before acting
+
+### New Models + Image Gen
+- **Qwen 3.6** (day-0) — 35B MoE, vision + agentic coding + thinking. One-click download
+- **ERNIE-Image** (Baidu) — Turbo (8 steps) + Base (50 steps). Plug & play, no custom nodes
+- **Image-to-Image** — Upload source, adjust denoise, transform with any model
+- **75+ downloadable models** — all URLs verified
+
+### UI/UX
+- **AE-style text header** — clean typography for better discoverability
+- **Plugins dropdown** — Caveman Mode + Personas in one menu
+- **Thinking mode** — tri-state, auto-retry, universal tag stripper
+- **2105 tests** — comprehensive smoke tests covering the entire app
 
 ---
 
@@ -65,7 +77,7 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 |---------|:-:|:-:|:-:|:-:|
 | AI Chat | **Yes** | Yes | Yes | Yes |
 | **Coding Agent (Codex)** | **Yes** | No | No | No |
-| **13 MCP Agent Tools** | **Yes** | No | No | No |
+| **14 Agent Tools + MCP** | **Yes** | No | No | No |
 | **Plug & Play Setup** | **12 Backends** | No | Built-in | No |
 | **Multi-Provider** (20+ Presets) | **Yes** | Yes | Yes | No |
 | **A/B Model Compare** | **Yes** | No | No | No |
@@ -82,6 +94,9 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 | Agent Workflows | **Yes** | No | No | No |
 | Document Chat (RAG) | **Yes** | Yes | No | No |
 | Voice (STT + TTS) | **Yes** | Partial | No | No |
+| **Remote Access (Phone)** | **Yes** | No | No | No |
+| **Plugins (Caveman + Personas)** | **Yes** | No | No | Yes |
+| **Auto-Update** | **Yes** | No | Yes | No |
 | Open Source | **AGPL-3.0** | MIT | No | AGPL |
 | No Docker | **Yes** | No | Yes | Yes |
 
@@ -93,8 +108,9 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 - **Plug & Play Setup** — First-launch wizard auto-detects 12 local backends. Nothing installed? One-click in-app Ollama download and install with progress bar. ComfyUI one-click install with step-by-step progress. Configurable ComfyUI port and path in Settings. Zero config needed.
 - **Uncensored AI Chat** — Abliterated models with zero restrictions. Streaming + thinking display.
 - **Multi-Provider** — 20+ presets. Local: Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang, TGI. Cloud: OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Mistral. Switch per conversation.
-- **Codex Coding Agent** — Reads codebase, writes code, runs shell commands. File tree with native folder picker. Up to 20 tool iterations.
-- **Agent Mode** — 13 MCP tools: web search, file I/O, shell, code execution, screenshots, system info. Native + Hermes XML fallback.
+- **Codex Coding Agent** — Live streaming between tool calls, continue capability, AUTONOMY CONTRACT. File tree, folder picker, up to 50 iterations.
+- **Agent Mode** — 14 tools + MCP: web search/fetch, file I/O, shell, code execution, screenshots, system info, time. Parallel execution, sub-agents, budget system.
+- **Remote Access** — Access your AI from your phone via LAN or Cloudflare Tunnel. Full mobile web app with Agent Mode, Codex, plugins, file attach.
 - **Image Generation** — FLUX 2 Klein, FLUX.1 (schnell/dev), Z-Image Turbo/Base, Juggernaut XL, RealVisXL, DreamShaper XL via ComfyUI. Full parameter control, no content filter.
 - **Image-to-Image** — Upload a source image, adjust denoise strength, transform with any image model.
 - **Video Generation** — Wan 2.1, HunyuanVideo 1.5, LTX 2.3, AnimateDiff Lightning, CogVideoX, FramePack F1 on your GPU.
@@ -116,12 +132,15 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 - **20+ Personas** — Pre-built characters. Switch without prompt engineering.
 - **Chat Export** — Markdown or JSON. Token counter. Keyboard shortcuts.
 
+### Customization
+- **Plugins Dropdown** — Caveman Mode (Off/Lite/Full/Ultra for terse responses) + 20+ Personas in one menu. Per-chat. Works in Chat, Agent, Codex.
+- **Auto-Update** — Signed NSIS installer. In-app download with progress bar. User-controlled restart (no forced updates). Settings survive updates.
+
 ### Polish
 - **Standalone Desktop App** — Tauri v2 Rust backend. Download .exe, run it.
-- **Model Load/Unload** — Power icons in header. Load into VRAM, unload when done.
-- **Custom Dark Titlebar** — Frameless window, no native chrome.
-- **Linear/Arc UI** — Compact, monochrome. 15% larger for readability.
-- **Privacy First** — Zero tracking, all API calls proxied locally.
+- **Model Load/Unload** — iOS-style toggle in header. Load into VRAM, unload when done.
+- **AE-Style Header** — Clean typography navigation. Models, Settings, Downloads at a glance.
+- **Privacy First** — Zero tracking, all API calls proxied locally. ComfyUI process auto-killed on app close.
 
 ## Tech Stack
 
@@ -181,11 +200,11 @@ Open the **Create** tab. ComfyUI is auto-detected or one-click installed. Models
 
 | Model | VRAM | Best For |
 |-------|------|----------|
+| **Qwen 3.6 35B MoE** | 24 GB | Vision + agentic coding + thinking. Brand new. |
 | **GLM-4.7-Flash IQ2** | 12 GB | Strongest 30B class. Tool calling. 198K context. |
 | **Gemma 4 E4B** | 4 GB | Lightweight, fast, great for small GPUs. |
-| **Qwen 3.5 9B** | 8 GB | Strongest reasoning + coding at 9B. |
-| **Gemma 4 31B** | 16 GB | Frontier dense model, native tools + vision. |
 | **Qwen 3.5 35B MoE** | 16 GB | Best agentic, 256K context. SWE-bench leader. |
+| **Gemma 4 31B** | 16 GB | Frontier dense model, native tools + vision. |
 | Hermes 3 8B | 6 GB | Agent Mode. Uncensored + tool calling. |
 | DeepSeek R1 (8B-70B) | 6-48 GB | Chain-of-thought reasoning. |
 
@@ -195,6 +214,7 @@ Open the **Create** tab. ComfyUI is auto-detected or one-click installed. Models
 |-------|------|-------|
 | FLUX.1 Schnell / Dev | 8-10 GB | Best text-to-image. Fast (schnell) or quality (dev). |
 | FLUX 2 Klein 4B | 8-10 GB | Next-gen, fastest FLUX model. |
+| ERNIE-Image Turbo | 24 GB | Baidu DiT, 8 steps, 1024x1024. New. |
 | Z-Image Turbo | 10-16 GB | Uncensored, 8-15 sec per image. |
 | Juggernaut XL V9 | 6 GB | Best photorealistic SDXL. |
 
@@ -229,13 +249,19 @@ Open the **Create** tab. ComfyUI is auto-detected or one-click installed. Models
 - [x] 20 Image + Video Model Bundles
 - [x] Image-to-Image (I2I)
 - [x] Image-to-Video (I2V) — FramePack, CogVideoX, SVD
-- [x] Z-Image + FLUX 2 support
-- [x] Dynamic Workflow Builder (14 strategies)
+- [x] Z-Image + FLUX 2 + ERNIE-Image support
+- [x] Dynamic Workflow Builder (15 strategies)
 - [x] VRAM-Aware Model Filtering
 - [x] Think Mode in Chat Input
+- [x] Remote Access (LAN + Cloudflare Tunnel)
+- [x] Mobile Web App (Agent, Codex, Plugins, Thinking)
+- [x] Codex Streaming + Continue + Autonomy Contract
+- [x] Agent 13-Phase Rewrite (parallel, budget, sub-agents, MCP)
+- [x] Auto-Update (signed NSIS installer)
+- [x] Qwen 3.6 Day-0 Support
+- [x] Plugins Dropdown (Caveman + Personas)
 - [ ] Voice Mode (Qwen Omni live voice)
 - [ ] Upscale + Inpainting
-- [ ] Plugin System
 
 ---
 
