@@ -35,17 +35,17 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.3.5 — Current Release
+## v2.3.6 — Current Release
 
-**LM Studio auto-detection fix + Windows terminal-popup cleanup + clearer setup scripts, 2166 Tests**
+**Remote ComfyUI host + LM Studio/OpenAI-compat CORS fix, 2183 Tests**
 
 ### Critical Fixes (why you want this update)
-- **LU now recognizes your LM Studio models when Ollama is also running** — if the first-launch detection found 2+ local backends (the very common "Ollama + LM Studio" setup), the backend selector modal opened but no provider got auto-enabled. Users who dismissed the modal saw zero LM Studio models in the dropdown even though LM Studio was clearly running. Fixed: the first non-Ollama backend is always pre-enabled; the selector stays as an educational picker so you can still switch primaries. Reproduced live and verified against a real LM Studio-like endpoint.
-- **No more terminal flashes on Windows** — a couple of subprocess spawns on the Windows code path were missing `CREATE_NO_WINDOW`, so killing ComfyUI/Claude Code during LU shutdown or installing SearXNG briefly flashed a console window. 100% of Windows-branch spawns are now flagged.
-- **`setup.bat` / `setup.sh` no longer lure end-users into dev mode** — previously advertised as "one-click setup" but actually launched `npm run dev` in a browser. Now each script opens with a clear dev-mode banner, a link to the installer, and a one-key prompt to continue or exit. README's setup section reframed for contributors only.
+- **Configurable ComfyUI host** — Settings → ComfyUI → Host. Previously only the port was configurable, the host was hardcoded `localhost`. Now you can point LU at a ComfyUI running in Docker, on a LAN machine, or on a headless homelab server. When the host is local, the Start/Stop/Restart/Install/Path controls stay visible; remote hosts hide them (LU can't manage a remote Python process). Requested in Discussion #1 by @ShoaibSajid.
+- **LM Studio (and every OpenAI-compat local backend) can actually be reached from LU** — v2.3.5 auto-detected LM Studio and pre-enabled it, but the actual `/v1/*` calls CORS-failed inside the Tauri WebView because `openai-provider.ts` used plain `fetch()`. Test button always showed "Failed" and models never appeared in the dropdown even when curl confirmed the backend was up. Fix routes localhost calls through the Rust proxy with direct-fetch fallback. Covers LM Studio, vLLM, llama.cpp server, KoboldCpp, Jan, GPT4All, oobabooga, Aphrodite, SGLang, TGI, LocalAI, TabbyAPI.
+- **ComfyUI port now actually persists across restarts** — pre-existing bug: the port setter wrote to `config.json` but startup never read it back. New `load_comfy_config_values()` helper applies persisted port + host at startup.
 
-### What's still in v2.3.5 from v2.3.4
-This is a hotfix release — v2.3.4's feature surface (chat-history persistence, Ollama 0.21 compat, Codex loop guard, stop-button instant, stale-chip fix, 12 backend auto-detection, Mobile Remote, Codex streaming, Agent Mode, ERNIE-Image, Qwen 3.6, 75+ downloadable models) is unchanged. Every fix from v2.3.4 and earlier still applies.
+### What's still in v2.3.6 from v2.3.5
+Drop-in upgrade. v2.3.5's auto-detection fix + Windows terminal-popup hardening + setup.bat warnings remain in place. Every fix from v2.3.5, v2.3.4, and earlier still applies.
 
 ### Remote Access + Mobile Web App
 - **Access your AI from your phone** — Dispatch via LAN or Cloudflare Tunnel (Internet)
