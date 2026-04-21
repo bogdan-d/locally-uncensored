@@ -294,21 +294,29 @@ export function AppShell() {
     detectLocalBackends().then((backends) => {
       if (backends.length === 0) return
 
-      // Only 1 backend (any) → auto-enable it silently
-      if (backends.length === 1) {
-        const backend = backends[0]
-        if (backend.id !== 'ollama') {
-          useProviderStore.getState().setProviderConfig('openai', {
-            enabled: true,
-            name: backend.name,
-            baseUrl: backend.baseUrl,
-            isLocal: true,
-          })
-        }
-        return
+      // Always auto-enable the first non-Ollama openai-compat backend we find.
+      // Ollama has its own provider slot and is handled separately.
+      // Without this, a user running e.g. Ollama + LM Studio together would
+      // see the BackendSelector modal; if they dismissed it, LM Studio stayed
+      // disabled and its models never appeared in the chat dropdown ("no models
+      // recognized" from the user's POV). Pre-enabling the first detected
+      // non-Ollama backend guarantees models show up, and the selector below
+      // stays available so the user can still pick a different one.
+      const nonOllama = backends.find((b) => b.id !== 'ollama')
+      if (nonOllama) {
+        useProviderStore.getState().setProviderConfig('openai', {
+          enabled: true,
+          name: nonOllama.name,
+          baseUrl: nonOllama.baseUrl,
+          isLocal: true,
+        })
       }
 
-      // Multiple backends detected → show selection dialog
+      // Single backend → we're done (already enabled above, or was Ollama).
+      if (backends.length === 1) return
+
+      // Multiple backends detected → show selection dialog so the user can
+      // change which one is the primary openai-compat provider if they want.
       setDetectedBackends(backends)
       setShowSelector(true)
     })
