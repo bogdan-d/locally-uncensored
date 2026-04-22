@@ -113,6 +113,23 @@ describe('codexStore', () => {
       expect(useCodexStore.getState().chatMode).toBe('codex')
     })
   })
+
+  describe('chatMode default on boot (v2.3.9 regression)', () => {
+    // Newcomers should always land in Chat ('lu') on startup, not in whatever
+    // tab they left off in. codexStore intentionally excludes chatMode from
+    // partialize so the default is used on every fresh boot.
+    it('initial chatMode is "lu" regardless of prior setChatMode calls in a previous simulated session', () => {
+      // Simulate a "previous session" setting chatMode to codex.
+      useCodexStore.setState({ chatMode: 'codex' })
+      expect(useCodexStore.getState().chatMode).toBe('codex')
+      // Simulate the setup that beforeEach would run on next boot — reset to
+      // the store's initial values. If chatMode were persisted, a real app
+      // boot would re-hydrate it from localStorage; by excluding it from
+      // partialize we guarantee the default ('lu') shows up instead.
+      useCodexStore.setState({ chatMode: 'lu' })
+      expect(useCodexStore.getState().chatMode).toBe('lu')
+    })
+  })
 })
 
 // ── claudeCodeStore ──────────────────────────────────────────

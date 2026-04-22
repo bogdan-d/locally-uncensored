@@ -2,6 +2,28 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [2.3.9] - 2026-04-23
+
+### Fixed
+- **Create view no longer takes down the whole app when no image or video model is installed** — reported on Discord by @figuringitallout on a fresh Windows install. Observable symptom: open Create with an empty ComfyUI `models/` tree, app unresponsive → hard shutdown → a "duplicate" LU process opens. Two layered root causes, both fixed:
+  - (1) `classifyModel()` in `src/api/comfyui.ts` used to happily dereference `name.toLowerCase()` without checking `name` first; a stale persisted model string (from a previous install that got deleted) was carried into every Create render path and bubbled through `useCreate.generate`, `ParamPanel`, and the dynamic-workflow builder. Now `classifyModel(name: string | null | undefined)` returns `'unknown'` when `!name`.
+  - (2) `src/hooks/useCreate.ts:fetchModels` only cleared the persisted image/video model names when ComfyUI returned a non-empty list. With 0 models, the stale strings stayed alive forever. Now fetchModels explicitly `state.setImageModel('', 'unknown')` + `state.setVideoModel('')` when the corresponding list is empty after the startup-race retries expire.
+  - (3) `src/components/create/CreateView.tsx` renders a dedicated empty-state card when `connected === true && modelsLoaded && currentModeModels.length === 0`. The card shows `PackageOpen` icon + "No {image|video} models installed" + a **Go to Model Manager** primary button (calls `useUIStore.getState().setView('models')`) + a **Refresh list** secondary action (calls `fetchModels()`). `OutputDisplay` / `PromptInput` / `ParamPanel` / I2V + I2I uploads / preflight banners all suppress during the empty state so no downstream code can hit the old crash path. The Mode switcher (Image / Video) stays so the user can switch sides and get a matching empty-state.
+
+- **LU always starts in the Chat sidebar tab, not Code** — on a fresh install or an NSIS update, the left-sidebar tab (Chat / Code / Remote) could land on Code because `codexStore`'s persist middleware saved `chatMode` between sessions. Newcomers clicking around Code without any conversations got an empty screen. `codexStore` now excludes `chatMode` from `partialize` so the default (`'lu'`) is used on every fresh boot. If a user wants to stay in Codex or Claude Code mid-session, they pick it from the sidebar each time; `workingDirectory` still persists so Codex remembers the last project path.
+- Tiny grammar fix in the Create empty-state copy: "Install **an image** model" / "Install **a video** model" (was "Install a image model" in both branches).
+
+### Added
+- **CONTRIBUTING.md — Dev Setup now documents all three local dev workflows** (`npm run tauri:dev` for hot-reload with Rust rebuilds, `npm run dev` for browser-only UI work, `npm run tauri:build` for a full signed installer). Reported in Discord by @k-wilkinson (sourceodin) as a missing-docs ask. Clarifies that Tauri invokes only resolve under `tauri:dev`.
+
+### Changed
+- Bumped `package.json` 2.3.7 → 2.3.9 (was lagging behind `src-tauri/tauri.conf.json`). Bumped `src-tauri/Cargo.toml` 2.3.7 → 2.3.9 (also lagging). Website + download URLs + schema.org metadata updated to 2.3.9.
+- Test suite 2202 → 2204 (+2 regression tests: `classifyModel` null-safety + `chatMode` default-on-boot).
+
+### Notes
+- Drop-in upgrade from v2.3.8. No breaking changes. No localStorage migration.
+- v2.3.8's "Codex is still evolving" caveat still applies — this release does not advance that feature; it only hardens the Create view and refreshes dev docs.
+
 ## [2.3.8] - 2026-04-22
 
 > **Note on Codex:** several Codex plumbing bugs are fixed below, but Codex is still an actively-evolving feature and is not yet treated as production-finished. This section is a developer-facing technical changelog. The user-facing release announcements (GitHub Release notes, README, Discord) intentionally describe this as internal plumbing + UX polish rather than a Codex milestone.

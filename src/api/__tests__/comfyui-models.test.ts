@@ -90,6 +90,18 @@ describe('classifyModel', () => {
   it('returns unknown for unrecognized models', () => {
     expect(classifyModel('totally_custom_model.safetensors')).toBe('unknown')
   })
+
+  // Regression: v2.3.9. classifyModel used to call `name.toLowerCase()` without
+  // guarding `name`, so a stale persisted model name that had been cleared would
+  // crash the Create view on render. Null-safety returns `unknown` for empty /
+  // null / undefined / non-string input.
+  it('is null-safe for missing names (v2.3.9 regression)', () => {
+    expect(classifyModel('')).toBe('unknown')
+    expect(classifyModel(null as unknown as string)).toBe('unknown')
+    expect(classifyModel(undefined as unknown as string)).toBe('unknown')
+    expect(classifyModel(0 as unknown as string)).toBe('unknown')
+    expect(classifyModel({} as unknown as string)).toBe('unknown')
+  })
 })
 
 // ─── isVideoModelType / isImageModelType ───

@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Image, Video, WifiOff, Loader2, AlertTriangle, RefreshCw, Settings, FolderOpen, HardDriveDownload, CheckCircle2, XCircle, Download, Pause, Play, X as XIcon, Upload, ImagePlus } from 'lucide-react'
+import { Image, Video, WifiOff, Loader2, AlertTriangle, RefreshCw, Settings, FolderOpen, HardDriveDownload, CheckCircle2, XCircle, Download, Pause, Play, X as XIcon, Upload, ImagePlus, PackageOpen } from 'lucide-react'
 import { backendCall } from '../../api/backend'
 import { freeMemory, uploadImage, classifyModel } from '../../api/comfyui'
 import { startModelDownload, getDownloadProgress, pauseDownload, cancelDownload, resumeDownload } from '../../api/discover'
 import { useCreate } from '../../hooks/useCreate'
 import { useCreateStore } from '../../stores/createStore'
+import { useUIStore } from '../../stores/uiStore'
 import { PromptInput } from './PromptInput'
 import { ParamPanel } from './ParamPanel'
 import { OutputDisplay } from './OutputDisplay'
@@ -250,6 +251,12 @@ export function CreateView() {
   const isStarting = status?.starting || status?.processAlive
   const notFound = status && !status.found && !status.running
 
+  // Empty-state when ComfyUI is connected + model scan finished but no models
+  // are installed for the current mode. Prevents the "click Create → crash"
+  // bug reported by users who opened Create without downloading a model first.
+  const currentModeModels = mode === 'image' ? imageModels : videoModels
+  const showNoModelsEmptyState = connected === true && modelsLoaded && currentModeModels.length === 0
+
   return (
     <div className="h-full flex flex-col">
       {/* Setup wizard */}
@@ -434,8 +441,42 @@ export function CreateView() {
             </div>
           </div>
 
+          {/* No models installed — show empty-state with CTA to Model Manager */}
+          {showNoModelsEmptyState && (
+            <div className="flex-1 min-h-0 flex items-center justify-center p-6">
+              <div className="max-w-sm w-full flex flex-col items-center text-center gap-4 rounded-xl border border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-white/[0.03] p-6">
+                <div className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center">
+                  <PackageOpen size={22} className="text-gray-400" />
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-sm font-medium text-gray-900 dark:text-white">
+                    No {mode} models installed
+                  </h3>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-relaxed">
+                    Install {mode === 'image' ? 'an image' : 'a video'} model from the Model Manager before you can generate.
+                    {mode === 'image' ? ' Try Z-Image Turbo or SDXL for a quick start.' : ' Try Wan 2.1 or AnimateDiff for a quick start.'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => useUIStore.getState().setView('models')}
+                  className="px-4 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-white text-xs font-medium transition-colors flex items-center gap-2"
+                >
+                  <Download size={12} />
+                  Go to Model Manager
+                </button>
+                <button
+                  onClick={fetchModels}
+                  className="text-[10px] text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1"
+                >
+                  <RefreshCw size={10} />
+                  Already downloaded? Refresh list
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Pre-flight status */}
-          {connected === true && modelsLoaded && preflightReady !== null && (
+          {!showNoModelsEmptyState && connected === true && modelsLoaded && preflightReady !== null && (
             <>
               {preflightReady && preflightWarnings.length === 0 && (
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10 text-emerald-400 text-[10px]">
@@ -469,8 +510,8 @@ export function CreateView() {
             </>
           )}
 
-          {/* Video info */}
-          {mode === 'video' && (videoBackend === 'none' || videoModels.length === 0) && connected === true && (
+          {/* Video info — suppressed when empty-state is showing (redundant) */}
+          {!showNoModelsEmptyState && mode === 'video' && (videoBackend === 'none' || videoModels.length === 0) && connected === true && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/5 border border-yellow-500/10 text-yellow-400 text-[11px]">
               <AlertTriangle size={12} />
               No video models found
@@ -478,7 +519,7 @@ export function CreateView() {
           )}
 
           {/* I2V Image Upload — shown when SVD or FramePack model is selected */}
-          {isI2V && connected === true && (
+          {!showNoModelsEmptyState && isI2V && connected === true && (
             <div
               onDragOver={(e) => { e.preventDefault(); setI2vDragOver(true) }}
               onDragLeave={() => setI2vDragOver(false)}
@@ -531,7 +572,7 @@ export function CreateView() {
           )}
 
           {/* I2I Image Upload + Denoise Slider — shown when Image sub-tab is "Image to Image" */}
-          {mode === 'image' && imageSubMode === 'img2img' && connected === true && (
+          {!showNoModelsEmptyState && mode === 'image' && imageSubMode === 'img2img' && connected === true && (
             <div className="space-y-2">
               <div
                 onDragOver={(e) => { e.preventDefault(); setI2iDragOver(true) }}
@@ -599,13 +640,15 @@ export function CreateView() {
           )}
 
           {/* Output area */}
-          <div className="flex-1 min-h-0 rounded-xl border border-gray-200 dark:border-white/5 bg-gray-100 dark:bg-white/[0.03] overflow-hidden flex flex-col">
-            <OutputDisplay />
-            <Gallery />
-          </div>
+          {!showNoModelsEmptyState && (
+            <div className="flex-1 min-h-0 rounded-xl border border-gray-200 dark:border-white/5 bg-gray-100 dark:bg-white/[0.03] overflow-hidden flex flex-col">
+              <OutputDisplay />
+              <Gallery />
+            </div>
+          )}
 
           {/* Error */}
-          {error && (
+          {!showNoModelsEmptyState && error && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/10 text-red-400 text-[11px]">
               <AlertTriangle size={12} className="shrink-0" />
               <span className="truncate">{error}</span>
@@ -613,25 +656,29 @@ export function CreateView() {
           )}
 
           {/* Prompt */}
-          <PromptInput onGenerate={generate} onCancel={cancel} disabled={!connected || !modelsLoaded} />
+          {!showNoModelsEmptyState && (
+            <PromptInput onGenerate={generate} onCancel={cancel} disabled={!connected || !modelsLoaded} />
+          )}
         </div>
 
-        {/* Parameter sidebar — desktop */}
-        <div className="w-56 border-l border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-white/[0.03] p-3 overflow-y-auto scrollbar-thin hidden lg:block">
-          <p className="text-[10px] font-medium text-gray-600 uppercase tracking-widest mb-3">Parameters</p>
-          <ParamPanel
-            imageModels={imageModels}
-            videoModels={videoModels}
-            samplerList={samplerList}
-            schedulerList={schedulerList}
-            modelsLoaded={modelsLoaded}
-            modelLoadError={modelLoadError}
-            onRetryModels={fetchModels}
-          />
-        </div>
+        {/* Parameter sidebar — desktop (hidden during empty-state) */}
+        {!showNoModelsEmptyState && (
+          <div className="w-56 border-l border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-white/[0.03] p-3 overflow-y-auto scrollbar-thin hidden lg:block">
+            <p className="text-[10px] font-medium text-gray-600 uppercase tracking-widest mb-3">Parameters</p>
+            <ParamPanel
+              imageModels={imageModels}
+              videoModels={videoModels}
+              samplerList={samplerList}
+              schedulerList={schedulerList}
+              modelsLoaded={modelsLoaded}
+              modelLoadError={modelLoadError}
+              onRetryModels={fetchModels}
+            />
+          </div>
+        )}
 
         {/* Parameter sidebar — mobile */}
-        {showParams && (
+        {!showNoModelsEmptyState && showParams && (
           <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setShowParams(false)}>
             <div className="absolute inset-0 bg-black/60" />
             <div className="absolute right-0 top-0 h-full w-64 bg-white dark:bg-[#212121] border-l border-gray-200 dark:border-white/5 p-3 overflow-y-auto"

@@ -94,10 +94,22 @@ export const useCodexStore = create<CodexState>()(
     }),
     {
       name: 'locally-uncensored-codex',
+      // chatMode is intentionally NOT persisted: newcomers should always land in
+      // the Chat tab on startup, not whatever tab they left off in. If a user
+      // wants to stay in Codex or Claude Code, they pick it from the sidebar
+      // each session. workingDirectory still persists so Codex remembers the
+      // last project path.
       partialize: (state) => ({
-        chatMode: state.chatMode,
         workingDirectory: state.workingDirectory,
       }),
+      // Existing installs have a persisted `chatMode: 'codex'` (or similar) in
+      // localStorage from v2.3.8 and earlier. partialize only affects writes,
+      // so rehydration would still restore the old value until the user next
+      // switches tabs. Force it back to the default on every rehydrate so the
+      // fix takes effect on existing users too, not just fresh installs.
+      onRehydrateStorage: () => (state) => {
+        if (state) state.chatMode = 'lu'
+      },
     }
   )
 )

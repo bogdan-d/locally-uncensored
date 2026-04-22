@@ -17,10 +17,25 @@ Thanks for your interest in contributing! This project thrives on community inpu
 git clone https://github.com/PurpleDoubleD/locally-uncensored.git
 cd locally-uncensored
 npm install
-npm run dev
 ```
 
-The app runs at `http://localhost:5173` with hot reload.
+You have three dev workflows, depending on what you're working on:
+
+```bash
+# Full Tauri dev — hot-reload React + live Rust rebuilds. Use for 95 % of work.
+npm run tauri:dev
+
+# Browser-only — no Rust, no Tauri shell. Fast feedback for pure UI tweaks.
+# Tauri invokes (backendCall, auto-update, filesystem access) do NOT work here.
+npm run dev           # serves at http://localhost:5173
+
+# Production build — emits a signed .exe / .msi / .AppImage / .deb / .rpm into
+# src-tauri/target/release/bundle/. Use when you want to test a real installer.
+npm run tauri:build
+```
+
+Most pull requests only need `npm run tauri:dev`. Thanks to @k-wilkinson for
+flagging that these commands weren't spelled out here.
 
 ### Project Structure
 

@@ -115,9 +115,20 @@ export function useCreate() {
           setModelLoadError('ComfyUI is loading models... This can take a moment after startup.')
           // Don't set modelsLoaded — auto-retry will keep running
         } else {
-          // Give up retrying — show actionable error
+          // Give up retrying — flip to loaded so the empty-state UI can render.
+          // Clear any stale persisted model names so callers don't try to
+          // generate against a model that no longer exists.
+          const state = useCreateStore.getState()
+          if (state.imageModel) {
+            console.warn(`[useCreate] Clearing stale persisted imageModel "${state.imageModel}" (0 models installed).`)
+            state.setImageModel('', 'unknown')
+          }
+          if (state.videoModel) {
+            console.warn(`[useCreate] Clearing stale persisted videoModel "${state.videoModel}" (0 models installed).`)
+            state.setVideoModel('')
+          }
           setModelsLoaded(true)
-          setModelLoadError('ComfyUI is running but found 0 models. Make sure models are in ComfyUI/models/ subfolders (checkpoints/, diffusion_models/). Try Refresh or restart ComfyUI in Settings.')
+          setModelLoadError(null)  // empty-state UI handles this — don't double-up
         }
         return
       }
@@ -127,15 +138,25 @@ export function useCreate() {
       setModelsLoaded(true)
 
       const state = useCreateStore.getState()
-      // Auto-select first models if none set
-      if (imgModels.length > 0 && !state.imageModel) {
-        state.setImageModel(imgModels[0].name, imgModels[0].type)
+      // Auto-select first models if none set (or stale name no longer exists)
+      if (imgModels.length > 0) {
+        if (!state.imageModel) {
+          state.setImageModel(imgModels[0].name, imgModels[0].type)
+        }
+      } else if (state.imageModel) {
+        // Image models absent but videos found — clear stale image model
+        console.warn(`[useCreate] No image models installed, clearing stale imageModel "${state.imageModel}".`)
+        state.setImageModel('', 'unknown')
       }
       if (vidModels.length > 0) {
         if (!state.videoModel || !vidModels.find(m => m.name === state.videoModel)) {
           if (state.videoModel) console.warn(`[useCreate] Persisted videoModel "${state.videoModel}" not found, resetting to ${vidModels[0].name}`)
           state.setVideoModel(vidModels[0].name)
         }
+      } else if (state.videoModel) {
+        // Video models absent but images found — clear stale video model
+        console.warn(`[useCreate] No video models installed, clearing stale videoModel "${state.videoModel}".`)
+        state.setVideoModel('')
       }
       // Always re-sync model type for currently selected model (fixes stale type after restart)
       if (state.imageModel && imgModels.length > 0) {

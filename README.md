@@ -35,7 +35,25 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.3.8 — Current Release
+## v2.3.9 — Current Release
+
+**UX safety net: Create view no longer crashes when no image or video models are installed. Small docs refresh.**
+
+Drop-in patch on top of v2.3.8.
+
+### What's fixed
+- **Create view: clean empty-state instead of a crash when no models are installed** — if you opened Create before downloading any ComfyUI model, the Create tab could go from unresponsive to a hard shutdown ("program disappears and a duplicate reopens"). Surfaced on Discord by @figuringitallout on a fresh Windows install. Root causes, both fixed: (1) `classifyModel()` was called with stale persisted model names that no longer existed on disk, (2) the main content area kept rendering `OutputDisplay` / `PromptInput` / `ParamPanel` against an empty model list. Create now detects this state and renders a calm empty-state card with a primary **Go to Model Manager** CTA and a **Refresh list** secondary action. Mode switcher stays available. Stale persisted image/video model names are proactively cleared by `useCreate.fetchModels` when ComfyUI reports 0 models in that category.
+- **App always starts in the Chat tab on boot, not Code** — `codexStore` used to persist `chatMode` between sessions, so users who happened to end their last session in Codex / Claude Code would re-open the app inside an empty coding panel instead of the Chat homepage. Newcomers in particular landed in Code without any visible conversations and thought the app was broken. Fixed by excluding `chatMode` from the persisted slice — default `'lu'` (Chat) is used on every fresh boot; pick Code or Remote from the sidebar each session when you want them.
+- **`classifyModel(name)` is null-safe** — defensive guard returns `unknown` if called with `null`, `undefined`, or non-string, so any path that reaches the classifier with a stale or missing model name degrades gracefully.
+- **CONTRIBUTING.md dev workflow documented** — `npm run tauri:dev` / `npm run tauri:build` / `npm run dev` are now spelled out with the trade-off between them. Reported in Discord by @k-wilkinson (sourceodin) — thanks.
+
+### Stability
+- 2202 / 2202 Vitest tests green
+- `cargo check` clean
+- `tsc --noEmit` clean
+- No breaking changes, no localStorage migration. Existing users see zero behavior change unless they previously hit the Create-with-no-models crash path.
+
+## v2.3.8 — Previous Release
 
 **Internal plumbing + UX polish. Drop-in patch on top of v2.3.7.**
 

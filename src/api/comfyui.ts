@@ -60,7 +60,10 @@ const KNOWN_MODELS: Record<string, ModelType> = {
   absolutereality: 'sd15',
 }
 
-export function classifyModel(name: string): ModelType {
+export function classifyModel(name: string | null | undefined): ModelType {
+  // Defensive: treat empty/missing names as unknown. Older installs can persist
+  // stale model strings that no longer exist; callers should not crash on those.
+  if (!name || typeof name !== 'string') return 'unknown'
   const lower = name.toLowerCase()
 
   // Video models — most specific first (order matters: specific before generic)
