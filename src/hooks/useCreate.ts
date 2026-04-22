@@ -52,6 +52,9 @@ export function useCreate() {
   const checkConnection = useCallback(async () => {
     const ok = await checkComfyConnection()
     setConnected(ok)
+    // Mirror into createStore so the header-level Lichtschalter in
+    // CreateTopControls stays in sync with the deeper useCreate state.
+    useCreateStore.getState().setComfyRunning(ok)
     return ok
   }, [])
 
@@ -104,6 +107,14 @@ export function useCreate() {
       setSamplerList(samplers)
       setSchedulerList(schedulers)
       setVideoBackend(vBackend)
+
+      // Mirror the fetched lists into createStore so the header-level
+      // CreateTopControls dropdown (which does NOT host its own useCreate)
+      // can render without crashing on undefined. Discord-reported by
+      // @diimmortalis (console: `activeList is undefined`).
+      const st = useCreateStore.getState()
+      st.setImageModelList(imgModels)
+      st.setVideoModelList(vidModels)
 
       // If ComfyUI is connected but returns 0 models, do NOT set modelsLoaded — keep retrying.
       // ComfyUI may still be scanning directories (race condition on startup).

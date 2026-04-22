@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { ModelType } from '../api/comfyui'
+import type { ModelType, ClassifiedModel } from '../api/comfyui'
 import { classifyModel } from '../api/comfyui'
 import type { PreflightError } from '../api/preflight'
 // ModelType includes: flux, flux2, zimage, sdxl, sd15, wan, hunyuan, unknown
@@ -80,6 +80,12 @@ interface CreateState {
   preflightWarnings: string[]
   gallery: GalleryItem[]
   promptHistory: string[]
+  /** Runtime-only (not persisted): populated by useCreate.fetchModels so the
+   * header-level CreateTopControls can render its model dropdown + Lichtschalter
+   * without hosting its own ComfyUI fetching. */
+  imageModelList: ClassifiedModel[]
+  videoModelList: ClassifiedModel[]
+  comfyRunning: boolean
 
   setPreflightStatus: (ready: boolean | null, errors: PreflightError[], warnings: string[]) => void
   setMode: (mode: 'image' | 'video') => void
@@ -110,6 +116,9 @@ interface CreateState {
   removeFromGallery: (id: string) => void
   clearGallery: () => void
   addToPromptHistory: (prompt: string) => void
+  setImageModelList: (list: ClassifiedModel[]) => void
+  setVideoModelList: (list: ClassifiedModel[]) => void
+  setComfyRunning: (running: boolean) => void
 }
 
 export const useCreateStore = create<CreateState>()(
@@ -147,6 +156,9 @@ export const useCreateStore = create<CreateState>()(
       preflightWarnings: [],
       gallery: [],
       promptHistory: [],
+      imageModelList: [],
+      videoModelList: [],
+      comfyRunning: false,
 
       setPreflightStatus: (ready, errors, warnings) => set({ preflightReady: ready, preflightErrors: errors, preflightWarnings: warnings }),
       setMode: (mode) => set((state) => {
@@ -227,6 +239,9 @@ export const useCreateStore = create<CreateState>()(
         const filtered = s.promptHistory.filter(p => p !== prompt)
         return { promptHistory: [prompt, ...filtered].slice(0, 50) }
       }),
+      setImageModelList: (list) => set({ imageModelList: list }),
+      setVideoModelList: (list) => set({ videoModelList: list }),
+      setComfyRunning: (running) => set({ comfyRunning: running }),
     }),
     {
       name: 'create-store',
