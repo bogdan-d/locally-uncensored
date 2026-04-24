@@ -6,7 +6,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) desktop application that co
 
 ## Key Facts
 - Name: Locally Uncensored
-- Current Version: v2.4.0 (April 23, 2026)
+- Current Version: v2.4.1 (April 24, 2026)
 - Type: Desktop AI Application
 - License: AGPL-3.0 (free and open source)
 - Platforms: Windows 10/11, Linux (deb, rpm, AppImage)

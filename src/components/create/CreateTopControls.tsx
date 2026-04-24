@@ -66,7 +66,15 @@ export function CreateTopControls() {
     }
   }, [])
 
-  const activeList = mode === 'image' ? imageModelList : videoModelList
+  // Bulletproof: reported on Discord by @phantomderp (2026-04-24) and
+  // @diimmortalis (2026-04-22) — opening the picker crashes the app when
+  // the list field is not an array. Can happen with stale persisted state
+  // from a very old LU install, Zustand rehydration racing the first render,
+  // a corrupted localStorage entry, or an old .exe that predates aa31bab.
+  // `Array.isArray` catches undefined / null / object / string — anything
+  // weird — and hands the render a safe empty array.
+  const rawList = mode === 'image' ? imageModelList : videoModelList
+  const activeList = Array.isArray(rawList) ? rawList : []
   const activeModel = mode === 'image' ? imageModel : videoModel
   const onPickModel = (name: string) => {
     if (mode === 'image') {

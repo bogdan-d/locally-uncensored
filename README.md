@@ -35,82 +35,25 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.3.9 — Current Release
+## v2.4.1 — Current Release
 
-**UX safety net: Create view no longer crashes when no image or video models are installed. Small docs refresh.**
+**Reliability hotfix: bulletproof the Create model picker against any pathological store state.**
 
-Drop-in patch on top of v2.3.8.
+Drop-in patch on top of v2.4.0. One focused fix — no new features, no dependency bumps.
 
 ### What's fixed
-- **Create view: clean empty-state instead of a crash when no models are installed** — if you opened Create before downloading any ComfyUI model, the Create tab could go from unresponsive to a hard shutdown ("program disappears and a duplicate reopens"). Surfaced on Discord by @figuringitallout on a fresh Windows install. Root causes, both fixed: (1) `classifyModel()` was called with stale persisted model names that no longer existed on disk, (2) the main content area kept rendering `OutputDisplay` / `PromptInput` / `ParamPanel` against an empty model list. Create now detects this state and renders a calm empty-state card with a primary **Go to Model Manager** CTA and a **Refresh list** secondary action. Mode switcher stays available. Stale persisted image/video model names are proactively cleared by `useCreate.fetchModels` when ComfyUI reports 0 models in that category.
-- **App always starts in the Chat tab on boot, not Code** — `codexStore` used to persist `chatMode` between sessions, so users who happened to end their last session in Codex / Claude Code would re-open the app inside an empty coding panel instead of the Chat homepage. Newcomers in particular landed in Code without any visible conversations and thought the app was broken. Fixed by excluding `chatMode` from the persisted slice — default `'lu'` (Chat) is used on every fresh boot; pick Code or Remote from the sidebar each session when you want them.
-- **Header-level Create toggle + dropdown no longer crash on click** — the Lichtschalter and model picker in the app header (when you're on Create) used to crash with `TypeError: activeList is undefined` / `setComfyRunning is not a function`. Reported on Discord by @diimmortalis with a clean console-log dump. Four store fields (`imageModelList`, `videoModelList`, `comfyRunning`, `setComfyRunning`) that the component expected were never actually in the store — now they are, and they're populated by the same `useCreate.fetchModels` / `checkConnection` path the main Create view uses.
-- **Backend Selector modal no longer reopens every 5-10 seconds** — users with multiple local backends (Ollama + LM Studio, Ollama + vLLM, etc) reported on Discord that the "N local backends detected" modal kept re-appearing no matter how often they dismissed it. Fix: a persistent `hideBackendSelector` flag in `providerStore`, a pre-checked "Don't show this again" tickbox in the modal, and a permanent pointer to **Settings → Providers** (clickable — it navigates you there) so users know where to manage providers going forward.
-- **`classifyModel(name)` is null-safe** — defensive guard returns `unknown` if called with `null`, `undefined`, or non-string, so any path that reaches the classifier with a stale or missing model name degrades gracefully.
-- **CONTRIBUTING.md dev workflow documented** — `npm run tauri:dev` / `npm run tauri:build` / `npm run dev` are now spelled out with the trade-off between them. Reported in Discord by @k-wilkinson (sourceodin) — thanks.
+- **CreateTopControls picker dropdown hardened against any non-array list value** — reported on Discord in `#bug-reports` by @phantomderp: the web UI crashes when clicking the model picker at the top of the Create tab. We'd already added the expected store fields + setters in v2.3.9/v2.4.0 (`imageModelList`, `videoModelList`, `comfyRunning`, `setComfyRunning`), but if the field ever arrives as anything other than an array — stale persisted state from a very old install, Zustand rehydration racing the first render, a corrupted localStorage entry, or an old .exe that predates aa31bab — the `.length` / `.map()` calls would still kill the app on picker-open. Read site now passes the list through `Array.isArray(rawList) ? rawList : []`, so undefined / null / object / string / number all render as the empty-state card instead of crashing.
 
 ### Stability
-- 2202 / 2202 Vitest tests green
-- `cargo check` clean
+- 2226 / 2226 Vitest tests green (+7 new pathological-state regression tests in `createStore.test.ts`)
 - `tsc --noEmit` clean
-- No breaking changes, no localStorage migration. Existing users see zero behavior change unless they previously hit the Create-with-no-models crash path.
+- Bundled JS contains the fix (grep-confirmed in the minified bundle)
+- Dev-preview E2E: injected six pathological types into the store (`undefined`, `null`, `{}`, `"corrupted"`, `42`, populated array), clicked the picker each time — zero errors
+- Installed-binary E2E, happy path: Ollama + ComfyUI + 3 image + 3 video models — picker opens with all six, no crash either mode
+- Installed-binary E2E, true fresh-user: Ollama folder renamed, ComfyUI folder renamed, LU AppData wiped — picker shows "Start ComfyUI to load models" empty-state, no crash either mode; all six tabs (Chat / Create / Compare / Benchmark / Models / Settings) load cleanly
+- No breaking changes, no localStorage migration — upgrade in place
 
-## v2.3.8 — Previous Release
-
-**Internal plumbing + UX polish. Drop-in patch on top of v2.3.7.**
-
-No new headline features this release — internal stability work so future feature releases have a cleaner foundation.
-
-### What's in this build
-- **Built-in tool executors now thread the active chat-id through to the Rust backend** — `agent-context.ts` was designed for per-chat workspace isolation but the frontend executors (`fs_read`/`fs_write`/`fs_list`/`fs_search`/`shell_execute`/`execute_code`) never actually passed the id through, so relative paths silently landed in a shared fallback folder. Fixed end-to-end.
-- **More robust tool-call JSON extraction** — the old greedy `\{[^}]*\}` regex failed on any nested brace or string value containing `{` (e.g. Python f-strings `f'Hello, {name}!'`). Replaced with a locate-header-then-balance scanner that respects string escapes. Fixes models that emit tool calls as JSON in `content` when the emitted code uses f-strings or dict literals.
-- **Cleaner chat bubbles across models that emit tool calls in content** — new `stripRanges()` helper uses the balanced-brace positions the extractor already computes to remove the exact tool-call JSON substrings instead of a greedy regex that missed edge cases. No more stacked raw-JSON bubbles.
-- **Concrete arg-validator error hints** — retry message now lists the exact required fields with types + the keys the model actually sent, so small models self-correct on the next iteration instead of repeating the same malformed call.
-- **Family grouping in the model dropdown** (QWEN / GEMMA / LLAMA / HERMES / PHI / DOLPHIN / MISTRAL / DEEPSEEK / …) with reactive refresh when any provider's enabled state changes.
-- **Development-only diagnostic code removed from the release binary** — devtools flag off for production, no file-writing loggers.
-
-### Stability
-- 2202 / 2202 Vitest tests green
-- `cargo check` clean
-- `tsc --noEmit` clean
-- Drop-in upgrade from v2.3.7, no breaking changes, no localStorage migration
-
-### Known work in progress
-Codex (the coding-agent tab) is under active development. Several improvements landed in this release but the feature is still evolving — do not yet treat Codex as production-finished. Chat, Create, Agent Mode, and Remote remain stable.
-
-### What's still in v2.3.8 from v2.3.7
-v2.3.7's remote Ollama + `OLLAMA_HOST` env var support, v2.3.6's configurable ComfyUI host, LM Studio / OpenAI-compat CORS fix, and ComfyUI port persistence all remain in place.
-
-### Remote Access + Mobile Web App
-- **Access your AI from your phone** — Dispatch via LAN or Cloudflare Tunnel (Internet)
-- **Full mobile web app** — Hamburger drawer, chat list, Codex mode, file attach, thinking toggle, Plugins (Caveman + Personas)
-- **Mobile Agent Mode** — 13 tools with Thought/Action/Observation cards
-- **Security hardened** — 6-digit passcodes, rate limiting, JWT auth, permissions enforced, CSP headers
-
-### Codex Coding Agent — Major Upgrade
-- **Live streaming** between tool calls — see tokens as they generate
-- **Continue capability** — tool-call history persisted, model remembers previous actions
-- **AUTONOMY CONTRACT** — model completes ALL steps without premature stopping
-- **Fallback answer** — never shows empty bubble after tool calls
-
-### Agent Mode — 13-Phase Rewrite
-- **Parallel tool execution** with side-effect grouping
-- **Budget system** — max 50 tool calls / 25 iterations per task
-- **Sub-agent delegation** — `delegate_task` spawns isolated sub-agents
-- **MCP integration** — external tools via ToolRegistry
-- **Filesystem awareness** — agent uses file_list/system_info before acting
-
-### New Models + Image Gen
-- **Qwen 3.6** (day-0) — 35B MoE, vision + agentic coding + thinking. One-click download
-- **ERNIE-Image** (Baidu) — Turbo (8 steps) + Base (50 steps). Plug & play, no custom nodes
-- **Image-to-Image** — Upload source, adjust denoise, transform with any model
-- **75+ downloadable models** — all URLs verified
-
-### UI/UX
-- **AE-style text header** — clean typography for better discoverability
-- **Plugins dropdown** — Caveman Mode + Personas in one menu
-- **Thinking mode** — tri-state, auto-retry, universal tag stripper
-- **2166 tests** — comprehensive smoke tests covering the entire app
+For older releases, see [CHANGELOG.md](CHANGELOG.md).
 
 ---
 

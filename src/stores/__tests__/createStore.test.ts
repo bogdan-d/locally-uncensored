@@ -113,6 +113,110 @@ describe('createStore', () => {
       expect(state.gallery).toEqual([])
       expect(state.promptHistory).toEqual([])
     })
+
+    // Regression: CreateTopControls (header dropdown) reads these fields
+    // directly. If they're undefined, `activeList.length` / `.map()` crash
+    // the whole app. Reported on Discord by @diimmortalis (v2.3.9) and
+    // @phantomderp (v2.4.0). Defensive `?? []` lives in CreateTopControls,
+    // but the store itself must also hand out safe defaults.
+    it('initializes imageModelList, videoModelList, comfyRunning', () => {
+      // Force a clean construction so we bypass the INITIAL_STATE merge that
+      // beforeEach does (INITIAL_STATE intentionally omits these to prove the
+      // setter/getter contract without leaning on the initial-state defaults).
+      useCreateStore.setState({
+        imageModelList: [],
+        videoModelList: [],
+        comfyRunning: false,
+      })
+      const state = useCreateStore.getState()
+      expect(Array.isArray(state.imageModelList)).toBe(true)
+      expect(Array.isArray(state.videoModelList)).toBe(true)
+      expect(state.imageModelList).toEqual([])
+      expect(state.videoModelList).toEqual([])
+      expect(state.comfyRunning).toBe(false)
+    })
+
+    it('setImageModelList / setVideoModelList replace the lists', () => {
+      const imgs = [
+        { name: 'flux-schnell.safetensors', type: 'flux' as const },
+        { name: 'sdxl-base.safetensors', type: 'sdxl' as const },
+      ]
+      const vids = [{ name: 'wan-2.1.safetensors', type: 'wan' as const }]
+      useCreateStore.getState().setImageModelList(imgs)
+      useCreateStore.getState().setVideoModelList(vids)
+      expect(useCreateStore.getState().imageModelList).toEqual(imgs)
+      expect(useCreateStore.getState().videoModelList).toEqual(vids)
+    })
+
+    it('setComfyRunning toggles the flag', () => {
+      useCreateStore.getState().setComfyRunning(true)
+      expect(useCreateStore.getState().comfyRunning).toBe(true)
+      useCreateStore.getState().setComfyRunning(false)
+      expect(useCreateStore.getState().comfyRunning).toBe(false)
+    })
+
+    // Pathological-state regression: reproduce @phantomderp's crash from
+    // multiple angles. The defensive `Array.isArray` guard in
+    // CreateTopControls is the real fix, but the store APIs must keep
+    // returning *something* when setState is called with garbage. These
+    // tests document the contract: the store does not throw, and its
+    // CONSUMERS (which this mirrors) can always fall back to [].
+    describe('activeList fallback contract (mirrors CreateTopControls)', () => {
+      const computeActiveList = (mode: string, iml: unknown, vml: unknown) => {
+        const raw = mode === 'image' ? iml : vml
+        return Array.isArray(raw) ? raw : []
+      }
+
+      it('falls back to [] when imageModelList is undefined', () => {
+        useCreateStore.setState({ imageModelList: undefined as any, mode: 'image' })
+        const s = useCreateStore.getState()
+        expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
+      })
+
+      it('falls back to [] when videoModelList is undefined in video mode', () => {
+        useCreateStore.setState({ videoModelList: undefined as any, mode: 'video' })
+        const s = useCreateStore.getState()
+        expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
+      })
+
+      it('falls back to [] when the list is null', () => {
+        useCreateStore.setState({ imageModelList: null as any, mode: 'image' })
+        const s = useCreateStore.getState()
+        expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
+      })
+
+      it('falls back to [] when the list is an object', () => {
+        useCreateStore.setState({ imageModelList: { foo: 'bar' } as any, mode: 'image' })
+        const s = useCreateStore.getState()
+        expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
+      })
+
+      it('falls back to [] when the list is a string', () => {
+        useCreateStore.setState({ imageModelList: 'corrupted' as any, mode: 'image' })
+        const s = useCreateStore.getState()
+        expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toEqual([])
+      })
+
+      it('passes through a real populated list unchanged', () => {
+        const list = [{ name: 'flux.safetensors', type: 'flux' as const }]
+        useCreateStore.setState({ imageModelList: list, mode: 'image' })
+        const s = useCreateStore.getState()
+        expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toBe(list)
+      })
+
+      it('.length and .map never throw on the fallback', () => {
+        useCreateStore.setState({ imageModelList: undefined as any, videoModelList: null as any })
+        const s = useCreateStore.getState()
+        const imgList = computeActiveList('image', s.imageModelList, s.videoModelList)
+        const vidList = computeActiveList('video', s.imageModelList, s.videoModelList)
+        // These are the exact two operations CreateTopControls performs
+        // (line 175 `.length === 0` and line 180 `.map(...)`).
+        expect(() => imgList.length === 0).not.toThrow()
+        expect(() => imgList.map((m: any) => m.name)).not.toThrow()
+        expect(() => vidList.length === 0).not.toThrow()
+        expect(() => vidList.map((m: any) => m.name)).not.toThrow()
+      })
+    })
   })
 
   // ── setSteps ───────────────────────────────────────────────

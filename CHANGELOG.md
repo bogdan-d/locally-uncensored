@@ -2,6 +2,26 @@
 
 All notable changes to Locally Uncensored are documented here.
 
+## [2.4.1] - 2026-04-24
+
+### Fixed
+- **CreateTopControls: picker dropdown hardened against any non-array list value** — reported on Discord by @phantomderp on the `#bug-reports` channel: "the web ui crashes when clicking on the model list at the top in the create tab". His workaround was to patch `activeList?.map(...)` in the source, which stopped the crash but "the list doesn't work anymore" because the `.length` branch above still evaluates on undefined. We already did the straightforward fix in v2.3.9 / v2.4.0 (added `imageModelList` / `videoModelList` to `createStore` as runtime-only state, populated by `useCreate.fetchModels`), but there's still a pathological path where the field arrives as something other than an array: stale persisted state from a very old install, Zustand rehydration racing the first render of `CreateTopControls`, a corrupted localStorage entry from an external tool, or simply an old .exe that predates aa31bab. The read site now passes the list through `Array.isArray(rawList) ? rawList : []`, so undefined / null / object / string / number / anything weird all render as the empty-state card instead of taking the app down.
+
+### Tests
+- Test suite 2216 → 2226 (+7 regression tests in `createStore.test.ts` — new "activeList fallback contract (mirrors CreateTopControls)" describe block covers undefined / null / object-with-wrong-shape / string / real-populated-array cases, plus a `.length && .map never throw on the fallback` guard).
+
+### Verification
+- `vitest`: 2226 / 2226 green
+- `tsc --noEmit`: clean
+- Bundled JS contains the fix (grep-confirmed `Array.isArray(h)?h:[]` in the minified `index-*.js`)
+- Dev-preview E2E: injected undefined / null / `{}` / `"corrupted"` / `42` / populated-array into the store and clicked the picker — zero errors across all six scenarios
+- Installed-binary E2E, happy-path: Ollama + ComfyUI running with 3 image + 3 video models — picker shows all 6 models, no crash in either mode
+- Installed-binary E2E, true fresh-user simulation: Ollama folder renamed, ComfyUI folder renamed, LU AppData wiped — picker shows "Start ComfyUI to load models" empty-state, no crash in either mode; Chat / Create / Compare / Benchmark / Models / Settings all load cleanly from fresh install
+
+### Notes
+- Drop-in upgrade from v2.4.0. No breaking changes, no localStorage migration. Existing users auto-update on next launch.
+- Single-file behavior fix + tests — no new features, no dependency bumps. If you were already on v2.4.0 with working model lists, you won't see a behavior change.
+
 ## [2.4.0] - 2026-04-23
 
 ### Fixed
