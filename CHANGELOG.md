@@ -60,7 +60,7 @@ All notable changes to Locally Uncensored are documented here.
 - Tiny grammar fix in the Create empty-state copy: "Install **an image** model" / "Install **a video** model" (was "Install a image model" in both branches).
 
 ### Added
-- **CONTRIBUTING.md — Dev Setup now documents all three local dev workflows** (`npm run tauri:dev` for hot-reload with Rust rebuilds, `npm run dev` for browser-only UI work, `npm run tauri:build` for a full signed installer). Reported in Discord by @k-wilkinson (sourceodin) as a missing-docs ask. Clarifies that Tauri invokes only resolve under `tauri:dev`.
+- **CONTRIBUTING.md — Dev Setup now documents all three local dev workflows** (`npm run tauri:dev` for hot-reload with Rust rebuilds, `npm run dev` for browser-only UI work, `npm run tauri:build` for a full NSIS installer). Reported in Discord by @k-wilkinson (sourceodin) as a missing-docs ask. Clarifies that Tauri invokes only resolve under `tauri:dev`.
 
 ### Changed
 - Bumped `package.json` 2.3.7 → 2.3.9 (was lagging behind `src-tauri/tauri.conf.json`). Bumped `src-tauri/Cargo.toml` 2.3.7 → 2.3.9 (also lagging). Website + download URLs + schema.org metadata updated to 2.3.9.
