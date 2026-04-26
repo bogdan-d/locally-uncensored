@@ -17,6 +17,7 @@ import { useModels } from '../../hooks/useModels'
 import { useDownloadStore } from '../../stores/downloadStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useWorkflowStore } from '../../stores/workflowStore'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
 import { ProgressBar } from '../ui/ProgressBar'
@@ -134,6 +135,12 @@ export function DiscoverModels({ category }: Props) {
   const [civitaiResults, setCivitaiResults] = useState<CivitAIModelResult[]>([])
   const [civitaiSearching, setCivitaiSearching] = useState(false)
   const [civitaiQuery, setCivitaiQuery] = useState('')
+  // Track whether the *latest* CivitAI search has been issued at least once,
+  // so an empty-state hint can render between "before-first-search" and
+  // "search returned 0 hits". Without this we fall through to the silent gap
+  // diimmortalis described — empty list, no console output, looks like the
+  // button did nothing.
+  const [civitaiSearched, setCivitaiSearched] = useState(false)
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
@@ -293,7 +300,12 @@ export function DiscoverModels({ category }: Props) {
   const handleCivitaiSearch = async () => {
     if (!civitaiQuery.trim()) return
     setCivitaiSearching(true)
-    const results = await searchCivitaiModels(civitaiQuery, 'Checkpoint')
+    setCivitaiSearched(true)
+    // Reuse the CivitAI API key the user already configured for the Workflow
+    // finder. The model search and the workflow finder share the same backend
+    // credential, so plumbing a separate input here would just confuse users.
+    const apiKey = useWorkflowStore.getState().civitaiApiKey || undefined
+    const results = await searchCivitaiModels(civitaiQuery, 'Checkpoint', apiKey)
     setCivitaiResults(results)
     setCivitaiSearching(false)
   }
@@ -679,6 +691,12 @@ export function DiscoverModels({ category }: Props) {
           )}
 
           {civitaiSearching && <div className="text-center py-4 text-gray-500 text-sm">Searching CivitAI...</div>}
+          {!civitaiSearching && civitaiSearched && civitaiResults.length === 0 && (
+            <div className="text-center py-4 text-[11px] text-gray-500 leading-relaxed">
+              No matches for "{civitaiQuery}". Try a broader query, or add your CivitAI API key
+              in the Workflow finder for the full catalog.
+            </div>
+          )}
         </GlassCard>
       )}
 

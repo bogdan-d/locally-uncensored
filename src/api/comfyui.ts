@@ -248,14 +248,32 @@ export async function checkComfyConnection(): Promise<boolean> {
   }
 }
 
-/** Force ComfyUI to re-scan model directories. Works on ComfyUI 2024+ with /api/refresh. */
-export async function refreshComfyModels(): Promise<boolean> {
-  try {
-    const res = await localFetch(comfyuiUrl('/api/refresh'), { method: 'POST' })
-    return res.ok
-  } catch {
-    return false // Older ComfyUI versions without /api/refresh — non-fatal
+/**
+ * Force ComfyUI to re-scan model directories. Works on ComfyUI 2024+ with
+ * /api/refresh.
+ *
+ * Retries on transient failures because in production we hit two real-world
+ * race conditions:
+ *  1. ComfyUI is mid-startup and `/api/refresh` 404s briefly (Discord report
+ *     from Draekzy: logs show repeated localhost:8188 connect errors after a
+ *     fresh download lands).
+ *  2. ComfyUI is busy executing a workflow and accepts the refresh but doesn't
+ *     finish the directory scan before we query `/object_info`.
+ *
+ * For both cases a single attempt silently returned `false` and the caller
+ * never knew the cache stayed stale.
+ */
+export async function refreshComfyModels(maxAttempts = 3): Promise<boolean> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const res = await localFetch(comfyuiUrl('/api/refresh'), { method: 'POST' })
+      if (res.ok) return true
+    } catch { /* network blip — retry */ }
+    if (attempt < maxAttempts - 1) {
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+    }
   }
+  return false // Older ComfyUI versions without /api/refresh — non-fatal
 }
 
 // ─── System VRAM Detection ───

@@ -1482,7 +1482,8 @@ export interface CivitAIModelResult {
 
 export async function searchCivitaiModels(
   query: string,
-  type: 'Checkpoint' | 'LORA' | 'VAE' | 'TextualInversion' = 'Checkpoint'
+  type: 'Checkpoint' | 'LORA' | 'VAE' | 'TextualInversion' = 'Checkpoint',
+  apiKey?: string
 ): Promise<CivitAIModelResult[]> {
   try {
     const params = new URLSearchParams({
@@ -1490,8 +1491,16 @@ export async function searchCivitaiModels(
       types: type,
       limit: '20',
       sort: 'Most Downloaded',
+      // LU positions itself as "uncensored" — surface adult content too. Without
+      // an explicit nsfw flag CivitAI silently filters most of the SFW catalog
+      // for an unauthenticated client, which is what made earlier searches come
+      // back near-empty for users who expected to find e.g. uncensored SDXL forks.
+      nsfw: 'true',
     })
-    const text = await fetchExternal(`https://civitai.com/api/v1/models?${params}`)
+    // Adding the user's API key as a bearer token unlocks the full catalog and
+    // lifts the per-IP rate limit. Falls back to anon access if no key is set.
+    const url = `https://civitai.com/api/v1/models?${params}${apiKey ? `&token=${encodeURIComponent(apiKey)}` : ''}`
+    const text = await fetchExternal(url)
     const data = JSON.parse(text)
     const items: any[] = data.items ?? []
 

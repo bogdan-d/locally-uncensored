@@ -191,14 +191,30 @@ export function useCreate() {
     }
   }, [runPreflight])
 
-  // Auto-refresh models when a ComfyUI model download completes
+  // Auto-refresh models when a ComfyUI model download completes.
+  // Schedules three fetches because real-world ComfyUI scans take longer than
+  // the /api/refresh round-trip implies: the API responds OK but the in-memory
+  // model list catches up only after the directory walk finishes. A single
+  // fetch immediately after the event was leaving Draekzy + cprovencher
+  // staring at a "model installed but not in dropdown" state for minutes.
   useEffect(() => {
+    let cancelled = false
+    const timeouts: ReturnType<typeof setTimeout>[] = []
     const handler = () => {
       console.log('[useCreate] Model download completed, refreshing model list...')
       fetchModels()
+      // Belt-and-braces: re-fetch at +2s and +6s in case ComfyUI's scan is slow.
+      // fetchModels() is idempotent and cheap (object_info hits cache server-side),
+      // so a couple of extra calls cost almost nothing.
+      timeouts.push(setTimeout(() => { if (!cancelled) fetchModels() }, 2000))
+      timeouts.push(setTimeout(() => { if (!cancelled) fetchModels() }, 6000))
     }
     window.addEventListener('comfyui-model-downloaded', handler)
-    return () => window.removeEventListener('comfyui-model-downloaded', handler)
+    return () => {
+      cancelled = true
+      timeouts.forEach(clearTimeout)
+      window.removeEventListener('comfyui-model-downloaded', handler)
+    }
   }, [fetchModels])
 
   // Auto-retry model loading when ComfyUI reconnects OR when 0 models found (startup race)

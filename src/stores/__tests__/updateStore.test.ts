@@ -84,6 +84,20 @@ describe('updateStore', () => {
     it('handles minor rollover: 1.1.0 < 2.0.0', () => {
       expect(isNewerVersion('1.1.0', '2.0.0')).toBe(false)
     })
+
+    // ── diimmortalis regression case (Discord, 2026-04-25) ────
+    // The reported display was `Current Version: 2.4.1 | Latest Version: 2.3.8`
+    // because a stale persisted snapshot survived an out-of-band binary
+    // upgrade. The helper itself was always correct — these assertions pin
+    // that behavior so future reshuffles can't reintroduce the inversion.
+    it('persisted 2.3.8 is NOT newer than current 2.4.1 (diimmortalis case)', () => {
+      expect(isNewerVersion('2.3.8', '2.4.1')).toBe(false)
+      expect(isNewerVersion('v2.3.8', 'v2.4.1')).toBe(false)
+    })
+
+    it('2.4.1 is newer than 2.3.8 (sanity invert of diimmortalis case)', () => {
+      expect(isNewerVersion('2.4.1', '2.3.8')).toBe(true)
+    })
   })
 
   // ── checkForUpdate (dev mode — GitHub API) ──────────────────

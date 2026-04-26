@@ -40,6 +40,12 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
   const [importJson, setImportJson] = useState('')
   const [importName, setImportName] = useState('')
   const [importLoading, setImportLoading] = useState(false)
+  // Visible success confirmation after a manual Import action. Without this the
+  // Import button silently clears its inputs on success and the user sees no
+  // feedback at all (diimmortalis' report: "doesn't seem to persist manually
+  // entered json … no feedback or console output when clicking the Import
+  // button"). The toast auto-clears after a few seconds.
+  const [importSuccess, setImportSuccess] = useState<string | null>(null)
   const initialSearchDone = useRef(false)
   const templatesCached = useRef<WorkflowSearchResult[] | null>(null)
 
@@ -172,6 +178,7 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
     if (!importUrl.trim()) return
     setImportLoading(true)
     setError(null)
+    setImportSuccess(null)
     try {
       const workflow = await fetchWorkflowFromUrl(importUrl.trim())
       const name = importName.trim() || new URL(importUrl).pathname.split('/').pop()?.replace('.json', '') || 'Imported Workflow'
@@ -185,6 +192,8 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
       assignToModelName(modelName, template.id)
       setImportUrl('')
       setImportName('')
+      setImportSuccess(`Imported "${name}" and assigned to ${modelName}.`)
+      setTimeout(() => setImportSuccess(null), 4000)
     } catch (err) {
       setError(`Import failed: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
@@ -195,6 +204,7 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
   const handleImportJson = () => {
     if (!importJson.trim()) return
     setError(null)
+    setImportSuccess(null)
     try {
       const json = JSON.parse(importJson.trim())
       if (!validateWorkflowJson(json)) {
@@ -212,6 +222,8 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
       assignToModelName(modelName, template.id)
       setImportJson('')
       setImportName('')
+      setImportSuccess(`Imported "${name}" and assigned to ${modelName}.`)
+      setTimeout(() => setImportSuccess(null), 4000)
     } catch (err) {
       if (err instanceof SyntaxError) {
         setError('Invalid JSON. Please paste valid JSON.')
@@ -332,6 +344,14 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
           <div className="flex items-start gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-xs">
             <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
             <span>{error}</span>
+          </div>
+        )}
+
+        {/* Success — visible confirmation that the manual Import landed */}
+        {importSuccess && (
+          <div className="flex items-start gap-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-300 text-xs">
+            <span aria-hidden className="mt-0.5">✓</span>
+            <span>{importSuccess}</span>
           </div>
         )}
 

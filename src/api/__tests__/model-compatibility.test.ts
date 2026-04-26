@@ -62,12 +62,20 @@ describe('isAgentCompatible', () => {
       expect(isAgentCompatible('nemotron:8b')).toBe(true)
     })
 
-    it('abliterated models are NOT compatible (need hermes fallback)', () => {
-      expect(isAgentCompatible('mannix/llama3.1-8b-abliterated:q5_K_M')).toBe(false)
-      expect(isAgentCompatible('huihui_ai/qwen2.5-abliterated:7b')).toBe(false)
+    it('abliterated variants of agent-capable bases ARE compatible', () => {
+      // Discord-reported by diimmortalis (2026-04-25): the previous heuristic
+      // only allow-listed a tiny set of abliterated bases (qwen3-coder, hermes)
+      // and silently disabled the Agent toggle for everyone else, including
+      // popular uncensored Qwen 3.5 / Llama 3.1 / Qwen 2.5 builds. We now
+      // strip the abliterated/uncensored suffix and check the same
+      // AGENT_COMPATIBLE list as the vanilla path.
+      expect(isAgentCompatible('mannix/llama3.1-8b-abliterated:q5_K_M')).toBe(true)
+      expect(isAgentCompatible('huihui_ai/qwen2.5-abliterated:7b')).toBe(true)
+      expect(isAgentCompatible('LEONW24/Qwen3.5-9B-Uncensored:Q4_K_M')).toBe(true)
     })
 
-    it('uncensored models are NOT compatible', () => {
+    it('uncensored variants of unknown bases are still NOT compatible', () => {
+      // dolphin3 is not in AGENT_COMPATIBLE — strip suffix and check, still no.
       expect(isAgentCompatible('dolphin3-uncensored:8b')).toBe(false)
     })
 
@@ -114,8 +122,10 @@ describe('getToolCallingStrategy', () => {
     expect(getToolCallingStrategy('gemma4:e4b')).toBe('native')
   })
 
-  it('Ollama abliterated models use hermes_xml', () => {
-    expect(getToolCallingStrategy('mannix/llama3.1-8b-abliterated:q5_K_M')).toBe('hermes_xml')
+  it('Ollama abliterated variants of agent-capable bases use native', () => {
+    // Same intent as the matching isAgentCompatible test — uncensored llama3.1
+    // keeps native tool-calling, the strategy follows.
+    expect(getToolCallingStrategy('mannix/llama3.1-8b-abliterated:q5_K_M')).toBe('native')
   })
 
   it('Ollama unknown models use hermes_xml', () => {

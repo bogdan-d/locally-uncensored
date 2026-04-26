@@ -17,7 +17,7 @@ import { PermissionSettings } from './PermissionSettings'
 import { MCPServerSettings } from './MCPServerSettings'
 import { WorkflowList } from '../agents/WorkflowList'
 import { WorkflowBuilder } from '../agents/WorkflowBuilder'
-import { useUpdateStore } from '../../stores/updateStore'
+import { useUpdateStore, isNewerVersion } from '../../stores/updateStore'
 import { useClaudeCodeStore, CLAUDE_CODE_RECOMMENDED_MODELS } from '../../stores/claudeCodeStore'
 import { backendCall } from '../../api/backend'
 import { ArrowUpCircle } from 'lucide-react'
@@ -705,7 +705,14 @@ export function SettingsPage() {
 
 function UpdateSection() {
   const { currentVersion, latestVersion, updateAvailable, releaseNotes, dismissed, isChecking, checkForUpdate, clearDismiss, openReleasePage } = useUpdateStore()
-  const showUpdate = updateAvailable && latestVersion
+  // Defensive: only treat the persisted `latestVersion` as actually newer if a
+  // semver compare confirms it. Otherwise the binary was updated out-of-band
+  // and the persisted value is stale (e.g. localStorage still says 2.3.8 while
+  // the binary is now 2.4.1). In that case both `updateAvailable` and the
+  // "Latest Version" row should hide so we don't display a confusing inversion.
+  const latestIsActuallyNewer = !!(latestVersion && isNewerVersion(latestVersion, currentVersion))
+  const displayLatestVersion = latestIsActuallyNewer ? latestVersion : null
+  const showUpdate = updateAvailable && latestIsActuallyNewer
 
   return (
     <Section title="Updates">
@@ -716,12 +723,12 @@ function UpdateSection() {
           <span className="text-[0.65rem] text-gray-300 font-mono">v{currentVersion}</span>
         </div>
 
-        {/* Latest version */}
-        {latestVersion && (
+        {/* Latest version — only show if it's actually newer than current */}
+        {displayLatestVersion && (
           <div className="flex items-center justify-between">
             <span className="text-[0.65rem] text-gray-500">Latest Version</span>
-            <span className={`text-[0.65rem] font-mono ${updateAvailable ? 'text-emerald-400' : 'text-gray-300'}`}>
-              v{latestVersion}
+            <span className={`text-[0.65rem] font-mono ${showUpdate ? 'text-emerald-400' : 'text-gray-300'}`}>
+              v{displayLatestVersion}
             </span>
           </div>
         )}
@@ -743,7 +750,7 @@ function UpdateSection() {
               >
                 Download Update
               </button>
-              {dismissed === latestVersion && (
+              {dismissed === displayLatestVersion && (
                 <button
                   onClick={clearDismiss}
                   className="px-3 py-1.5 rounded-md text-[0.6rem] text-gray-500 hover:text-gray-300 hover:bg-white/[0.04] transition-colors"

@@ -26,6 +26,17 @@ const AGENT_COMPATIBLE = [
 /**
  * Check if a model supports Agent Mode.
  * Cloud providers always support tools. Ollama needs explicit check.
+ *
+ * Strategy: strip user-prefix, abliterated/uncensored/instruct/chat suffixes
+ * and the :tag, then match the remaining base name against AGENT_COMPATIBLE.
+ *
+ * Earlier versions kept a much shorter `ABLITERATED_NATIVE` allow-list which
+ * over-rejected uncensored variants of agent-capable bases (Qwen 3.5 Uncensored,
+ * Llama 3.2 Abliterated, Gemma 4 Uncensored, etc.). For modern agent-capable
+ * families the abliteration / uncensoring procedure does not break native
+ * tool-calling weights, so falling back to the same compatibility list as the
+ * vanilla path matches user expectation. If a specific abliterated build is
+ * proven to break tools at runtime, the user can simply toggle Agent Mode off.
  */
 export function isAgentCompatible(modelName: string | null): boolean {
   if (!modelName) return false
@@ -34,17 +45,15 @@ export function isAgentCompatible(modelName: string | null): boolean {
   // Cloud providers always support tool calling
   if (providerId === 'openai' || providerId === 'anthropic') return true
 
-  // Ollama: check compatibility list
+  // Ollama: strip everything decorative and check against the canonical list
   const name = modelName.toLowerCase()
-
-  // Some abliterated models retain native tool calling
-  const ABLITERATED_NATIVE = ['qwen3-coder', 'hermes3', 'hermes-3', 'hermes']
-  if (name.includes('abliterated') || name.includes('uncensored')) {
-    const baseName = name.replace(/^[^/]+\//, '').replace(/-abliterated/g, '').replace(/-uncensored/g, '').replace(/:.*$/, '')
-    return ABLITERATED_NATIVE.some((f) => baseName.startsWith(f))
-  }
-
-  const baseName = name.replace(/^[^/]+\//, '').replace(/-instruct/g, '').replace(/-chat/g, '').replace(/:.*$/, '')
+  const baseName = name
+    .replace(/^[^/]+\//, '')
+    .replace(/-abliterated/g, '')
+    .replace(/-uncensored/g, '')
+    .replace(/-instruct/g, '')
+    .replace(/-chat/g, '')
+    .replace(/:.*$/, '')
   return AGENT_COMPATIBLE.some((f) => baseName.startsWith(f))
 }
 

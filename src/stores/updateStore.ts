@@ -196,6 +196,20 @@ export const useUpdateStore = create<UpdateState>()(
         releaseNotes: state.releaseNotes,
         downloadStatus: state.downloadStatus,
       }),
+      // Reset stale persisted state when the binary has been updated out-of-band
+      // (e.g. user manually installed a newer .deb / .exe than what the persisted
+      // "latest" snapshot remembers). Without this, the Updates tab can show
+      // `Current: 2.4.1 | Latest: 2.3.8` indefinitely because checkForUpdate has
+      // a 6h cooldown and a stale `latestVersion` survives in localStorage.
+      onRehydrateStorage: () => (state) => {
+        if (!state) return
+        if (state.latestVersion && !isNewerVersion(state.latestVersion, currentVersion)) {
+          state.latestVersion = null
+          state.updateAvailable = false
+          state.releaseNotes = null
+          state.lastChecked = null
+        }
+      },
     }
   )
 )
