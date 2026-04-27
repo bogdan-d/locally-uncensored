@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <title>Join the Locally Uncensored Discord</title>
-  <meta http-equiv="refresh" content="0; url=https://discord.gg/c9kquPfU4x">
-  <meta name="robots" content="noindex">
   <link rel="canonical" href="https://discord.gg/c9kquPfU4x">
+  <meta name="robots" content="noindex">
   <meta name="description" content="Join the Locally Uncensored Discord community.">
   <style>
     :root { color-scheme: dark; }
@@ -18,41 +17,126 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 12px;
+      gap: 8px;
       padding: 24px;
       text-align: center;
     }
-    h1 { font-size: 1.4rem; font-weight: 500; margin: 0; }
-    p { color: #a3a3a3; margin: 4px 0 16px 0; max-width: 420px; line-height: 1.5; }
-    a.cta {
-      display: inline-block;
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 500;
+      margin: 0 0 4px 0;
+    }
+    p {
+      color: #a3a3a3;
+      margin: 4px 0;
+      max-width: 460px;
+      line-height: 1.5;
+    }
+    .stack { display: flex; flex-direction: column; gap: 12px; align-items: stretch; min-width: 280px; margin-top: 16px; }
+    a.cta-primary {
       background: #5865F2;
       color: #fff;
       text-decoration: none;
-      padding: 12px 28px;
+      padding: 14px 28px;
       border-radius: 8px;
       font-weight: 500;
       transition: background 0.15s ease;
+      text-align: center;
     }
-    a.cta:hover { background: #4752C4; }
-    a.fallback { color: #a78bfa; font-size: 0.9rem; }
-    .small { color: #525252; font-size: 0.85rem; margin-top: 24px; }
+    a.cta-primary:hover { background: #4752C4; }
+    a.cta-secondary {
+      color: #a78bfa;
+      text-decoration: none;
+      padding: 10px 28px;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      text-align: center;
+      transition: border-color 0.15s ease;
+    }
+    a.cta-secondary:hover { border-color: #a78bfa; }
+    .tip {
+      max-width: 460px;
+      margin-top: 24px;
+      padding: 14px 18px;
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 8px;
+      color: #a3a3a3;
+      font-size: 0.9rem;
+      line-height: 1.5;
+      text-align: left;
+    }
+    .tip strong { color: #f0f0f0; }
+    code {
+      background: #2a2a2a;
+      color: #f0f0f0;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.95em;
+      letter-spacing: 0.5px;
+      user-select: all;
+    }
+    .small { color: #525252; font-size: 0.8rem; margin-top: 12px; }
   </style>
 </head>
 <body>
-  <h1>Joining the Locally Uncensored Discord…</h1>
-  <p>If you aren't redirected automatically, click below.</p>
-  <a class="cta" href="https://discord.gg/c9kquPfU4x">Join Discord →</a>
-  <p class="small">
-    Direct link: <a class="fallback" href="https://discord.gg/c9kquPfU4x">discord.gg/c9kquPfU4x</a>
-  </p>
+  <h1>Join the Locally Uncensored Discord</h1>
+  <p>Local, private, uncensored AI &mdash; for everyone running models on their own hardware.</p>
+
+  <div class="stack">
+    <!-- Primary: discord:// deeplink. Opens the Discord desktop app
+         directly, bypassing the browser entirely. Works regardless of
+         what browser-side privacy / VPN / strict-mode is enabled. If
+         the user does not have the Discord app installed, the protocol
+         handler does nothing and the secondary CTA remains as fallback. -->
+    <a class="cta-primary" href="discord://invite/c9kquPfU4x">Open in Discord App</a>
+
+    <!-- Secondary: regular https invite. Works in most browsers.
+         Some browsers (Opera with strict privacy defaults, certain
+         extension stacks) break the discord.com join flow even when
+         VPN / ad-block / tracker-block are off — for those, the
+         primary CTA above is the workaround. -->
+    <a class="cta-secondary" href="https://discord.gg/c9kquPfU4x">Or join in your browser</a>
+  </div>
+
+  <div class="tip">
+    <strong>Browser showing &ldquo;invite invalid&rdquo;?</strong>
+    Some browsers (notably Opera, even with VPN / ad-block / trackers off)
+    break Discord&rsquo;s join page. Two fixes:
+    <br><br>
+    1. Click <em>Open in Discord App</em> above &mdash; bypasses the browser.
+    <br>
+    2. Or open the Discord app, click the <strong>+</strong> icon, choose
+       <em>Join Server</em>, and paste the invite code: <code>c9kquPfU4x</code>
+  </div>
+
+  <p class="small">Direct invite: discord.gg/c9kquPfU4x</p>
+
   <script>
-    // JS fallback in case the meta-refresh is suppressed (some privacy
-    // browsers / extensions disable meta-refresh). Fires after a 1s delay
-    // so users can read the page first.
-    setTimeout(function () {
-      window.location.href = 'https://discord.gg/c9kquPfU4x';
-    }, 1000);
+    // Auto-attempt the deeplink on page load. If the user has the
+    // Discord app installed, this opens the app instantly. If not, the
+    // browser silently ignores it and the user stays on this page so
+    // they can use the visible buttons.
+    //
+    // We do NOT auto-redirect to https://discord.gg afterwards because
+    // for the Opera users this page exists to help, that web URL is
+    // exactly what was failing. Letting the user stay and pick the
+    // app option (or the manual paste-code workaround) is the win.
+    (function () {
+      try {
+        // Tiny delay so the page paints before we trigger the
+        // protocol handler — avoids "site blocked from opening app"
+        // prompts in some browsers when the redirect fires too eagerly.
+        setTimeout(function () {
+          window.location.href = 'discord://invite/c9kquPfU4x';
+        }, 250);
+      } catch (e) {
+        // No-op: if location.href fails for any reason, the visible
+        // buttons remain functional.
+      }
+    })();
   </script>
 </body>
 </html>
