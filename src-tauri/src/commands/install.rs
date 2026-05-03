@@ -576,6 +576,254 @@ pub fn install_ollama_status(state: State<'_, AppState>) -> Result<serde_json::V
     }))
 }
 
+// ── LM Studio Install (Windows) ─────────────────────────────────────────────
+//
+// LM Studio doesn't run as a Windows service like Ollama — it's a desktop app
+// whose embedded server is started via either the GUI ("Server" tab) or the
+// `lms` CLI (`lms server start`). The install flow here:
+//   1. Download the official LM Studio installer .exe
+//   2. Silent install with /S (NSIS / electron-builder convention)
+//   3. Run `lms bootstrap` to register the CLI on PATH
+//   4. Start the server on port 1234 via `lms server start --cors`
+//
+// Step 4 is what makes this Plug & Play — without it the user has to manually
+// open the app and toggle the server, which is exactly the "version one
+// usability cliff" we're trying to remove. If lms isn't on PATH yet (e.g.
+// install is too fresh), we look in `%USERPROFILE%/.lmstudio/bin/lms.exe`
+// directly.
+//
+// The hard-coded URL points to a known-stable release. LM Studio's installer
+// host doesn't expose a /latest redirect — every version is its own URL — so
+// the alternative would be to bake in a remote-version-check, which adds an
+// extra failure mode for offline users. A stale URL just means the user gets
+// a slightly older LM Studio; functionally fine.
+const LMSTUDIO_INSTALLER_URL: &str =
+    "https://installers.lmstudio.ai/win32/x64/0.3.16-6/LM-Studio-0.3.16-6-x64.exe";
+const LMSTUDIO_DEFAULT_PORT: u16 = 1234;
+
+fn lmstudio_lms_path() -> Option<PathBuf> {
+    // Post-install convention: `lms bootstrap` puts a launcher on PATH, but
+    // before bootstrap the .exe lives here. Try both.
+    let direct = dirs::home_dir().map(|h| h.join(".lmstudio").join("bin").join("lms.exe"));
+    if let Some(ref p) = direct {
+        if p.exists() {
+            return direct;
+        }
+    }
+
+    // After bootstrap: `where lms` returns it. We resolve via PATH.
+    if let Ok(out) = Command::new("where").arg("lms").output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Some(line) = s.lines().next() {
+                let p = PathBuf::from(line.trim());
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn lmstudio_server_running() -> bool {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(800))
+        .build();
+    if let Ok(c) = client {
+        return c
+            .get(format!("http://localhost:{}/v1/models", LMSTUDIO_DEFAULT_PORT))
+            .send()
+            .map(|r| r.status().is_success() || r.status() == 401)
+            .unwrap_or(false);
+    }
+    false
+}
+
+#[tauri::command]
+pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mut install = state.lmstudio_install.lock().unwrap();
+    if install.status == "downloading"
+        || install.status == "installing"
+        || install.status == "starting"
+    {
+        return Ok(serde_json::json!({"status": "already_installing"}));
+    }
+
+    install.status = "downloading".to_string();
+    install.logs.clear();
+    install.download_progress = 0;
+    install.download_total = 0;
+    install.download_speed = 0.0;
+    install
+        .logs
+        .push("Downloading LM Studio installer...".to_string());
+    drop(install);
+
+    let lms_state = state.lmstudio_install.clone();
+
+    std::thread::spawn(move || {
+        let update = |status: &str, msg: &str| {
+            if let Ok(mut s) = lms_state.lock() {
+                s.status = status.to_string();
+                s.logs.push(msg.to_string());
+            }
+        };
+
+        let temp_dir = std::env::temp_dir();
+        let installer_path = temp_dir.join("LMStudioSetup.exe");
+
+        println!("[LMStudio] Downloading {}", LMSTUDIO_INSTALLER_URL);
+        if let Err(e) =
+            download_file_blocking(LMSTUDIO_INSTALLER_URL, &installer_path, &lms_state)
+        {
+            let err = format!(
+                "Download failed: {}. If the network is fine, the installer URL may have rotated — fall back to https://lmstudio.ai/download in your browser.",
+                e
+            );
+            println!("[LMStudio] {}", err);
+            update("error", &err);
+            return;
+        }
+
+        update(
+            "installing",
+            "Download complete. Running silent installer (this can take a minute)...",
+        );
+
+        // electron-builder NSIS supports /S for silent install. Ignore exit
+        // code: real failures surface via the absence of lms.exe afterwards.
+        let mut cmd = Command::new(&installer_path);
+        cmd.arg("/S");
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        match cmd.output() {
+            Ok(_) => println!("[LMStudio] Installer finished"),
+            Err(e) => {
+                let err = format!("Could not run installer: {}", e);
+                println!("[LMStudio] {}", err);
+                update("error", &err);
+                return;
+            }
+        }
+
+        let _ = fs::remove_file(&installer_path);
+
+        // Bootstrap the lms CLI. First boot of the LM Studio app sometimes
+        // does this for us, but it requires the GUI to launch — which we don't
+        // want during an unattended install. Calling `lms bootstrap` on the
+        // raw .exe handles it without touching the GUI.
+        update("starting", "Bootstrapping `lms` CLI...");
+        let lms = lmstudio_lms_path();
+        match &lms {
+            Some(p) => {
+                let mut bs = Command::new(p);
+                bs.arg("bootstrap");
+                #[cfg(target_os = "windows")]
+                bs.creation_flags(CREATE_NO_WINDOW);
+                let _ = bs.output();
+            }
+            None => {
+                update(
+                    "error",
+                    "LM Studio installed but `lms.exe` not found. Open LM Studio once from the Start menu, then return here and click Re-Scan.",
+                );
+                return;
+            }
+        }
+
+        // Start the embedded server. `lms server start` is non-blocking — it
+        // detaches a background httpd. --cors so LU's web view (which is on a
+        // tauri:// origin) isn't blocked by the SOP. Port matches the
+        // provider-store default of 1234 so user config Just Works.
+        update("starting", "Starting LM Studio server on port 1234...");
+        if let Some(p) = lms {
+            let mut srv = Command::new(&p);
+            srv.args(["server", "start", "--cors", "--port"])
+                .arg(LMSTUDIO_DEFAULT_PORT.to_string())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            #[cfg(target_os = "windows")]
+            srv.creation_flags(CREATE_NO_WINDOW);
+            let _ = srv.spawn();
+        }
+
+        // Wait for the server to respond. LM Studio's server typically takes
+        // ~3-5 s to bind in a fresh install (it loads its model index first).
+        update("starting", "Waiting for LM Studio server...");
+        let mut ready = false;
+        for i in 0..15 {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            if lmstudio_server_running() {
+                ready = true;
+                break;
+            }
+            println!("[LMStudio] Server not ready, attempt {}/15", i + 1);
+        }
+
+        if ready {
+            update("complete", "LM Studio server is up on localhost:1234.");
+        } else {
+            update(
+                "error",
+                "LM Studio installed but the server didn't come up. Open LM Studio from the Start menu and toggle the Server tab on, then click Re-Scan.",
+            );
+        }
+    });
+
+    Ok(serde_json::json!({"status": "downloading"}))
+}
+
+#[tauri::command]
+pub fn install_lmstudio_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let install = state.lmstudio_install.lock().unwrap();
+    Ok(serde_json::json!({
+        "status": install.status,
+        "logs": install.logs,
+        "download_progress": install.download_progress,
+        "download_total": install.download_total,
+        "download_speed": install.download_speed,
+    }))
+}
+
+/// Best-effort: spawn `lms server start` so we don't make the user open the
+/// LM Studio GUI just to flip the Server toggle. Idempotent — quick early-exit
+/// if the server is already responding.
+#[tauri::command]
+pub fn start_lmstudio_server() -> Result<serde_json::Value, String> {
+    if lmstudio_server_running() {
+        return Ok(serde_json::json!({"status": "already_running"}));
+    }
+    match lmstudio_lms_path() {
+        Some(p) => {
+            let mut srv = Command::new(&p);
+            srv.args(["server", "start", "--cors", "--port"])
+                .arg(LMSTUDIO_DEFAULT_PORT.to_string())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            #[cfg(target_os = "windows")]
+            srv.creation_flags(CREATE_NO_WINDOW);
+            srv.spawn()
+                .map_err(|e| format!("spawn lms: {}", e))?;
+            Ok(serde_json::json!({"status": "starting"}))
+        }
+        None => Err(
+            "LM Studio is not installed (no lms.exe found). Use Settings → Install LM Studio first."
+                .to_string(),
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn lmstudio_server_status() -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "running": lmstudio_server_running(),
+        "port": LMSTUDIO_DEFAULT_PORT,
+        "lms_present": lmstudio_lms_path().is_some(),
+    }))
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[allow(non_snake_case)]

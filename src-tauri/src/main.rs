@@ -45,6 +45,10 @@ fn main() {
             commands::install::install_comfyui_status,
             commands::install::install_ollama,
             commands::install::install_ollama_status,
+            commands::install::install_lmstudio,
+            commands::install::install_lmstudio_status,
+            commands::install::start_lmstudio_server,
+            commands::install::lmstudio_server_status,
             commands::install::install_custom_node,
             // Whisper STT
             commands::whisper::whisper_status,

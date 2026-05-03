@@ -269,10 +269,33 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
         *path = Some(comfy_path.clone());
     }
 
-    // Validate python binary exists
-    let python = &state.python_bin;
+    // Prefer the portable's bundled Python over the system one. ComfyUI
+    // Portable (NVIDIA, AMD, CPU variants) ships its own Python with the
+    // matching torch wheel pre-installed — using the system Python instead
+    // wastes that and on AMD it actively fails because system Python lacks
+    // the DirectML / ROCm bindings the portable installer prepared. Layout:
+    //   <ComfyUI>/python_embeded/python.exe   ← what we want
+    //   <ComfyUI>/main.py
+    // Fixed Discord report from reload__: AMD Portable launchte nicht.
+    let portable_python = std::path::Path::new(&comfy_path)
+        .parent()
+        .and_then(|p| {
+            let candidate = p.join("python_embeded").join("python.exe");
+            if candidate.exists() { Some(candidate.to_string_lossy().to_string()) } else { None }
+        });
+    let bundled_python = portable_python.or_else(|| {
+        // Some portable variants nest python_embeded inside the ComfyUI dir
+        // itself rather than alongside it.
+        let candidate = std::path::Path::new(&comfy_path).join("python_embeded").join("python.exe");
+        if candidate.exists() { Some(candidate.to_string_lossy().to_string()) } else { None }
+    });
+    let python = bundled_python.as_deref().unwrap_or(&state.python_bin);
     let port_str = port.to_string();
-    println!("[ComfyUI] Using Python: {}", python);
+    if bundled_python.is_some() {
+        println!("[ComfyUI] Using bundled portable Python: {}", python);
+    } else {
+        println!("[ComfyUI] Using system Python: {}", python);
+    }
     println!("[ComfyUI] Starting from: {} on port {}", comfy_path, port);
 
     let mut cmd = Command::new(python);
@@ -660,7 +683,25 @@ pub fn auto_start_comfyui(state: &AppState) {
             println!("[ComfyUI] Auto-starting from: {} on port {}", path, port);
             *state.comfy_path.lock().unwrap() = Some(path.clone());
 
-            let mut cmd = Command::new(&state.python_bin);
+            // Mirror the start_comfyui Python preference: use the portable's
+            // bundled Python when present so AMD / cu126 / CPU portables boot
+            // with the right torch wheel. See start_comfyui for full context.
+            let portable_python = std::path::Path::new(&path)
+                .parent()
+                .and_then(|p| {
+                    let c = p.join("python_embeded").join("python.exe");
+                    if c.exists() { Some(c.to_string_lossy().to_string()) } else { None }
+                })
+                .or_else(|| {
+                    let c = std::path::Path::new(&path).join("python_embeded").join("python.exe");
+                    if c.exists() { Some(c.to_string_lossy().to_string()) } else { None }
+                });
+            let python = portable_python.as_deref().unwrap_or(state.python_bin.as_str());
+            if portable_python.is_some() {
+                println!("[ComfyUI] Auto-start using bundled portable Python: {}", python);
+            }
+
+            let mut cmd = Command::new(python);
             cmd.args(["main.py", "--listen", "127.0.0.1", "--port", &port_str, "--enable-cors-header", "*"])
                 .current_dir(&path)
                 .env("TQDM_DISABLE", "1")
