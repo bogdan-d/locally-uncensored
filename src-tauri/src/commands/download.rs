@@ -528,10 +528,35 @@ pub fn detect_model_path(provider: String) -> Result<serde_json::Value, String> 
         }
     }
 
-    // Fallback: create LU models directory
-    let fallback = home.join("locally-uncensored").join("models");
-    fs::create_dir_all(&fallback).map_err(|e| format!("Create fallback dir: {}", e))?;
-    Ok(serde_json::json!(fallback.to_string_lossy()))
+    // No managed dir exists yet for this provider. For the two providers LU
+    // actively writes downloads into (Ollama, LM Studio), pre-create the
+    // conventional path so the first download just works on a fresh box —
+    // this is the Plug & Play path. Frontend gating ensures we only ever
+    // direct-write into the LM Studio dir; Ollama's path is here purely so
+    // legacy callers don't get an Err — see download_model_to_path callers.
+    //
+    // The previous `~/locally-uncensored/models` fallback was unreachable
+    // by any backend and produced the "downloaded but invisible" bug
+    // (Discord drdeath9669, kmmorr23, GH disc #35). We remove it: if a
+    // user picked a backend with no conventional dir, return an explicit
+    // error so the UI can show a real message instead of silently writing
+    // into a junk folder.
+    match provider_lower.as_str() {
+        "ollama" => {
+            let p = home.join(".ollama").join("models");
+            fs::create_dir_all(&p).map_err(|e| format!("Create Ollama models dir: {}", e))?;
+            Ok(serde_json::json!(p.to_string_lossy()))
+        }
+        "lm studio" | "lmstudio" => {
+            let p = home.join(".lmstudio").join("models");
+            fs::create_dir_all(&p).map_err(|e| format!("Create LM Studio models dir: {}", e))?;
+            Ok(serde_json::json!(p.to_string_lossy()))
+        }
+        _ => Err(format!(
+            "No conventional model directory for provider '{}'. Configure a custom path in Settings → Models, or pick a backend (Ollama / LM Studio) with a known model location.",
+            provider
+        )),
+    }
 }
 
 #[allow(non_snake_case)]

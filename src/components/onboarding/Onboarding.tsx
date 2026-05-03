@@ -13,6 +13,8 @@ import { openExternal } from '../../api/backend'
 import { formatBytes } from '../../lib/formatters'
 import { backendCall } from '../../api/backend'
 import { getSystemVRAM } from '../../api/comfyui'
+import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama'
+import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
 
 type Step = 'welcome' | 'theme' | 'backends' | 'comfyui' | 'models' | 'done'
 const STEP_ORDER: Step[] = ['welcome', 'theme', 'backends', 'comfyui', 'models', 'done']
@@ -85,6 +87,19 @@ export function Onboarding() {
   const [ollamaStartTime, setOllamaStartTime] = useState<number | null>(null)
   const [ollamaElapsed, setOllamaElapsed] = useState(0)
 
+  // LM Studio install state — same shape as Ollama; both can show their
+  // own progress card if the user picks both. In practice they pick one.
+  const [lmstudioInstalling, setLmstudioInstalling] = useState(false)
+  const [lmstudioStatus, setLmstudioStatus] = useState('')
+  const [lmstudioProgress, setLmstudioProgress] = useState(0)
+  const [lmstudioTotal, setLmstudioTotal] = useState(0)
+  const [lmstudioSpeed, setLmstudioSpeed] = useState(0)
+  const [lmstudioLogs, setLmstudioLogs] = useState<string[]>([])
+  const [lmstudioError, setLmstudioError] = useState('')
+  const [lmstudioReady, setLmstudioReady] = useState(false)
+  const [lmstudioStartTime, setLmstudioStartTime] = useState<number | null>(null)
+  const [lmstudioElapsed, setLmstudioElapsed] = useState(0)
+
   const isDark = settings.theme === 'dark'
   const bgClass = isDark ? 'bg-[#0a0a0a] text-white' : 'bg-white text-gray-900'
   const cardClass = isDark ? 'bg-[#141414] border-white/[0.08]' : 'bg-gray-50 border-gray-200'
@@ -98,12 +113,46 @@ export function Onboarding() {
   const handleDownloadSelected = async () => {
     setDownloadError(null)
     const providers = useProviderStore.getState().providers
-    const destDir = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
-    if (!destDir) {
-      setDownloadError('Could not determine model directory. Please check app permissions.')
-      return
+
+    // Decide which backend the download has to feed. selectedBackend (set in
+    // the backends step) is the strongest signal; ollamaReady covers the
+    // "we just installed Ollama in-app" path; final fallback is the first
+    // detected backend, defaulting to ollama. The earlier code wrote a raw
+    // .gguf into `~/.ollama/models` regardless — Ollama ignores files placed
+    // there directly, which is the root cause of the "downloaded model
+    // never appears" bug reported on Discord and GH discussion #35.
+    const targetBackend = selectedBackend || (ollamaReady ? 'ollama' : detectedBackends[0]?.id) || 'ollama'
+    const useOllamaPath = targetBackend === 'ollama'
+
+    // Sanity-check / auto-start Ollama before pulling. The pull command will
+    // otherwise spin in "connecting" with no actionable error if the daemon
+    // isn't reachable.
+    if (useOllamaPath && isTauri) {
+      let ok = await checkOllama()
+      if (!ok) {
+        try { await backendCall('start_ollama') } catch { /* fall through to retry loop */ }
+        for (let i = 0; i < 20 && !ok; i++) {
+          await new Promise(r => setTimeout(r, 250))
+          ok = await checkOllama()
+        }
+      }
+      if (!ok) {
+        setDownloadError('Cannot reach Ollama (localhost:11434). Open the Ollama app or run `ollama serve`, then retry.')
+        return
+      }
     }
-    setHfModelPath(destDir)
+
+    // Direct-write providers (LM Studio etc.) still need a base dir.
+    let destDir: string | null = null
+    if (!useOllamaPath) {
+      const settingsOverride = useSettingsStore.getState().settings.hfDownloadPathOverride?.trim() || ''
+      destDir = settingsOverride || hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
+      if (!destDir) {
+        setDownloadError('Could not determine model directory. Please check app permissions, or set a custom path in Settings → Models.')
+        return
+      }
+      setHfModelPath(destDir)
+    }
 
     for (const name of selectedModels) {
       if (pulledModels.includes(name)) continue
@@ -112,16 +161,73 @@ export function Onboarding() {
 
       setPullingModel(name)
       try {
-        dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf', destDir)
-        const expectedBytes = model.sizeGB ? Math.round(model.sizeGB * 1_073_741_824) : undefined
-        await startModelDownloadToPath(model.downloadUrl, destDir, model.filename, expectedBytes)
-        dlStore.getState().startPolling()
+        if (useOllamaPath) {
+          // Ollama: HF URL → `hf.co/<user>/<repo>:<quant>` → /api/pull. Ollama
+          // materialises the GGUF into its own blob+manifest store; the file
+          // appears in `ollama list` (and therefore in our model manager) the
+          // moment the pull finishes — no separate scanner involved.
+          const ollamaRef = hfUrlToOllamaRef(model.downloadUrl, model.filename)
+          if (!ollamaRef) {
+            setDownloadError(`Cannot derive an Ollama reference for ${model.label}. Try LM Studio instead.`)
+            continue
+          }
+
+          // Seed an entry in the download store so the existing onboarding
+          // progress UI keeps working. Translation from PullProgress (Ollama)
+          // → DownloadProgress (LU) below.
+          dlStore.getState().setMeta(model.filename, model.downloadUrl, 'ollama')
+          useDownloadStore.setState(s => ({
+            downloads: {
+              ...s.downloads,
+              [model.filename!]: {
+                progress: 0, total: 0, speed: 0,
+                filename: model.filename!,
+                status: 'connecting',
+              },
+            },
+          }))
+
+          const { promise } = pullModelTauri(ollamaRef, (p) => {
+            const total = p.total || 0
+            const completed = p.completed || 0
+            const status = (p.status || '').toLowerCase()
+            const isComplete = status.includes('success') || status === 'complete'
+            useDownloadStore.setState(s => ({
+              downloads: {
+                ...s.downloads,
+                [model.filename!]: {
+                  progress: completed, total,
+                  speed: 0,
+                  filename: model.filename!,
+                  status: isComplete ? 'complete' : 'downloading',
+                },
+              },
+            }))
+          })
+          await promise
+          // Mark complete in case the final progress event didn't include
+          // a "success" status string (Ollama varies between versions).
+          useDownloadStore.getState().markComplete(model.filename)
+        } else {
+          // LM Studio etc.: nest under <user>/<repo>/ so the scanner finds
+          // it. A bare .gguf in the model root is silently ignored by LM
+          // Studio's library — the second half of the same Discord bug.
+          const subdir = hfUrlToLmStudioSubdir(model.downloadUrl)
+          const targetDir = subdir ? `${destDir}/${subdir}` : destDir!
+          dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf', targetDir)
+          const expectedBytes = model.sizeGB ? Math.round(model.sizeGB * 1_073_741_824) : undefined
+          await startModelDownloadToPath(model.downloadUrl, targetDir, model.filename, expectedBytes)
+          dlStore.getState().startPolling()
+        }
         setPulledModels(prev => [...prev, name])
       } catch (e) {
-        setDownloadError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
+        setDownloadError(`Download failed for ${model.label}: ${e instanceof Error ? e.message : String(e)}`)
       }
     }
     setPullingModel(null)
+    // Tell the rest of the app the model list changed — Model Manager,
+    // Chat picker, etc. listen for this and re-fetch.
+    window.dispatchEvent(new CustomEvent('lu-models-refresh'))
     setStep('done')
   }
 
@@ -146,6 +252,26 @@ export function Onboarding() {
   // Detect system VRAM for model filtering
   useEffect(() => { getSystemVRAM().then(v => setSystemVRAM(v)).catch(() => {}) }, [])
 
+  // Count models the user already has installed across all backends. Used to
+  // suppress the "Recommended" starter pick when the user is clearly an
+  // experienced reinstaller — the previous version slapped "Recommended" on
+  // half a dozen 5–16 GB models for everyone, which was both noisy and a bad
+  // suggestion if you already had your own preferences. Failing the call
+  // returns 0 (no Ollama running yet → genuinely fresh install → recommend
+  // away).
+  const [existingModelCount, setExistingModelCount] = useState<number>(0)
+  useEffect(() => {
+    if (step !== 'models') return
+    let cancelled = false
+    import('../../api/ollama').then(({ listModels }) =>
+      listModels()
+        .then(models => { if (!cancelled) setExistingModelCount(models.length) })
+        .catch(() => { if (!cancelled) setExistingModelCount(0) })
+    )
+    return () => { cancelled = true }
+  }, [step])
+  const showRecommendedBadge = existingModelCount === 0
+
   // Elapsed timer for ComfyUI installation
   useEffect(() => {
     if (!installStartTime) return
@@ -159,6 +285,13 @@ export function Onboarding() {
     const timer = setInterval(() => setOllamaElapsed(Math.floor((Date.now() - ollamaStartTime) / 1000)), 1000)
     return () => clearInterval(timer)
   }, [ollamaStartTime])
+
+  // Elapsed timer for LM Studio installation
+  useEffect(() => {
+    if (!lmstudioStartTime) return
+    const timer = setInterval(() => setLmstudioElapsed(Math.floor((Date.now() - lmstudioStartTime) / 1000)), 1000)
+    return () => clearInterval(timer)
+  }, [lmstudioStartTime])
 
   // Auto-detect ComfyUI when entering the comfyui step
   useEffect(() => {
@@ -398,6 +531,11 @@ export function Onboarding() {
                               setOllamaInstalling(false)
                               setOllamaReady(true)
                               setOllamaStartTime(null)
+                              // Lock the model-download flow onto Ollama so
+                              // GGUFs go through `ollama pull` (which produces
+                              // a usable model) instead of a raw .gguf write
+                              // (which Ollama then can't see).
+                              setSelectedBackend('ollama')
                             } else if (s.status === 'error') {
                               clearInterval(poll)
                               setOllamaInstalling(false)
@@ -466,6 +604,126 @@ export function Onboarding() {
                   <p className="text-[0.65rem] text-red-400">{ollamaError}</p>
                 )}
 
+                {/* LM Studio ready */}
+                {lmstudioReady && (
+                  <div className={`p-3 rounded-lg border ${isDark ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-200'}`}>
+                    <div className="flex items-center gap-2 justify-center">
+                      <Check size={14} className="text-green-400" />
+                      <span className="text-[0.7rem] font-medium">LM Studio is ready (server on :1234)</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* LM Studio install — alt path. Hidden once any installer is
+                    running so two heavy downloads don't kick off at once. */}
+                {!lmstudioInstalling && !lmstudioReady && !ollamaInstalling && !ollamaReady && (
+                  <button
+                    onClick={async () => {
+                      setLmstudioInstalling(true)
+                      setLmstudioError('')
+                      setLmstudioStartTime(Date.now())
+                      setLmstudioElapsed(0)
+                      try {
+                        await backendCall('install_lmstudio')
+                        const poll = setInterval(async () => {
+                          try {
+                            const s: any = await backendCall('install_lmstudio_status')
+                            setLmstudioStatus(s.status || '')
+                            setLmstudioLogs(s.logs || [])
+                            setLmstudioProgress(s.download_progress || 0)
+                            setLmstudioTotal(s.download_total || 0)
+                            setLmstudioSpeed(s.download_speed || 0)
+                            if (s.status === 'complete') {
+                              clearInterval(poll)
+                              setLmstudioInstalling(false)
+                              setLmstudioReady(true)
+                              setLmstudioStartTime(null)
+                              // Wire the OpenAI-compat provider to LM Studio so
+                              // /v1/chat/completions calls hit the right port,
+                              // and route GGUF downloads through the LM-Studio
+                              // <user>/<repo>/<file>.gguf nesting.
+                              setSelectedBackend('lmstudio')
+                              setProviderConfig('openai', {
+                                enabled: true,
+                                name: 'LM Studio',
+                                baseUrl: 'http://localhost:1234/v1',
+                                isLocal: true,
+                              })
+                            } else if (s.status === 'error') {
+                              clearInterval(poll)
+                              setLmstudioInstalling(false)
+                              setLmstudioStartTime(null)
+                              const lastLog = s.logs?.[s.logs.length - 1] || 'Installation failed'
+                              setLmstudioError(lastLog)
+                            }
+                          } catch { /* keep polling */ }
+                        }, 1000)
+                      } catch (err) {
+                        setLmstudioInstalling(false)
+                        setLmstudioStartTime(null)
+                        setLmstudioError(err instanceof Error ? err.message : 'Installation failed')
+                      }
+                    }}
+                    className={`w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.7rem] font-medium transition-all ${
+                      isDark ? 'bg-white/10 text-white hover:bg-white/15' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    <Download size={14} /> Or install LM Studio (GUI app, ~570 MB)
+                  </button>
+                )}
+
+                {/* LM Studio install progress */}
+                {lmstudioInstalling && (
+                  <div className={`p-3 rounded-lg border ${cardClass} text-left`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Loader2 size={14} className="animate-spin text-purple-400" />
+                        <span className="text-[0.7rem] font-medium">
+                          {lmstudioStatus === 'downloading' ? 'Downloading LM Studio...' :
+                           lmstudioStatus === 'installing' ? 'Installing LM Studio...' :
+                           lmstudioStatus === 'starting' ? 'Starting LM Studio server...' :
+                           'Setting up LM Studio...'}
+                        </span>
+                      </div>
+                      <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                        {Math.floor(lmstudioElapsed / 60)}:{String(lmstudioElapsed % 60).padStart(2, '0')}
+                      </span>
+                    </div>
+                    {lmstudioStatus === 'downloading' && lmstudioTotal > 0 && (
+                      <div className="space-y-1">
+                        <ProgressBar progress={(lmstudioProgress / lmstudioTotal) * 100} />
+                        <div className="flex justify-between">
+                          <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                            {formatBytes(lmstudioProgress)} / {formatBytes(lmstudioTotal)}
+                          </span>
+                          <span className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                            {lmstudioSpeed > 0 ? `${formatBytes(lmstudioSpeed)}/s` : ''}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    <div className={`text-[0.55rem] font-mono mt-1 max-h-16 overflow-y-auto space-y-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                      {lmstudioLogs.slice(-4).map((log, i) => (
+                        <p key={i}>{log}</p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {lmstudioError && (
+                  <p className="text-[0.65rem] text-red-400">
+                    {lmstudioError}
+                    {lmstudioError.toLowerCase().includes('didn\'t come up') && (
+                      <button
+                        onClick={() => { backendCall('start_lmstudio_server').catch(() => {}); setLmstudioError('') }}
+                        className={`block mt-1 ${secondaryBtn}`}
+                      >
+                        Start LM Studio server
+                      </button>
+                    )}
+                  </p>
+                )}
+
                 {/* Other alternatives collapsed */}
                 {!ollamaInstalling && !ollamaReady && (
                   <details className={`text-left ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -473,7 +731,7 @@ export function Onboarding() {
                       Other backends
                     </summary>
                     <div className="space-y-1 mt-2 max-h-[30vh] overflow-y-auto scrollbar-thin pr-1">
-                      {LOCAL_BACKENDS.filter(b => b.id !== 'ollama').map(b => (
+                      {LOCAL_BACKENDS.filter(b => b.id !== 'ollama' && b.id !== 'lmstudio').map(b => (
                         <button
                           key={b.id}
                           onClick={() => openExternal(b.url)}
@@ -498,14 +756,17 @@ export function Onboarding() {
                 )}
 
                 <div className="flex items-center justify-center gap-2 pt-1">
-                  {!ollamaInstalling && !ollamaReady && (
+                  {!ollamaInstalling && !lmstudioInstalling && !ollamaReady && !lmstudioReady && (
                     <button onClick={runDetection} className={secondaryBtn}>
                       <RefreshCw size={12} /> Re-Scan
                     </button>
                   )}
-                  {(ollamaReady || !ollamaInstalling) && (
-                    <button onClick={() => setStep('comfyui')} className={ollamaReady ? primaryBtn : `${secondaryBtn} opacity-60`}>
-                      {ollamaReady ? <>Continue <ArrowRight size={14} /></> : <>Skip for now <ChevronRight size={12} /></>}
+                  {(ollamaReady || lmstudioReady || (!ollamaInstalling && !lmstudioInstalling)) && (
+                    <button
+                      onClick={() => setStep('comfyui')}
+                      className={(ollamaReady || lmstudioReady) ? primaryBtn : `${secondaryBtn} opacity-60`}
+                    >
+                      {(ollamaReady || lmstudioReady) ? <>Continue <ArrowRight size={14} /></> : <>Skip for now <ChevronRight size={12} /></>}
                     </button>
                   )}
                 </div>
@@ -805,7 +1066,7 @@ export function Onboarding() {
                       <div>
                         <div className="flex items-center gap-1.5">
                           <span className="font-medium text-[0.7rem]">{model.label}</span>
-                          {model.recommended && (
+                          {model.recommended && showRecommendedBadge && (
                             <span className={`text-[0.5rem] px-1 py-0.5 rounded ${isDark ? 'bg-white/10 text-gray-300' : 'bg-gray-200 text-gray-600'}`}>
                               Recommended
                             </span>

@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { listModels, pullModel as pullModelApi, pullModelTauri, deleteModel as deleteModelApi } from '../api/ollama'
 import { isTauri } from '../api/backend'
 import { getCheckpoints as getComfyCheckpoints, getDiffusionModels as getComfyDiffusionModels, checkComfyConnection, filterPartialFiles } from '../api/comfyui'
@@ -31,6 +31,19 @@ export function useModels() {
   } = useModelStore()
 
   const isPulling = Object.keys(activePulls).length > 0
+
+  // Refresh trigger: any code path that just installed a model (onboarding,
+  // DiscoverModels, the Ollama in-app installer) dispatches this event so
+  // every mounted consumer of useModels re-fetches without needing a manual
+  // RefreshCw click.
+  useEffect(() => {
+    const handler = () => { fetchModels().catch(() => {}) }
+    window.addEventListener('lu-models-refresh', handler)
+    return () => window.removeEventListener('lu-models-refresh', handler)
+    // fetchModels is reassigned below on every render but always wraps the
+    // same setModels — depending on it would just churn listeners.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const fetchModels = useCallback(async () => {
     try {

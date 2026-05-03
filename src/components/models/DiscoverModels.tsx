@@ -18,6 +18,7 @@ import { useDownloadStore } from '../../stores/downloadStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
+import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
 import { ProgressBar } from '../ui/ProgressBar'
@@ -401,7 +402,7 @@ export function DiscoverModels({ category }: Props) {
   }
 
   const handleTextDownload = async (model: DiscoverModel) => {
-    // Ollama-native models: use ollama pull instead of GGUF download
+    // Ollama-native models: use ollama pull (registry path).
     if (model.ollamaModel) {
       try {
         await pullModel(model.ollamaModel)
@@ -412,16 +413,47 @@ export function DiscoverModels({ category }: Props) {
       return
     }
     if (!model.downloadUrl || !model.filename) return
+
+    // HF GGUF: which backend will actually consume this file?
+    //   - LM Studio explicitly enabled (openai provider with LM Studio name)
+    //     → nest under <user>/<repo>/ so its scanner picks it up.
+    //   - Otherwise default to Ollama (always-on by default), pull via
+    //     /api/pull as `hf.co/<user>/<repo>:<quant>`.
+    // Why: a raw .gguf in `~/.ollama/models` or in `~/.lmstudio/models/`
+    // (top-level) is silently ignored by both runtimes. That mismatch is
+    // the bug behind the "downloaded model never appears" reports.
+    const lmStudioOn = !!providers.openai?.enabled && (providers.openai?.name || '').toLowerCase().includes('lm studio')
+    const ollamaOn = !!providers.ollama?.enabled
+    const useOllamaPath = !lmStudioOn && ollamaOn
+
+    if (useOllamaPath) {
+      const ref = hfUrlToOllamaRef(model.downloadUrl, model.filename)
+      if (!ref) {
+        setInstallError(`Cannot map ${model.name} to an Ollama HF reference — try LM Studio.`)
+        return
+      }
+      try {
+        await pullModel(ref)
+      } catch (e) {
+        console.error('Ollama HF pull failed:', e)
+        setInstallError(`Ollama pull failed: ${e instanceof Error ? e.message : String(e)}. Is Ollama running?`)
+      }
+      return
+    }
+
     const destDir = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
     if (!destDir) {
       setInstallError('Could not determine model directory. Please check app permissions.')
       return
     }
     setHfModelPath(destDir)
+
+    const subdir = hfUrlToLmStudioSubdir(model.downloadUrl)
+    const targetDir = subdir ? `${destDir}/${subdir}` : destDir
     try {
-      dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf', destDir)
+      dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf', targetDir)
       const expectedBytes = model.sizeGB ? Math.round(model.sizeGB * 1_073_741_824) : undefined
-      await startModelDownloadToPath(model.downloadUrl, destDir, model.filename, expectedBytes)
+      await startModelDownloadToPath(model.downloadUrl, targetDir, model.filename, expectedBytes)
       dlStore.getState().startPolling()
     } catch (e) {
       console.error('GGUF download failed:', e)
@@ -442,13 +474,29 @@ export function DiscoverModels({ category }: Props) {
 
       <p className="text-sm text-gray-500">{subtitle}</p>
 
+      {/* Always-visible "your own model" call-out for text. Discord users
+          repeatedly asked for a way to install their own GGUFs / HF models,
+          unaware the search bar already does it (booster.netv2, #general).
+          Spelling out what the search bar accepts moves it from "feature
+          you have to discover" to "feature you can't miss." */}
+      {isText && (
+        <div className={`flex items-start gap-2.5 p-2.5 rounded-lg border ${
+          'bg-blue-50 dark:bg-blue-500/[0.08] border-blue-200 dark:border-blue-500/20 text-blue-900 dark:text-blue-200'
+        }`}>
+          <Search size={14} className="mt-0.5 shrink-0" />
+          <div className="text-[0.65rem] leading-relaxed">
+            <strong>Looking for your own model?</strong> Search any HuggingFace GGUF below — paste a repo name like <code className="font-mono px-1 rounded bg-white/30 dark:bg-white/10">bartowski/Llama-3.1-8B-Instruct-GGUF</code> or a keyword like "qwen 14b". Hit Enter and pick a quant.
+          </div>
+        </div>
+      )}
+
       <div className="relative">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && isText) handleSearch() }}
-          placeholder={isText ? 'Search HuggingFace GGUF models... (Enter to search)' : 'Filter models...'}
+          placeholder={isText ? 'Search HuggingFace GGUF (e.g. "qwen 14b" or "bartowski/Llama-3.1") — Enter to search' : 'Filter models...'}
           className="w-full pl-9 pr-3 py-2 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-sm text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/30"
         />
       </div>
