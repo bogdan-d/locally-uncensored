@@ -1,11 +1,24 @@
 import { useState, useEffect } from 'react'
-import { Wifi, WifiOff, Loader2, Eye, EyeOff, ChevronDown, Plus, Power } from 'lucide-react'
+import { Wifi, WifiOff, Loader2, Eye, EyeOff, ChevronDown, Plus, Power, Play } from 'lucide-react'
 import { useProviderStore } from '../../stores/providerStore'
 import { useMemoryStore } from '../../stores/memoryStore'
 import { getProvider } from '../../api/providers'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
 import { Modal } from '../ui/Modal'
+import { backendCall } from '../../api/backend'
 import type { ProviderId } from '../../api/providers/types'
+
+const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
+
+// Sweep #4 Bug (g): when LM Studio is installed locally but its embedded
+// server is not currently listening on :1234 (user closed the GUI, the
+// server toggle is off, etc.), the previous Settings UI offered only
+// `Test` and `Disable`. The clean Plug-and-Play path is to call the
+// existing `start_lmstudio_server` Tauri command — same surface the
+// onboarding's Fix-(d) card uses. This keeps the user inside LU instead
+// of forcing them through Re-run-onboarding to recover from a
+// transient server outage.
+type LmStudioServerInfo = { lms_present: boolean; running: boolean }
 
 export function ProviderSettings() {
   const { providers, setProviderConfig, setProviderApiKey, getProviderApiKey } = useProviderStore()
@@ -19,7 +32,21 @@ export function ProviderSettings() {
 
   const autoExtractEnabled = useMemoryStore((s) => s.settings.autoExtractEnabled)
 
-  // Auto-check connection status for all enabled providers on mount
+  // Bug (g) state — LM-Studio-on-disk-but-server-off detection.
+  const [lmStudioInfo, setLmStudioInfo] = useState<LmStudioServerInfo | null>(null)
+  const [startingLmStudioServer, setStartingLmStudioServer] = useState(false)
+
+  const refreshLmStudioInfo = async () => {
+    if (!isTauri) return
+    try {
+      const status = await backendCall<LmStudioServerInfo>('lmstudio_server_status')
+      setLmStudioInfo(status)
+    } catch { /* command unavailable on older builds — leave null */ }
+  }
+
+  // Auto-check connection status for all enabled providers on mount.
+  // Also probe lmstudio_server_status so the inline "Start Server"
+  // affordance is correct from first render, not just after a Test click.
   useEffect(() => {
     const checkAll = async () => {
       const ids = (Object.keys(providers) as ProviderId[]).filter(id => providers[id].enabled)
@@ -32,6 +59,7 @@ export function ProviderSettings() {
           setStatuses(prev => ({ ...prev, [id]: 'failed' }))
         }
       }
+      await refreshLmStudioInfo()
     }
     checkAll()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -91,6 +119,33 @@ export function ProviderSettings() {
       setStatuses(prev => ({ ...prev, [providerId]: 'failed' }))
     }
     setTesting(null)
+    // Bug (g): refresh after a Test click so the Start-Server button
+    // appears the moment a user discovers their LM Studio server is down.
+    void refreshLmStudioInfo()
+  }
+
+  const handleStartLmStudioServer = async (providerId: ProviderId) => {
+    setStartingLmStudioServer(true)
+    setStatuses(prev => ({ ...prev, [providerId]: 'idle' }))
+    try {
+      await backendCall('start_lmstudio_server')
+      // Poll up to 30 s for the server to come up. LM Studio's embedded
+      // server typically binds in 3–8 s on a warm machine; 30 s ceiling
+      // covers cold ARM64 VMs without wedging the UI.
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 2000))
+        const status = await backendCall<LmStudioServerInfo>('lmstudio_server_status').catch(() => null)
+        if (status?.running) {
+          setLmStudioInfo(status)
+          // Re-test the provider so the connection dot turns green.
+          await handleTest(providerId)
+          break
+        }
+      }
+    } catch {
+      setStatuses(prev => ({ ...prev, [providerId]: 'failed' }))
+    }
+    setStartingLmStudioServer(false)
   }
 
   // Group presets for the "Add provider" dropdown
@@ -179,8 +234,8 @@ export function ProviderSettings() {
                   </div>
                 )}
 
-                {/* Test + Disable */}
-                <div className="flex items-center gap-2">
+                {/* Test + Disable + (g) Start Server when LM-Studio is offline */}
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => handleTest(id)}
                     disabled={isTesting}
@@ -194,6 +249,25 @@ export function ProviderSettings() {
                   >
                     Disable
                   </button>
+                  {/* Bug (g): only render when this is the LM Studio provider AND
+                      we have positive evidence that the binary is on disk but the
+                      server isn't up. The same Tauri command is idempotent so
+                      duplicate clicks are safe. */}
+                  {preset?.id === 'lmstudio'
+                    && lmStudioInfo?.lms_present
+                    && lmStudioInfo?.running === false
+                    && status !== 'connected'
+                    && (
+                      <button
+                        onClick={() => handleStartLmStudioServer(id)}
+                        disabled={startingLmStudioServer}
+                        className="flex items-center gap-1 px-2 py-0.5 rounded bg-green-500/10 border border-green-500/20 text-[0.6rem] text-green-300 hover:text-green-200 hover:bg-green-500/15 transition-colors disabled:opacity-50"
+                      >
+                        {startingLmStudioServer
+                          ? <><Loader2 size={10} className="animate-spin" /> Starting…</>
+                          : <><Play size={10} /> Start Server</>}
+                      </button>
+                    )}
                   {status === 'connected' && (
                     <span className="flex items-center gap-1 text-[0.6rem] text-green-400">
                       <Wifi size={10} /> Connected
