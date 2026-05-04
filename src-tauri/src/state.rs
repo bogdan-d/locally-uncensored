@@ -139,9 +139,17 @@ pub struct AppState {
     pub install_status: Arc<Mutex<InstallState>>,
     pub ollama_install: Arc<Mutex<InstallState>>,
     pub lmstudio_install: Arc<Mutex<InstallState>>,
+    pub python_install: Arc<Mutex<InstallState>>,
     pub searxng_install: Mutex<InstallState>,
     pub searxng_available: AtomicBool,
-    pub python_bin: String,
+    /// Resolved Python binary path. Empty string means "no real Python on
+    /// this box" — callers must treat `""` as the missing-Python sentinel
+    /// and surface the install_python flow rather than spawning `"python"`
+    /// (which on Windows hits the Microsoft Store stub). Wrapped in a
+    /// `Mutex` so `install_python` can update it at runtime once Python
+    /// finishes installing — without that, the user would have to restart
+    /// LU to pick up the freshly installed Python.
+    pub python_bin: Arc<Mutex<String>>,
     // Claude Code
     pub claude_code_process: Mutex<Option<Child>>,
     pub claude_code_install: Arc<Mutex<InstallState>>,
@@ -158,7 +166,11 @@ pub struct AppState {
 impl AppState {
     pub fn new() -> Self {
         let python_bin = get_python_bin();
-        println!("[Python] Resolved: {}", python_bin);
+        if python_bin.is_empty() {
+            println!("[Python] Resolved: <none — install_python required for ComfyUI / agent code-exec>");
+        } else {
+            println!("[Python] Resolved: {}", python_bin);
+        }
 
         // Load persisted ComfyUI port+host from config.json if available.
         // Fixes a pre-existing bug where `set_comfyui_port` wrote to disk but
@@ -193,9 +205,10 @@ impl AppState {
             install_status: Arc::new(Mutex::new(InstallState::default())),
             ollama_install: Arc::new(Mutex::new(InstallState::default())),
             lmstudio_install: Arc::new(Mutex::new(InstallState::default())),
+            python_install: Arc::new(Mutex::new(InstallState::default())),
             searxng_install: Mutex::new(InstallState::default()),
             searxng_available: AtomicBool::new(false),
-            python_bin,
+            python_bin: Arc::new(Mutex::new(python_bin)),
             // Claude Code
             claude_code_process: Mutex::new(None),
             claude_code_install: Arc::new(Mutex::new(InstallState::default())),

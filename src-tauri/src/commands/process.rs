@@ -100,6 +100,134 @@ fn scan_for_comfyui(dir: &Path, depth: u32) -> Option<PathBuf> {
     None
 }
 
+/// Heuristic: does this ComfyUI directory look like a *complete* install,
+/// i.e. one that will actually start when we run `python main.py`?
+///
+/// "Complete" here means: torch is reachable. Two paths qualify:
+///
+/// 1. Portable variants ship a `python_embeded/` directory with the
+///    matching torch wheel pre-baked. We just check that
+///    `python_embeded/Lib/site-packages/torch/` exists — fast and avoids
+///    spawning a Python process for every dir we scan.
+/// 2. From-source installs depend on the system Python having torch.
+///    `python_embeded/` won't exist; we sniff the system Python's
+///    `Lib/site-packages/torch/` instead. (Best-effort: we only check the
+///    canonical "next to python.exe" layout — virtualenvs aren't covered,
+///    but those users wouldn't be using LU's auto-install path anyway.)
+///
+/// Returning `false` for a `main.py`-only carcass is the whole point of
+/// P14: a half-cloned ComfyUI dir from a previous abort (Python missing,
+/// pip 403, network drop) used to be detected as "installed", which left
+/// the user staring at "ComfyUI not responding" forever. Reporting it as
+/// incomplete instead lets the install flow retry cleanly.
+fn is_comfyui_install_complete(comfy_path: &Path) -> bool {
+    if !comfy_path.join("main.py").exists() {
+        return false;
+    }
+
+    // Path 1: portable layouts (next-to or inside the ComfyUI dir).
+    let portable_candidates = [
+        comfy_path
+            .parent()
+            .map(|p| p.join("python_embeded").join("Lib").join("site-packages").join("torch")),
+        Some(comfy_path.join("python_embeded").join("Lib").join("site-packages").join("torch")),
+    ];
+    for c in portable_candidates.into_iter().flatten() {
+        if c.exists() {
+            return true;
+        }
+    }
+
+    // Path 2: system Python — derive its prefix from the resolved path
+    // and look for torch in the standard sysconfig location. This catches
+    // the from-source case where pip dropped torch into the system
+    // Python's site-packages.
+    let candidate_pythons = collect_candidate_pythons();
+    for py in candidate_pythons {
+        if let Some(prefix) = Path::new(&py).parent() {
+            // Windows layout: <prefix>/Lib/site-packages
+            let win_torch = prefix.join("Lib").join("site-packages").join("torch");
+            if win_torch.exists() {
+                return true;
+            }
+            // Unix layout: <prefix>/../lib/python3.X/site-packages — be
+            // permissive, just look for any torch under <prefix>/../lib.
+            if let Some(parent) = prefix.parent() {
+                let lib = parent.join("lib");
+                if lib.exists() {
+                    if let Ok(entries) = std::fs::read_dir(&lib) {
+                        for e in entries.flatten() {
+                            if e.path().join("site-packages").join("torch").exists() {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Collect the system Python paths we might want to probe. Mirrors the
+/// search order in `python::get_python_bin` but returns *all* hits, not
+/// just the first — so the carcass check works even when the user has
+/// torch installed in a non-default Python.
+fn collect_candidate_pythons() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+
+    if !cfg!(target_os = "windows") {
+        for bin in &["python3", "python"] {
+            out.push(bin.to_string());
+        }
+        return out;
+    }
+
+    // `where python` candidates (excluding WindowsApps stub).
+    let mut where_cmd = Command::new("where");
+    where_cmd.arg("python");
+    #[cfg(target_os = "windows")]
+    where_cmd.creation_flags(CREATE_NO_WINDOW);
+    if let Ok(output) = where_cmd.output() {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let path = line.trim();
+                if !path.is_empty() && !path.contains("WindowsApps") {
+                    out.push(path.to_string());
+                }
+            }
+        }
+    }
+
+    for p in [
+        "C:\\Python313\\python.exe",
+        "C:\\Python312\\python.exe",
+        "C:\\Python311\\python.exe",
+        "C:\\Python310\\python.exe",
+        "C:\\Python39\\python.exe",
+    ] {
+        if Path::new(p).exists() {
+            out.push(p.to_string());
+        }
+    }
+
+    if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+        let programs = Path::new(&localappdata).join("Programs").join("Python");
+        if let Ok(entries) = std::fs::read_dir(&programs) {
+            for e in entries.flatten() {
+                let py = e.path().join("python.exe");
+                if py.exists() {
+                    out.push(py.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    out
+}
+
 pub fn find_comfyui_path() -> Option<String> {
     // 1. Check environment variable
     if let Ok(env_path) = std::env::var("COMFYUI_PATH") {
@@ -289,8 +417,16 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
         let candidate = std::path::Path::new(&comfy_path).join("python_embeded").join("python.exe");
         if candidate.exists() { Some(candidate.to_string_lossy().to_string()) } else { None }
     });
-    let python = bundled_python.as_deref().unwrap_or(&state.python_bin);
+    let system_python = state.python_bin.lock().unwrap().clone();
+    let python = bundled_python.clone().unwrap_or(system_python.clone());
     let port_str = port.to_string();
+    if python.is_empty() {
+        return Err(
+            "No Python available — install Python first (Settings → ComfyUI → Install Python). \
+             ComfyUI from-source needs a system Python; install one and retry."
+                .to_string(),
+        );
+    }
     if bundled_python.is_some() {
         println!("[ComfyUI] Using bundled portable Python: {}", python);
     } else {
@@ -298,7 +434,7 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
     }
     println!("[ComfyUI] Starting from: {} on port {}", comfy_path, port);
 
-    let mut cmd = Command::new(python);
+    let mut cmd = Command::new(&python);
     cmd.args(["main.py", "--listen", "127.0.0.1", "--port", &port_str, "--enable-cors-header", "*"])
         .current_dir(&comfy_path)
         .env("TQDM_DISABLE", "1")
@@ -403,16 +539,35 @@ pub async fn comfyui_status(state: State<'_, AppState>) -> Result<serde_json::Va
     };
 
     // For remote hosts we don't care whether a local install path exists.
+    let resolved_path: Option<String> = if is_local {
+        path.clone().or_else(find_comfyui_path)
+    } else {
+        None
+    };
+
     let found = if is_local {
-        path.is_some() || find_comfyui_path().is_some()
+        resolved_path.is_some()
     } else {
         true  // the remote side handles its own install
+    };
+
+    // Carcass detection: a local install is only "complete" if torch is
+    // actually reachable. Remote hosts are reported complete by definition
+    // — the remote side owns its own install state.
+    let complete = if is_local {
+        match &resolved_path {
+            Some(p) => is_comfyui_install_complete(Path::new(p)),
+            None => false,
+        }
+    } else {
+        true
     };
 
     Ok(serde_json::json!({
         "running": running,
         "starting": process_alive && !running,
         "found": found,
+        "complete": complete,
         "path": path,
         "port": port,
         "host": host,
@@ -431,8 +586,23 @@ pub fn is_local_host(host: &str) -> bool {
 #[tauri::command]
 pub fn find_comfyui() -> Result<serde_json::Value, String> {
     match find_comfyui_path() {
-        Some(path) => Ok(serde_json::json!({"found": true, "path": path})),
-        None => Ok(serde_json::json!({"found": false, "path": null})),
+        Some(path) => {
+            // Surface install completeness so the UI can distinguish a
+            // working ComfyUI from a half-cloned carcass and offer the
+            // right action (Continue vs. Re-install). See
+            // is_comfyui_install_complete for the definition of "complete".
+            let complete = is_comfyui_install_complete(Path::new(&path));
+            Ok(serde_json::json!({
+                "found": true,
+                "path": path,
+                "complete": complete,
+            }))
+        }
+        None => Ok(serde_json::json!({
+            "found": false,
+            "path": null,
+            "complete": false,
+        })),
     }
 }
 
@@ -696,12 +866,17 @@ pub fn auto_start_comfyui(state: &AppState) {
                     let c = std::path::Path::new(&path).join("python_embeded").join("python.exe");
                     if c.exists() { Some(c.to_string_lossy().to_string()) } else { None }
                 });
-            let python = portable_python.as_deref().unwrap_or(state.python_bin.as_str());
+            let system_python = state.python_bin.lock().unwrap().clone();
+            let python = portable_python.clone().unwrap_or_else(|| system_python.clone());
+            if python.is_empty() {
+                println!("[ComfyUI] Auto-start skipped: no Python available (install via P14 flow)");
+                return;
+            }
             if portable_python.is_some() {
                 println!("[ComfyUI] Auto-start using bundled portable Python: {}", python);
             }
 
-            let mut cmd = Command::new(python);
+            let mut cmd = Command::new(&python);
             cmd.args(["main.py", "--listen", "127.0.0.1", "--port", &port_str, "--enable-cors-header", "*"])
                 .current_dir(&path)
                 .env("TQDM_DISABLE", "1")

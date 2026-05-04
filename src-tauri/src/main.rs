@@ -49,6 +49,9 @@ fn main() {
             commands::install::install_lmstudio_status,
             commands::install::start_lmstudio_server,
             commands::install::lmstudio_server_status,
+            commands::install::install_python,
+            commands::install::install_python_status,
+            commands::install::python_check,
             commands::install::install_custom_node,
             // Whisper STT
             commands::whisper::whisper_status,
@@ -193,10 +196,19 @@ fn main() {
             commands::process::auto_start_comfyui(&state);
 
             let handle = app.handle().clone();
-            let python_bin = state.python_bin.clone();
+            let python_bin = state.python_bin.lock().unwrap().clone();
             let whisper = state.whisper.clone();
             std::thread::spawn(move || {
-                commands::whisper::auto_start_whisper_sync(&handle, &python_bin, &whisper);
+                // Whisper auto-start is best-effort and pip-installs faster-whisper
+                // on first launch — silently skip when no Python is on the box, so
+                // a fresh install doesn't fail the whole startup. The user can
+                // install Python later via the ComfyUI flow; whisper picks up on
+                // next launch.
+                if !python_bin.is_empty() {
+                    commands::whisper::auto_start_whisper_sync(&handle, &python_bin, &whisper);
+                } else {
+                    println!("[Whisper] Skipping auto-start: no Python yet (install via ComfyUI step)");
+                }
             });
 
             Ok(())

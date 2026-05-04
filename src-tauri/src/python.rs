@@ -7,7 +7,14 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// Resolve the real Python binary path, filtering out Windows Store alias.
+/// Resolve the real Python binary path, filtering out the Microsoft Store stub
+/// alias (`%LOCALAPPDATA%\Microsoft\WindowsApps\python.exe`) which prints
+/// "Python was not found, run without arguments to install from the Microsoft
+/// Store" and exits 1 — useless for `pip install`. Returns the empty string
+/// when no real Python is available; callers must treat `""` as
+/// "Python not installed". Falling back to the bare `"python"` string the way
+/// older versions did re-introduces the Store-stub trap on a fresh Windows
+/// box, which is exactly the bug P14 fixes.
 pub fn get_python_bin() -> String {
     if cfg!(not(target_os = "windows")) {
         // On Linux/macOS, try python3 first, then python
@@ -18,7 +25,8 @@ pub fn get_python_bin() -> String {
                 }
             }
         }
-        return "python3".to_string();
+        // Nothing usable — empty string sentinel.
+        return String::new();
     }
 
     // Windows: use `where python` and filter out WindowsApps alias
@@ -106,6 +114,18 @@ pub fn get_python_bin() -> String {
         }
     }
 
-    println!("[Python] WARNING: No reliable Python found, falling back to 'python'");
-    "python".to_string()
+    println!("[Python] No real Python found on PATH or known locations — returning empty sentinel");
+    String::new()
+}
+
+/// True iff `bin` looks like a real, runnable Python binary (not the empty
+/// sentinel from `get_python_bin` and not a Microsoft Store stub).
+pub fn is_real_python(bin: &str) -> bool {
+    if bin.is_empty() {
+        return false;
+    }
+    if bin.contains("WindowsApps") {
+        return false;
+    }
+    true
 }

@@ -231,7 +231,32 @@ pub fn install_comfyui(
         .map(PathBuf::from)
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("ComfyUI"));
 
-    let python_bin = state.python_bin.clone();
+    // Pre-flight: refuse to start ComfyUI install without a real Python.
+    // The frontend is expected to call `install_python` first when this
+    // returns the "no python" error — that flow shows a Python-install
+    // progress card before re-firing `install_comfyui`. The ComfyUI carcass
+    // bug (P14) was caused by skipping this check: pip got fed the Microsoft
+    // Store stub `python.exe`, which exit-1'd, leaving a half-cloned
+    // ComfyUI dir on disk that LU then mistakenly detected as "installed".
+    let python_bin = state.python_bin.lock().unwrap().clone();
+    if python_bin.is_empty() || !crate::python::is_real_python(&python_bin) {
+        // Reset install state so the frontend's polling sees the error
+        // immediately — without this the spawned thread below never runs and
+        // the UI sits on "installing" forever.
+        let mut install = state.install_status.lock().unwrap();
+        install.status = "error".to_string();
+        install.logs.push(
+            "Python is not installed on this machine. \
+             Install Python first (Settings → ComfyUI → Install Python, \
+             or click 'Install Python' in the onboarding ComfyUI step), \
+             then retry the ComfyUI install."
+                .to_string(),
+        );
+        return Err(
+            "no_python: Python must be installed before ComfyUI. Call install_python first."
+                .to_string(),
+        );
+    }
     let install_status = state.install_status.clone();
 
     std::thread::spawn(move || {
@@ -824,6 +849,244 @@ pub fn lmstudio_server_status() -> Result<serde_json::Value, String> {
     }))
 }
 
+// ── Python Auto-Install (P14: Plug-and-Play, blocking pre-req for ComfyUI) ──
+//
+// On a fresh Windows box `python.exe` is the Microsoft Store stub at
+// `%LOCALAPPDATA%\Microsoft\WindowsApps\python.exe` — it prints "Python was
+// not found, run without arguments to install from the Microsoft Store" and
+// exits 1. That kills `pip install torch ...` 200 ms in, leaves a half-cloned
+// ComfyUI dir on disk, and the user sees "ComfyUI not responding". The
+// only Plug-and-Play fix for newbies is to install Python ourselves; this is
+// what `install_python` does. Same shape as `install_ollama` /
+// `install_lmstudio`: kick off a background thread, surface status via a
+// shared `InstallState`, and re-resolve `python_bin` once it finishes so
+// subsequent `install_comfyui` calls find it without an app restart.
+
+#[tauri::command]
+pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    // If Python is already there, short-circuit so the UI can skip the
+    // install card and go straight to ComfyUI. is_real_python rejects
+    // the empty sentinel and WindowsApps stub paths.
+    {
+        let current = state.python_bin.lock().unwrap().clone();
+        if crate::python::is_real_python(&current) {
+            return Ok(serde_json::json!({"status": "already_installed", "path": current}));
+        }
+    }
+
+    let mut install = state.python_install.lock().unwrap();
+    if install.status == "downloading"
+        || install.status == "installing"
+        || install.status == "starting"
+    {
+        return Ok(serde_json::json!({"status": "already_installing"}));
+    }
+
+    install.status = "installing".to_string();
+    install.logs.clear();
+    install.download_progress = 0;
+    install.download_total = 0;
+    install.download_speed = 0.0;
+    install
+        .logs
+        .push("Installing Python 3.12 via winget (~30 MB)…".to_string());
+    drop(install);
+
+    let py_state = state.python_install.clone();
+    let py_bin_slot = state.python_bin.clone();
+
+    std::thread::spawn(move || {
+        let update = |status: &str, msg: &str| {
+            if let Ok(mut s) = py_state.lock() {
+                s.status = status.to_string();
+                s.logs.push(msg.to_string());
+            }
+        };
+
+        // Stream-friendly winget invocation. `--silent --accept-*-agreements`
+        // drops the EULA prompts; without them winget will sit and wait for
+        // user input forever inside our background thread. Python.Python.3.12
+        // is the canonical winget id for the python.org installer (matches
+        // `winget search python` top result).
+        update("installing", "Running: winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements");
+
+        let mut cmd = Command::new("winget");
+        cmd.args([
+            "install",
+            "Python.Python.3.12",
+            "--silent",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--scope",
+            "user",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+        #[cfg(target_os = "windows")]
+        cmd.creation_flags(CREATE_NO_WINDOW);
+
+        let child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                update(
+                    "error",
+                    &format!(
+                        "Could not run winget: {}. winget ships with Windows 10/11 — \
+                         if it's missing, run 'Get App Installer' from the Microsoft \
+                         Store (free) and retry.",
+                        e
+                    ),
+                );
+                return;
+            }
+        };
+
+        // Stream stdout + stderr line-by-line so the UI's log card animates
+        // as winget extracts and installs (otherwise it freezes for 1–2 min).
+        let mut child = child;
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
+        let stdout_state = py_state.clone();
+        let stdout_handle = std::thread::spawn(move || {
+            if let Some(out) = stdout {
+                let reader = BufReader::new(out);
+                for line in reader.lines().map_while(Result::ok) {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        if let Ok(mut s) = stdout_state.lock() {
+                            s.logs.push(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+        });
+        let stderr_state = py_state.clone();
+        let stderr_handle = std::thread::spawn(move || {
+            if let Some(err) = stderr {
+                let reader = BufReader::new(err);
+                for line in reader.lines().map_while(Result::ok) {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        if let Ok(mut s) = stderr_state.lock() {
+                            s.logs.push(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+        });
+
+        let exit_status = match child.wait() {
+            Ok(s) => s,
+            Err(e) => {
+                update("error", &format!("winget wait failed: {}", e));
+                return;
+            }
+        };
+        let _ = stdout_handle.join();
+        let _ = stderr_handle.join();
+
+        if !exit_status.success() {
+            // winget exit codes are HRESULT-shaped; -1978335189 (0x8A150011)
+            // means "no upgrade applicable" which is fine if Python is
+            // already present. Anything else is a real failure.
+            let code = exit_status.code().unwrap_or(-1);
+            // Re-resolve regardless: Python may already be on the box from
+            // a previous install attempt that the original where-scan
+            // missed (e.g. Add-to-PATH was unchecked).
+            let resolved = crate::python::get_python_bin();
+            if crate::python::is_real_python(&resolved) {
+                if let Ok(mut slot) = py_bin_slot.lock() {
+                    *slot = resolved.clone();
+                }
+                update(
+                    "complete",
+                    &format!("Python ready (winget exit {} ignored, Python detected at {})", code, resolved),
+                );
+                return;
+            }
+            update(
+                "error",
+                &format!(
+                    "winget exited with code {}. Python was not detected after \
+                     install. Try installing manually from python.org with the \
+                     'Add Python to PATH' checkbox on, then return here and \
+                     click Re-Scan.",
+                    code
+                ),
+            );
+            return;
+        }
+
+        update("starting", "winget finished. Re-resolving Python…");
+
+        // Give the freshly installed Python a moment to settle (winget can
+        // signal completion before the file is fully linked into PATH on
+        // some boxes), then re-resolve and persist.
+        for attempt in 0..15 {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let resolved = crate::python::get_python_bin();
+            if crate::python::is_real_python(&resolved) {
+                if let Ok(mut slot) = py_bin_slot.lock() {
+                    *slot = resolved.clone();
+                }
+                update(
+                    "complete",
+                    &format!("Python ready at {}", resolved),
+                );
+                return;
+            }
+            println!("[Python] post-install resolve attempt {}/15 — not yet on PATH", attempt + 1);
+        }
+
+        update(
+            "error",
+            "winget reported success but Python is still not on PATH. \
+             Restart Locally Uncensored — sometimes Windows needs the new PATH \
+             to take effect. If it still doesn't show up, install manually \
+             from python.org with 'Add Python to PATH' on.",
+        );
+    });
+
+    Ok(serde_json::json!({"status": "installing"}))
+}
+
+#[tauri::command]
+pub fn install_python_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let install = state.python_install.lock().unwrap();
+    Ok(serde_json::json!({
+        "status": install.status,
+        "logs": install.logs,
+        "download_progress": install.download_progress,
+        "download_total": install.download_total,
+        "download_speed": install.download_speed,
+    }))
+}
+
+/// Cheap synchronous probe: is there a real Python on the box?  The frontend
+/// calls this before kicking off `install_comfyui` so it can decide whether
+/// to show the Python install step first. Returns the resolved path on
+/// success so the UI can display it ("Found Python at C:\\…").
+#[tauri::command]
+pub fn python_check(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let current = state.python_bin.lock().unwrap().clone();
+    if crate::python::is_real_python(&current) {
+        return Ok(serde_json::json!({"available": true, "path": current}));
+    }
+
+    // The slot may have been empty at startup (fresh box) and Python may
+    // have been installed since (e.g. via this same install_python flow on
+    // another launch). Re-resolve as a refresh.
+    let resolved = crate::python::get_python_bin();
+    if crate::python::is_real_python(&resolved) {
+        if let Ok(mut slot) = state.python_bin.lock() {
+            *slot = resolved.clone();
+        }
+        Ok(serde_json::json!({"available": true, "path": resolved}))
+    } else {
+        Ok(serde_json::json!({"available": false, "path": null}))
+    }
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[allow(non_snake_case)]
@@ -892,7 +1155,7 @@ pub fn install_custom_node(
             // Install requirements.txt if it exists
             let reqs = target_dir.join("requirements.txt");
             if reqs.exists() {
-                let python_bin = state.python_bin.clone();
+                let python_bin = state.python_bin.lock().unwrap().clone();
                 println!("[Install] Installing requirements for {}...", node_name);
                 let mut pip = Command::new(&python_bin);
                 pip.args(["-m", "pip", "install", "-r"]).arg(&reqs)

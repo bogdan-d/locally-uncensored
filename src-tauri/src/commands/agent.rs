@@ -279,7 +279,15 @@ pub fn execute_code(
     let workspace = agent_workspace(chatId.as_deref(), Some(&*state));
     let _ = fs::create_dir_all(&workspace);
 
-    let mut cmd = Command::new(&state.python_bin);
+    let python_bin = state.python_bin.lock().unwrap().clone();
+    if python_bin.is_empty() {
+        return Err(
+            "Python is not installed — agent code execution requires Python. \
+             Install it from Settings → ComfyUI → Install Python first."
+                .to_string(),
+        );
+    }
+    let mut cmd = Command::new(&python_bin);
     cmd.arg(&script_path)
         .current_dir(&workspace)
         .stdin(Stdio::null())
