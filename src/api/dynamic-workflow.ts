@@ -32,6 +32,15 @@ export type WorkflowStrategy =
 interface StrategyResult {
   strategy: WorkflowStrategy
   reason: string
+  /**
+   * When `strategy === 'unavailable'` and the missing piece is an
+   * installable custom-node pack, this hint tells the UI which one to
+   * suggest. Surfaces in Create view as a clickable "open install guide"
+   * link so users like vvvxxxvvv_80435 (CogVideoX 1.5 5B → UNETLoader
+   * mismatch on v2.4.3) get a clear next step instead of just a
+   * blocking error. (Bug #6)
+   */
+  installHint?: { pack: string; url: string }
 }
 
 export function determineStrategy(
@@ -125,7 +134,11 @@ export function determineStrategy(
     if (hasCogNodes) {
       return { strategy: 'cogvideo', reason: 'CogVideoX → Kijai wrapper pipeline' }
     }
-    return { strategy: 'unavailable', reason: 'CogVideoX requires ComfyUI-CogVideoXWrapper custom nodes. Install them from the Model Manager.' }
+    return {
+      strategy: 'unavailable',
+      reason: 'CogVideoX needs the ComfyUI-CogVideoXWrapper custom nodes. Install via ComfyUI Manager (Manager → Install Custom Nodes → search "CogVideoXWrapper") or git clone the repo into ComfyUI/custom_nodes/.',
+      installHint: { pack: 'ComfyUI-CogVideoXWrapper', url: 'https://github.com/kijai/ComfyUI-CogVideoXWrapper' },
+    }
   }
 
   // FramePack → Kijai wrapper nodes (I2V)
@@ -134,7 +147,11 @@ export function determineStrategy(
     if (hasFPNodes) {
       return { strategy: 'framepack', reason: 'FramePack → Kijai wrapper pipeline (I2V)' }
     }
-    return { strategy: 'unavailable', reason: 'FramePack requires ComfyUI-FramePackWrapper custom nodes. Install them from the Model Manager.' }
+    return {
+      strategy: 'unavailable',
+      reason: 'FramePack needs the ComfyUI-FramePackWrapper custom nodes. Install via ComfyUI Manager (Manager → Install Custom Nodes → search "FramePackWrapper") or git clone the repo into ComfyUI/custom_nodes/.',
+      installHint: { pack: 'ComfyUI-FramePackWrapper', url: 'https://github.com/kijai/ComfyUI-FramePackWrapper' },
+    }
   }
 
   // Pyramid Flow → Kijai wrapper nodes
@@ -143,7 +160,11 @@ export function determineStrategy(
     if (hasPFNodes) {
       return { strategy: 'pyramidflow', reason: 'Pyramid Flow → Kijai wrapper pipeline' }
     }
-    return { strategy: 'unavailable', reason: 'Pyramid Flow requires ComfyUI-PyramidFlowWrapper custom nodes. Install them from the Model Manager.' }
+    return {
+      strategy: 'unavailable',
+      reason: 'Pyramid Flow needs the ComfyUI-PyramidFlowWrapper custom nodes. Install via ComfyUI Manager or git clone into ComfyUI/custom_nodes/.',
+      installHint: { pack: 'ComfyUI-PyramidFlowWrapper', url: 'https://github.com/kijai/ComfyUI-PyramidFlowWrapper' },
+    }
   }
 
   // Allegro → Community wrapper nodes
@@ -152,7 +173,11 @@ export function determineStrategy(
     if (hasAllegroNodes) {
       return { strategy: 'allegro', reason: 'Allegro → Community wrapper pipeline' }
     }
-    return { strategy: 'unavailable', reason: 'Allegro requires ComfyUI-Allegro custom nodes. Install them from the Model Manager.' }
+    return {
+      strategy: 'unavailable',
+      reason: 'Allegro needs the ComfyUI-Allegro community wrapper nodes (search "Allegro" in ComfyUI Manager → Install Custom Nodes).',
+      installHint: { pack: 'ComfyUI-Allegro', url: 'https://github.com/rhajou/ComfyUI-Allegro' },
+    }
   }
 
   // SDXL / SD1.5 / Unknown
@@ -174,6 +199,46 @@ export function determineStrategy(
 
 // ─── Dynamic Workflow Builder ───
 
+/**
+ * Custom Error thrown by `buildDynamicWorkflow` when the active ComfyUI
+ * lacks the loader nodes for the chosen model architecture (Bug #6:
+ * CogVideoX 1.5 / LTX / FramePack require Kijai wrapper nodes that aren't
+ * in ComfyUI core). UI can read `.installHint` to render a one-click
+ * "open install guide" link instead of just blocking the user.
+ */
+export class WorkflowUnavailableError extends Error {
+  readonly strategy: WorkflowStrategy
+  readonly installHint?: { pack: string; url: string }
+  constructor(message: string, strategy: WorkflowStrategy, installHint?: { pack: string; url: string }) {
+    super(message)
+    this.name = 'WorkflowUnavailableError'
+    this.strategy = strategy
+    this.installHint = installHint
+  }
+}
+
+/**
+ * Probe ComfyUI for the video output node we need. When neither VHS nor
+ * SaveAnimatedWEBP is present, the workflow will fall back to SaveImage
+ * (single frames on disk) — Turbulent_Tomato7559's "videos generate as
+ * .webp" was caused by VHS missing while SaveAnimatedWEBP still produced
+ * an animated still. UI calls this BEFORE Generate so users see a banner
+ * rather than discovering after the fact.
+ */
+export async function checkVideoOutputCapability(): Promise<{ mp4Capable: boolean; webpOnly: boolean; missingNodes: string[] }> {
+  const allNodes = await getAllNodeInfo()
+  const cats = categorizeNodes(allNodes)
+  const hasVHS = cats.videoSavers.includes('VHS_VideoCombine')
+  const hasWebp = cats.videoSavers.includes('SaveAnimatedWEBP')
+  const missing: string[] = []
+  if (!hasVHS) missing.push('VHS_VideoCombine (ComfyUI-VideoHelperSuite)')
+  return {
+    mp4Capable: hasVHS,
+    webpOnly: !hasVHS && hasWebp,
+    missingNodes: missing,
+  }
+}
+
 export async function buildDynamicWorkflow(
   params: GenerateParams | VideoParams,
   modelType?: ModelType,
@@ -187,11 +252,11 @@ export async function buildDynamicWorkflow(
   const nodes = categorizeNodes(allNodes)
   const models = detectAvailableModels(allNodes)
 
-  const { strategy, reason } = determineStrategy(type, isVideo, nodes, models)
+  const { strategy, reason, installHint } = determineStrategy(type, isVideo, nodes, models)
   console.log(`[dynamic-workflow] Strategy: ${strategy} (${reason})`)
 
   if (strategy === 'unavailable') {
-    throw new Error(reason)
+    throw new WorkflowUnavailableError(reason, strategy, installHint)
   }
 
   const seed = params.seed === -1 ? Math.floor(Math.random() * 2147483647) : params.seed

@@ -35,6 +35,7 @@ fn main() {
             commands::process::stop_comfyui,
             commands::process::comfyui_status,
             commands::process::find_comfyui,
+            commands::process::detect_all_comfyui_installs,
             commands::process::set_comfyui_path,
             commands::process::set_comfyui_port,
             commands::process::set_comfyui_host,
@@ -43,6 +44,7 @@ fn main() {
             // Installation
             commands::install::install_comfyui,
             commands::install::install_comfyui_status,
+            commands::install::cancel_comfyui_install,
             commands::install::install_ollama,
             commands::install::install_ollama_status,
             commands::install::install_lmstudio,

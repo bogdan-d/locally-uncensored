@@ -221,4 +221,45 @@ describe('dynamic-workflow — determineStrategy', () => {
       expect(result.reason.toLowerCase()).toContain('no compatible')
     })
   })
+
+  // ─── installHint (Bug #6 — Video architecture install paths) ───
+
+  describe('install hints when wrapper nodes missing', () => {
+    it('cogvideo unavailable -> installHint with ComfyUI-CogVideoXWrapper', () => {
+      const nodes = makeNodes({ samplers: ['KSampler'] })
+      const result = determineStrategy('cogvideo', true, nodes, makeModels())
+      expect(result.strategy).toBe('unavailable')
+      expect(result.installHint?.pack).toBe('ComfyUI-CogVideoXWrapper')
+      expect(result.installHint?.url).toContain('github.com')
+    })
+
+    it('framepack unavailable -> installHint with ComfyUI-FramePackWrapper', () => {
+      const nodes = makeNodes({ samplers: ['KSampler'] })
+      const result = determineStrategy('framepack', true, nodes, makeModels())
+      expect(result.strategy).toBe('unavailable')
+      expect(result.installHint?.pack).toBe('ComfyUI-FramePackWrapper')
+      expect(result.installHint?.url).toContain('github.com')
+    })
+
+    it('pyramidflow unavailable -> installHint with ComfyUI-PyramidFlowWrapper', () => {
+      const nodes = makeNodes({ samplers: ['KSampler'] })
+      const result = determineStrategy('pyramidflow', true, nodes, makeModels())
+      expect(result.strategy).toBe('unavailable')
+      expect(result.installHint?.pack).toBe('ComfyUI-PyramidFlowWrapper')
+    })
+
+    it('allegro unavailable -> installHint with ComfyUI-Allegro', () => {
+      const nodes = makeNodes({ samplers: ['KSampler'] })
+      const result = determineStrategy('allegro', true, nodes, makeModels())
+      expect(result.strategy).toBe('unavailable')
+      expect(result.installHint?.pack).toBe('ComfyUI-Allegro')
+    })
+
+    it('non-wrapper unavailable (flux without UNETLoader) has no installHint', () => {
+      const nodes = makeNodes({ loaders: ['CheckpointLoaderSimple'] })
+      const result = determineStrategy('flux', false, nodes, makeModels())
+      expect(result.strategy).toBe('unavailable')
+      expect(result.installHint).toBeUndefined()
+    })
+  })
 })

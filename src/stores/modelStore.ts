@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { AIModel, PullProgress, ModelCategory } from '../types/models'
 import { unloadModel } from '../api/ollama'
+import { isTauri } from '../api/backend'
 
 export interface PullState {
   progress: PullProgress
@@ -106,11 +107,37 @@ export const useModelStore = create<ModelState>()(
           }
         }),
 
-      dismissPull: (name) =>
+      dismissPull: (name) => {
+        // Bug #5 (phantomderp v2.4.3): the X-button used to remove the
+        // entry from `activePulls` without telling Rust to stop the
+        // underlying stream. The Tauri-side `pull_model_stream` kept
+        // emitting `pull-progress` events that re-created the entry via
+        // `pullModelTauri`'s listener — the item visually respawned within
+        // 100 ms and the disk-write kept running. Fix: cancel both sides.
+        //
+        // 1. Abort the AbortController so the listener inside
+        //    `useModels.pullModel` sees the abort and the controller's
+        //    "abort" handler fires `cancel_model_pull`.
+        // 2. Best-effort: invoke `cancel_model_pull` directly too. This
+        //    covers the rare case where the controller was already
+        //    consumed (e.g. completed-but-not-yet-dismissed entries) and
+        //    is idempotent on the Rust side.
+        const existing = get().activePulls[name]
+        if (existing) {
+          try { existing.controller.abort() } catch { /* already aborted */ }
+        }
+        if (isTauri()) {
+          // Fire-and-forget — the Rust command returns Ok(()) even when
+          // there's nothing to cancel, so failure here is non-fatal.
+          import('@tauri-apps/api/core').then(({ invoke }) => {
+            invoke('cancel_model_pull', { name }).catch(() => {})
+          }).catch(() => {})
+        }
         set((state) => {
           const { [name]: _, ...rest } = state.activePulls
           return { activePulls: rest }
-        }),
+        })
+      },
 
       setIsModelLoading: (loading) => set({ isModelLoading: loading }),
       setCategoryFilter: (category) => set({ categoryFilter: category }),

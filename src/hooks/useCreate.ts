@@ -23,7 +23,7 @@ import {
   LOADER_NODES, CLIP_LOADER_NODES, VAE_LOADER_NODES, SAMPLER_NODES, DECODE_NODES,
   type ComfyWSEvent,
 } from '../api/comfyui-ws'
-import { buildDynamicWorkflow } from '../api/dynamic-workflow'
+import { buildDynamicWorkflow, WorkflowUnavailableError, checkVideoOutputCapability } from '../api/dynamic-workflow'
 import { getAllNodeInfo } from '../api/comfyui-nodes'
 import { useCreateStore, type GalleryItem } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
@@ -310,7 +310,22 @@ export function useCreate() {
           workflow = await buildDynamicWorkflow(genParams, imageModelType)
           builderUsed = 'dynamic'
         } catch (dynErr) {
-          // Fallback to legacy builders if dynamic fails
+          // Bug #6: when the dynamic builder reports the active ComfyUI is
+          // missing wrapper nodes (CogVideoX 1.5 / FramePack / LTX etc.),
+          // there's no point falling back to the legacy builder — it
+          // hits the same UNETLoader trap and surfaces "could not detect
+          // model type" instead. Tell the user exactly what to install.
+          if (dynErr instanceof WorkflowUnavailableError) {
+            const hint = dynErr.installHint
+            const guidance = hint
+              ? ` Install via ComfyUI Manager → Install Custom Nodes → search "${hint.pack}" (${hint.url}).`
+              : ''
+            setError(`${dynErr.message}${guidance}`)
+            setIsGenerating(false)
+            return
+          }
+          // Other dynamic-builder failures: legacy is a reasonable fallback
+          // (mostly happens for classic SDXL/SD15 image paths).
           console.warn('[useCreate] Dynamic builder failed, using legacy:', dynErr)
           builderUsed = 'legacy'
           setProgress(5, 'Using legacy builder...')
@@ -319,6 +334,18 @@ export function useCreate() {
           } else {
             workflow = await buildTxt2ImgWorkflow(baseParams, imageModelType)
           }
+        }
+        // Bug #6 (Turbulent_Tomato7559 — Reddit, 2026-05-10): warn when
+        // we'll fall back to animated .webp because VHS_VideoCombine is
+        // missing. User gets a banner explaining the output before they
+        // hit Generate and then wonder why they got an "image".
+        if (mode === 'video' && builderUsed === 'dynamic') {
+          try {
+            const caps = await checkVideoOutputCapability()
+            if (caps.webpOnly) {
+              setProgress(8, 'Heads-up: output will be animated .webp (install VHS_VideoCombine for mp4)')
+            }
+          } catch { /* non-fatal */ }
         }
       }
 

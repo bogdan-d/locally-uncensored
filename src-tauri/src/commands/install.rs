@@ -1,7 +1,8 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Read as IoRead};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -15,6 +16,104 @@ use crate::state::{AppState, InstallState};
 /// Windows: hide console windows for spawned processes
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+// ── Disk-pressure pre-flight (Bug #1 — techx69 100%-busy-drive hang) ────────
+
+/// Return a human-readable warning when the target install drive is short
+/// on free space (<5 GB — ComfyUI + PyTorch wheels need ~5 GB) or its
+/// pending I/O queue suggests sustained 100% utilisation. Best-effort —
+/// returns None if sysinfo can't get reliable data, so we never block a
+/// well-meaning install over a probing flake.
+fn check_install_disk_pressure(target_dir: &Path) -> Option<String> {
+    use sysinfo::Disks;
+    let disks = Disks::new_with_refreshed_list();
+    // Find the disk that contains the target dir. sysinfo's Disk::mount_point
+    // is a PathBuf — pick the longest mount that is a prefix of target_dir.
+    let normalized = target_dir.to_path_buf();
+    let mut best: Option<&sysinfo::Disk> = None;
+    let mut best_len: usize = 0;
+    for d in &disks {
+        let mp = d.mount_point();
+        if normalized.starts_with(mp) {
+            let len = mp.as_os_str().len();
+            if len > best_len {
+                best_len = len;
+                best = Some(d);
+            }
+        }
+    }
+    let disk = best?;
+
+    let free_bytes = disk.available_space();
+    let total_bytes = disk.total_space();
+    let needed_bytes: u64 = 5 * 1024 * 1024 * 1024; // 5 GB
+    if free_bytes < needed_bytes {
+        return Some(format!(
+            "⚠ Low disk space on {}: {:.1} GB free of {:.1} GB total. \
+             ComfyUI + PyTorch need about 5 GB. Consider freeing space or \
+             choosing a drive with more room before continuing.",
+            disk.mount_point().to_string_lossy(),
+            free_bytes as f64 / 1_073_741_824.0,
+            total_bytes as f64 / 1_073_741_824.0,
+        ));
+    }
+    None
+}
+
+#[tauri::command]
+pub fn cancel_comfyui_install(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    state.comfyui_install_cancel.store(true, Ordering::SeqCst);
+    if let Ok(mut s) = state.install_status.lock() {
+        // Mark as cancelling immediately so the UI can switch to a
+        // "Cancelling…" indicator even before the spawn loop notices.
+        if s.status == "installing" || s.status == "downloading" {
+            s.status = "cancelling".to_string();
+            s.logs.push("Cancellation requested — waiting for active subprocess to exit…".to_string());
+        }
+    }
+    Ok(serde_json::json!({"status": "cancelling"}))
+}
+
+// ── GPU helpers (Bug #10 — Blackwell PyTorch cu128 routing) ─────────────────
+
+/// Probe NVIDIA's compute capability of the first detected GPU and return
+/// its major version (8 for Ampere, 9 for Hopper, 12 for Blackwell, …).
+///
+/// `nvidia-smi --query-gpu=compute_cap` prints lines like `12.0` (one per
+/// GPU). We take the highest major across visible GPUs because pip can
+/// only install ONE PyTorch build — picking the higher capability set
+/// satisfies every card on the box (cu128 wheels still run on Ampere etc.).
+/// Returns None when nvidia-smi is absent or the parse fails; the caller
+/// falls back to the previous default index URL.
+fn parse_compute_cap_output(s: &str) -> Option<u32> {
+    let mut max_major: Option<u32> = None;
+    for line in s.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let major_str = trimmed.split('.').next().unwrap_or("");
+        if let Ok(major) = major_str.parse::<u32>() {
+            max_major = Some(max_major.map_or(major, |prev| prev.max(major)));
+        }
+    }
+    max_major
+}
+
+fn detect_nvidia_compute_cap_major() -> Option<u32> {
+    let mut cmd = Command::new("nvidia-smi");
+    cmd.args(["--query-gpu=compute_cap", "--format=csv,noheader,nounits"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    parse_compute_cap_output(&s)
+}
 
 // ── pip helpers (issue #32: PyTorch / ComfyUI install reliability) ───────────
 
@@ -109,16 +208,27 @@ fn diagnose_pip_error(stderr: &str) -> String {
 ///
 /// On non-transient errors or after exhausting retries, returns Err with a
 /// human-readable diagnosis prepended to the truncated original error.
-fn pip_install_streaming_with_retry(
+/// Streaming pip install with retry. When `cancel` is `Some`, polls the
+/// shared flag between line reads and waits, and kills the pip child on
+/// cancel — used by `install_comfyui` so the user's Cancel button
+/// (Bug #1 — techx69 v2.4.3) actually stops the running install instead
+/// of waiting for pip to finish naturally. When `cancel` is `None`, the
+/// install runs to completion as before — used by `install_python` and
+/// callers that haven't been wired up to the new cancel flow.
+fn pip_install_streaming_with_retry_cancellable(
     args: &[&str],
     python_bin: &str,
     max_attempts: u32,
     install_state: &Arc<Mutex<InstallState>>,
+    cancel: Option<&Arc<AtomicBool>>,
 ) -> Result<(), String> {
     let mut delay_seconds = 10u64;
     let mut last_stderr = String::new();
 
     for attempt in 1..=max_attempts {
+        if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+            return Err("cancelled".to_string());
+        }
         if attempt > 1 {
             push_install_log(
                 install_state,
@@ -127,7 +237,13 @@ fn pip_install_streaming_with_retry(
                     attempt, max_attempts, delay_seconds
                 ),
             );
-            std::thread::sleep(std::time::Duration::from_secs(delay_seconds));
+            // Sleep in 1-second chunks so cancel reacts within ~1s.
+            for _ in 0..delay_seconds {
+                if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+                    return Err("cancelled".to_string());
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
             delay_seconds = (delay_seconds * 3).min(180);
         }
 
@@ -184,9 +300,22 @@ fn pip_install_streaming_with_retry(
             }
         });
 
-        let exit_status = match child.wait() {
-            Ok(s) => s,
-            Err(e) => return Err(format!("pip wait failed: {}", e)),
+        // Poll for either the child to exit or the cancel flag to flip.
+        // try_wait avoids blocking the cancel check; sleep keeps CPU idle.
+        let exit_status = loop {
+            if cancel.as_ref().map(|c| c.load(Ordering::SeqCst)).unwrap_or(false) {
+                // Kill the child so pip doesn't keep saturating disk.
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_handle.join();
+                let _ = stderr_handle.join();
+                return Err("cancelled".to_string());
+            }
+            match child.try_wait() {
+                Ok(Some(s)) => break s,
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(200)),
+                Err(e) => return Err(format!("pip wait failed: {}", e)),
+            }
         };
         let _ = stdout_handle.join();
         let _ = stderr_handle.join();
@@ -227,9 +356,25 @@ pub fn install_comfyui(
     install.logs.push("Starting ComfyUI installation...".to_string());
     drop(install);
 
+    // Reset cancel flag (Bug #1) — a previous cancelled install would
+    // otherwise short-circuit the new run on first poll.
+    state.comfyui_install_cancel.store(false, Ordering::SeqCst);
+    let cancel_flag = state.comfyui_install_cancel.clone();
+
     let target_dir = install_path
         .map(PathBuf::from)
         .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("ComfyUI"));
+
+    // Bug #1 (techx69): pre-flight disk pressure check. On a drive sitting
+    // at 100% utilisation the install hangs for 45+ minutes and the app
+    // OOMs. Surface the risk BEFORE we start — the user can free space
+    // or pick a different drive instead of staring at a frozen progress
+    // log. We don't refuse to start: some users will accept the slow path.
+    if let Some(warning) = check_install_disk_pressure(&target_dir) {
+        if let Ok(mut s) = state.install_status.lock() {
+            s.logs.push(warning);
+        }
+    }
 
     // Pre-flight: refuse to start ComfyUI install without a real Python.
     // The frontend is expected to call `install_python` first when this
@@ -268,7 +413,15 @@ pub fn install_comfyui(
             }
         };
 
-        // Step 1: Git clone
+        let cancelled = || cancel_flag.load(Ordering::SeqCst);
+
+        if cancelled() {
+            update("cancelled", "Install cancelled before it started.");
+            return;
+        }
+
+        // Step 1: Git clone — spawn+poll instead of cmd.output() so the
+        // Cancel button can kill an in-flight clone (Bug #1).
         println!("[Install] Cloning ComfyUI to {:?}", target_dir);
         update("downloading", "Step 1/3: Downloading ComfyUI repository...");
 
@@ -279,37 +432,64 @@ pub fn install_comfyui(
             .stderr(Stdio::piped());
         #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
-        let clone = cmd.output();
-
-        match clone {
-            Ok(output) if output.status.success() => {
-                println!("[Install] Git clone successful");
-                update("installing", "Repository cloned successfully.");
-            }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if stderr.contains("already exists") {
-                    println!("[Install] ComfyUI directory already exists, updating...");
-                    update("installing", "ComfyUI already exists, pulling latest...");
-                    let mut pull = Command::new("git");
-                    pull.args(["pull"]).current_dir(&target_dir)
-                        .stdout(Stdio::piped()).stderr(Stdio::piped());
-                    #[cfg(target_os = "windows")]
-                    pull.creation_flags(CREATE_NO_WINDOW);
-                    let _ = pull.output();
-                } else {
-                    let err = format!("Git clone failed: {}", stderr);
-                    println!("[Install] {}", err);
-                    update("error", &err);
-                    return;
-                }
-            }
+        let mut clone_child = match cmd.spawn() {
+            Ok(c) => c,
             Err(e) => {
                 let err = format!("Git is not installed or not in PATH: {}", e);
                 println!("[Install] {}", err);
                 update("error", &err);
                 return;
             }
+        };
+        let clone_exit = loop {
+            if cancelled() {
+                let _ = clone_child.kill();
+                let _ = clone_child.wait();
+                update("cancelled", "Install cancelled during git clone.");
+                return;
+            }
+            match clone_child.try_wait() {
+                Ok(Some(s)) => break s,
+                Ok(None) => std::thread::sleep(std::time::Duration::from_millis(250)),
+                Err(e) => {
+                    update("error", &format!("git wait failed: {}", e));
+                    return;
+                }
+            }
+        };
+
+        if clone_exit.success() {
+            println!("[Install] Git clone successful");
+            update("installing", "Repository cloned successfully.");
+        } else {
+            let mut stderr = String::new();
+            if let Some(mut e) = clone_child.stderr.take() {
+                let _ = e.read_to_string(&mut stderr);
+            }
+            if stderr.contains("already exists") {
+                println!("[Install] ComfyUI directory already exists, updating...");
+                update("installing", "ComfyUI already exists, pulling latest...");
+                if cancelled() {
+                    update("cancelled", "Install cancelled.");
+                    return;
+                }
+                let mut pull = Command::new("git");
+                pull.args(["pull"]).current_dir(&target_dir)
+                    .stdout(Stdio::piped()).stderr(Stdio::piped());
+                #[cfg(target_os = "windows")]
+                pull.creation_flags(CREATE_NO_WINDOW);
+                let _ = pull.output();
+            } else {
+                let err = format!("Git clone failed: {}", stderr);
+                println!("[Install] {}", err);
+                update("error", &err);
+                return;
+            }
+        }
+
+        if cancelled() {
+            update("cancelled", "Install cancelled after clone.");
+            return;
         }
 
         // Step 2: Detect GPU and install PyTorch
@@ -319,7 +499,28 @@ pub fn install_comfyui(
         nv.creation_flags(CREATE_NO_WINDOW);
         let has_nvidia = nv.output().map(|o| o.status.success()).unwrap_or(false);
 
-        let gpu_info = if has_nvidia { "NVIDIA GPU detected — installing CUDA PyTorch" } else { "No NVIDIA GPU — installing CPU PyTorch" };
+        // Bug #10 (vokurta — RTX 6000 Blackwell, 2026-05-11): SM 12.0 GPUs
+        // need PyTorch cu128 wheels. cu121 stops at sm_90 (Hopper); on
+        // Blackwell the kernel simply isn't shipped and the first compute
+        // call dies with "CUDA error: no kernel image is available for
+        // execution on the device". We probe `--query-gpu=compute_cap` and
+        // pick the wheel set accordingly. Falls back to cu121 if the probe
+        // fails for any reason — that's the previous behaviour, so we
+        // never regress existing setups.
+        let compute_cap_major = if has_nvidia { detect_nvidia_compute_cap_major() } else { None };
+        let pytorch_index = match compute_cap_major {
+            Some(major) if major >= 12 => Some("https://download.pytorch.org/whl/cu128"),
+            Some(_) => Some("https://download.pytorch.org/whl/cu121"),
+            None if has_nvidia => Some("https://download.pytorch.org/whl/cu121"),
+            None => None,
+        };
+
+        let gpu_info = match (has_nvidia, compute_cap_major) {
+            (true, Some(major)) if major >= 12 => "NVIDIA Blackwell GPU detected (SM 12.0+) — installing PyTorch cu128",
+            (true, Some(_)) => "NVIDIA GPU detected — installing CUDA PyTorch (cu121)",
+            (true, None) => "NVIDIA GPU detected (compute capability probe failed) — falling back to cu121",
+            (false, _) => "No NVIDIA GPU — installing CPU PyTorch",
+        };
         println!("[Install] {}", gpu_info);
         update("installing", &format!("Step 2/3: {}", gpu_info));
         update(
@@ -330,13 +531,13 @@ pub fn install_comfyui(
              lines appearing, the install is making progress, not hung.",
         );
 
-        let torch_args: Vec<&str> = if has_nvidia {
+        let torch_args: Vec<&str> = if let Some(index_url) = pytorch_index {
             vec![
                 "-m", "pip", "install",
                 "--progress-bar", "off",
                 "--no-input",
                 "torch", "torchvision", "torchaudio",
-                "--index-url", "https://download.pytorch.org/whl/cu121",
+                "--index-url", index_url,
             ]
         } else {
             vec![
@@ -347,9 +548,13 @@ pub fn install_comfyui(
             ]
         };
 
-        match pip_install_streaming_with_retry(&torch_args, &python_bin, 3, &install_status) {
+        match pip_install_streaming_with_retry_cancellable(&torch_args, &python_bin, 3, &install_status, Some(&cancel_flag)) {
             Ok(()) => {
                 update("installing", "PyTorch installed successfully.");
+            }
+            Err(diagnosis) if diagnosis == "cancelled" => {
+                update("cancelled", "Install cancelled during PyTorch download.");
+                return;
             }
             Err(diagnosis) => {
                 let err = format!("PyTorch installation failed.\n\n{}", diagnosis);
@@ -357,6 +562,11 @@ pub fn install_comfyui(
                 update("error", &err);
                 return;
             }
+        }
+
+        if cancelled() {
+            update("cancelled", "Install cancelled before requirements install.");
+            return;
         }
 
         // Step 3: Install ComfyUI requirements
@@ -372,9 +582,13 @@ pub fn install_comfyui(
                 "--no-input",
                 "-r", reqs_str.as_str(),
             ];
-            match pip_install_streaming_with_retry(&req_args, &python_bin, 3, &install_status) {
+            match pip_install_streaming_with_retry_cancellable(&req_args, &python_bin, 3, &install_status, Some(&cancel_flag)) {
                 Ok(()) => {
                     update("installing", "Dependencies installed successfully.");
+                }
+                Err(diagnosis) if diagnosis == "cancelled" => {
+                    update("cancelled", "Install cancelled during requirements install.");
+                    return;
                 }
                 Err(diagnosis) => {
                     // Don't fail the whole install — some optional deps may fail
@@ -641,16 +855,46 @@ fn lmstudio_lms_path() -> Option<PathBuf> {
     // directly is how we *do* the bootstrap on a brand-new box — without it
     // the user has to open LM Studio once from the Start menu just to seed
     // the CLI, which is exactly the noob-cliff this sweep is removing.
+    let webpack_suffix = ["resources", "app", ".webpack", "lms.exe"];
     if let Ok(la) = std::env::var("LOCALAPPDATA") {
-        let pre_bootstrap = PathBuf::from(la)
-            .join("Programs")
-            .join("LM Studio")
-            .join("resources")
-            .join("app")
-            .join(".webpack")
-            .join("lms.exe");
+        let mut pre_bootstrap = PathBuf::from(la);
+        pre_bootstrap.push("Programs");
+        pre_bootstrap.push("LM Studio");
+        for s in &webpack_suffix { pre_bootstrap.push(s); }
         if pre_bootstrap.exists() {
             return Some(pre_bootstrap);
+        }
+    }
+
+    // System-wide install path: when LM Studio's installer is run "for all
+    // users" (or installed via an MSI deployment), it lands in
+    // %PROGRAMFILES%\LM Studio\. techx69 confirmed (2026-05-06): the
+    // per-user-only lookup made LU report "no LM Studio detected" even with
+    // `~/.lmstudio/models/` already populated.
+    for env_var in ["PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMW6432"] {
+        if let Ok(pf) = std::env::var(env_var) {
+            let mut sys_wide = PathBuf::from(pf);
+            sys_wide.push("LM Studio");
+            for s in &webpack_suffix { sys_wide.push(s); }
+            if sys_wide.exists() {
+                return Some(sys_wide);
+            }
+        }
+    }
+
+    // Registry-based fallback: LM Studio's installer writes its install dir
+    // under HKCU or HKLM Uninstall keys. Reading the registry lets us catch
+    // exotic install dirs (e.g. user moved it to D:\Apps\LM Studio\).
+    #[cfg(target_os = "windows")]
+    if let Some(p) = lmstudio_path_from_registry() {
+        let candidate = p.join("resources").join("app").join(".webpack").join("lms.exe");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        // Some builds drop lms.exe at the install root.
+        let root_candidate = p.join("lms.exe");
+        if root_candidate.exists() {
+            return Some(root_candidate);
         }
     }
 
@@ -668,6 +912,90 @@ fn lmstudio_lms_path() -> Option<PathBuf> {
         }
     }
 
+    None
+}
+
+/// Soft-detect LM Studio by scanning `~/.lmstudio/models/` for GGUF files.
+/// Returns the number of GGUF files found (0 if the dir is missing or empty).
+///
+/// Rationale: even when `lms.exe` isn't on any search path (system-wide
+/// install missed by our fallback, GUI never launched, etc.), the presence
+/// of GGUFs in the canonical models dir is a strong signal that the user
+/// *has* LM Studio and just hasn't started the server. Surfacing that in the
+/// onboarding lets us show "LM Studio models detected — start server?" instead
+/// of the dead-end "no LM Studio".
+fn lmstudio_models_present() -> u32 {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return 0,
+    };
+    let models_dir = home.join(".lmstudio").join("models");
+    if !models_dir.exists() {
+        return 0;
+    }
+    // The standard layout is ~/.lmstudio/models/<publisher>/<repo>/<file>.gguf —
+    // up to three levels deep. We walk lazily and stop after the first 1000
+    // matches; the user does not care about the exact count past "many".
+    fn walk(dir: &Path, depth: u32, found: &mut u32) {
+        if *found >= 1000 || depth > 4 {
+            return;
+        }
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, depth + 1, found);
+            } else if path.extension().and_then(|e| e.to_str()).map(|s| s.eq_ignore_ascii_case("gguf")).unwrap_or(false) {
+                *found += 1;
+                if *found >= 1000 {
+                    return;
+                }
+            }
+        }
+    }
+    let mut count: u32 = 0;
+    walk(&models_dir, 0, &mut count);
+    count
+}
+
+#[cfg(target_os = "windows")]
+fn lmstudio_path_from_registry() -> Option<PathBuf> {
+    // Read InstallLocation from LM Studio's Uninstall entry. We try HKCU
+    // first (per-user installs) then HKLM (system-wide). The display name
+    // varies slightly between installer builds, so we scan for any subkey
+    // whose DisplayName starts with "LM Studio".
+    use winreg::enums::*;
+    use winreg::RegKey;
+    for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        let root = RegKey::predef(hive);
+        for uninstall_path in [
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ] {
+            let Ok(uninstall) = root.open_subkey(uninstall_path) else { continue };
+            for key_res in uninstall.enum_keys() {
+                let Ok(key) = key_res else { continue };
+                let Ok(sub) = uninstall.open_subkey(&key) else { continue };
+                let name: String = sub.get_value("DisplayName").unwrap_or_default();
+                if name.eq_ignore_ascii_case("LM Studio") || name.starts_with("LM Studio") {
+                    if let Ok(loc) = sub.get_value::<String, _>("InstallLocation") {
+                        let p = PathBuf::from(loc);
+                        if p.exists() {
+                            return Some(p);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn lmstudio_path_from_registry() -> Option<PathBuf> {
     None
 }
 
@@ -959,10 +1287,15 @@ pub fn start_lmstudio_server() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 pub fn lmstudio_server_status() -> Result<serde_json::Value, String> {
+    let model_count = lmstudio_models_present();
     Ok(serde_json::json!({
         "running": lmstudio_server_running(),
         "port": LMSTUDIO_DEFAULT_PORT,
         "lms_present": lmstudio_lms_path().is_some(),
+        // Soft-detect signals — onboarding shows "Start LM Studio server?"
+        // when models are present even if lms.exe couldn't be located.
+        "models_detected": model_count > 0,
+        "model_count": model_count,
     }))
 }
 
@@ -1509,5 +1842,47 @@ mod tests {
         let s = state.lock().unwrap();
         assert_eq!(s.status, "installing");
         assert_eq!(s.logs, vec!["log line"]);
+    }
+
+    // ── parse_compute_cap_output (Bug #10 — Blackwell PyTorch routing) ────
+
+    #[test]
+    fn compute_cap_parses_ampere_single_gpu() {
+        assert_eq!(parse_compute_cap_output("8.6\n"), Some(8));
+    }
+
+    #[test]
+    fn compute_cap_parses_ada_single_gpu() {
+        assert_eq!(parse_compute_cap_output("8.9\n"), Some(8));
+    }
+
+    #[test]
+    fn compute_cap_parses_hopper() {
+        assert_eq!(parse_compute_cap_output("9.0\n"), Some(9));
+    }
+
+    #[test]
+    fn compute_cap_parses_blackwell() {
+        assert_eq!(parse_compute_cap_output("12.0\n"), Some(12));
+    }
+
+    #[test]
+    fn compute_cap_multi_gpu_picks_highest() {
+        assert_eq!(parse_compute_cap_output("8.6\n12.0\n"), Some(12));
+    }
+
+    #[test]
+    fn compute_cap_handles_blank_lines() {
+        assert_eq!(parse_compute_cap_output("\n8.6\n\n"), Some(8));
+    }
+
+    #[test]
+    fn compute_cap_returns_none_for_empty_output() {
+        assert_eq!(parse_compute_cap_output(""), None);
+    }
+
+    #[test]
+    fn compute_cap_skips_unparseable_lines() {
+        assert_eq!(parse_compute_cap_output("[Not Supported]\n8.6\n"), Some(8));
     }
 }
