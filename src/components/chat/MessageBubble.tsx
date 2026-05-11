@@ -1,12 +1,17 @@
 import { motion } from 'framer-motion'
-import { User, Bot, Copy, Check, Pencil, RefreshCw, X } from 'lucide-react'
-import { useState, useRef, useEffect } from 'react'
+import { User, Bot, Copy, Check, Pencil, RefreshCw, X, Wrench } from 'lucide-react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ReflectionBlock } from './ReflectionBlock'
 import { SpeakerButton } from './SpeakerButton'
 import type { Message } from '../../types/chat'
+import { useAgentModeStore } from '../../stores/agentModeStore'
+import { useChatStore } from '../../stores/chatStore'
+import { useModelStore } from '../../stores/modelStore'
+import { extractToolCallsFromContent } from '../../lib/tool-call-repair'
+import { isAgentCompatible } from '../../lib/model-compatibility'
 
 interface Props {
   message: Message
@@ -26,6 +31,30 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
   const [editContent, setEditContent] = useState('')
   const editRef = useRef<HTMLTextAreaElement>(null)
   const isUser = message.role === 'user'
+
+  // Bug #7 (phantomderp v2.4.3): the Codex-style "model parrots tool-call
+  // JSON as plaintext" only happens when the active chat does NOT have
+  // agent mode on. Detect the JSON pattern and show a one-click "Enable
+  // agent" banner instead of leaving the user staring at a JSON dump.
+  const activeConversationId = useChatStore((s) => s.activeConversationId)
+  const isAgentActive = useAgentModeStore((s) =>
+    activeConversationId ? s.agentModeActive[activeConversationId] ?? false : false
+  )
+  const activeModel = useModelStore((s) => s.activeModel)
+  const toggleAgentMode = useAgentModeStore((s) => s.toggleAgentMode)
+
+  const suggestAgent = useMemo(() => {
+    if (isUser || isAgentActive || !activeConversationId || !activeModel) return false
+    if (!message.content || message.content.length < 10) return false
+    // The repair helper extracts {name, arguments}-shaped JSON blocks, plus
+    // <tool_call>...</tool_call> Hermes tags. If anything came out, the
+    // model wanted to call a tool — even though we never registered any.
+    const calls = extractToolCallsFromContent(message.content)
+    if (!calls || calls.length === 0) return false
+    // Only nudge when the model is on the agent-allow-list. Showing this
+    // banner on a non-agent-capable model would be a dead-end.
+    return isAgentCompatible(activeModel)
+  }, [isUser, isAgentActive, activeConversationId, activeModel, message.content])
 
   useEffect(() => {
     if (isEditing && editRef.current) {
@@ -171,6 +200,21 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
           ) : (
             <div className="text-[0.78rem] leading-relaxed">
               <MarkdownRenderer content={message.content} />
+              {suggestAgent && (
+                <div className="mt-2 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 text-[0.65rem] text-amber-700 dark:text-amber-200">
+                  <Wrench size={11} className="mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-medium">This model tried to call a tool, but Agent Mode is off for this chat.</p>
+                    <p className="opacity-80 mt-0.5">Turn it on to let the model actually execute tools (read files, run commands, browse). Until then it'll keep emitting JSON that nothing reads.</p>
+                  </div>
+                  <button
+                    onClick={() => activeConversationId && toggleAgentMode(activeConversationId)}
+                    className="shrink-0 px-2 py-0.5 rounded border border-amber-400/40 hover:bg-amber-500/20 transition-colors font-medium"
+                  >
+                    Enable Agent
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

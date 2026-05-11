@@ -78,6 +78,19 @@ export function Onboarding() {
   const [comfyDownloadProgress, setComfyDownloadProgress] = useState(0)
   const [comfyDownloadTotal, setComfyDownloadTotal] = useState(0)
   const [comfyDownloadSpeed, setComfyDownloadSpeed] = useState(0)
+  // Bug #3 (ninjastic2008 v2.4.3): multi-install disambiguation. When
+  // `detect_all_comfyui_installs` returns more than one hit the user picks
+  // explicitly instead of LU auto-picking the first scan match. Picking
+  // the wrong install caused "ComfyUI loaded endlessly" because their
+  // manual install's `python_embeded` was incompatible with our default
+  // System-Python launcher.
+  type ComfyInstallChoice = {
+    path: string
+    complete: boolean
+    has_embedded_python: boolean
+    source: string
+  }
+  const [comfyChoices, setComfyChoices] = useState<ComfyInstallChoice[]>([])
 
   // P14: Python install state. On a fresh Windows box `python` is the
   // Microsoft Store stub which exit-1's `pip install`. The ComfyUI install
@@ -139,6 +152,13 @@ export function Onboarding() {
   // start — so we route through the same code path either way; only the
   // UI labelling differs.
   const [lmstudioOfflineDetected, setLmstudioOfflineDetected] = useState(false)
+  // Soft-detect: GGUFs in ~/.lmstudio/models/ even when we can't locate
+  // lms.exe. Set when techx69-style users have LM Studio installed
+  // system-wide (C:\Program Files\LM Studio) and the Rust path scan misses
+  // it, but the canonical models dir is populated anyway. We surface a
+  // "Start LM Studio server" CTA either way — the model count gives a
+  // confidence cue in the offline-detected card.
+  const [lmstudioModelCount, setLmstudioModelCount] = useState(0)
 
   const isDark = settings.theme === 'dark'
   const bgClass = isDark ? 'bg-[#0a0a0a] text-white' : 'bg-white text-gray-900'
@@ -281,6 +301,7 @@ export function Onboarding() {
   const runDetection = async () => {
     setDetecting(true)
     setLmstudioOfflineDetected(false)
+    setLmstudioModelCount(0)
     const backends = await detectLocalBackends()
     setDetectedBackends(backends)
     if (backends.length > 0 && !selectedBackend) {
@@ -292,10 +313,20 @@ export function Onboarding() {
       // just be turned off. lmstudio_server_status is cheap (a single
       // reqwest probe + a path check) and was added in the same sweep
       // that introduced this branch.
+      //
+      // v2.4.4 (Bug #2): the status payload now also includes
+      // `models_detected` / `model_count` — set by scanning
+      // ~/.lmstudio/models/ for GGUF files. We treat that as a strong
+      // soft-detect signal: if the user has models in the canonical dir,
+      // they obviously *have* LM Studio, regardless of whether our path
+      // scan turned up lms.exe (techx69's system-wide install reproed this).
       try {
         const status: any = await backendCall('lmstudio_server_status')
-        if (status?.lms_present && !status?.running) {
+        const offline = status?.lms_present && !status?.running
+        const softDetect = status?.models_detected && !status?.running
+        if (offline || softDetect) {
           setLmstudioOfflineDetected(true)
+          setLmstudioModelCount(Number(status?.model_count) || 0)
         }
       } catch { /* command unavailable — ignore */ }
     }
@@ -381,15 +412,56 @@ export function Onboarding() {
   useEffect(() => {
     if (step === 'comfyui' && !comfyFound && !comfyDetecting) {
       setComfyDetecting(true)
-      backendCall<{ found: boolean; path?: string; complete?: boolean }>('find_comfyui')
-        .then(result => {
-          setComfyFound(result)
-          if (result.found && result.complete !== false) setComfyReady(true)
+      // First: enumerate ALL installs (Bug #3). When >1 we show a picker
+      // BEFORE auto-picking — preventing the ninjastic2008 trap where LU
+      // detected their manual install while they wanted the empty placeholder
+      // path. `find_comfyui` is the auto-pick fallback for the single-install
+      // case, which keeps the existing happy-path behaviour intact.
+      backendCall<ComfyInstallChoice[]>('detect_all_comfyui_installs')
+        .then(async installs => {
+          if (Array.isArray(installs) && installs.length > 1) {
+            setComfyChoices(installs)
+            setComfyFound(null)
+            return
+          }
+          if (Array.isArray(installs) && installs.length === 1) {
+            const only = installs[0]
+            setComfyFound({ found: true, path: only.path, complete: only.complete })
+            if (only.complete) setComfyReady(true)
+            // Persist the auto-pick so process.rs uses it on start_comfyui.
+            try { await backendCall('set_comfyui_path', { path: only.path }) } catch {}
+            return
+          }
+          // Zero matches — fall back to legacy find_comfyui (env var, config
+          // file overrides that aren't on the scan list).
+          const legacy = await backendCall<{ found: boolean; path?: string; complete?: boolean }>('find_comfyui')
+          setComfyFound(legacy)
+          if (legacy.found && legacy.complete !== false) setComfyReady(true)
         })
-        .catch(() => setComfyFound({ found: false, complete: false }))
+        .catch(async () => {
+          // Older builds without detect_all_comfyui_installs — degrade
+          // gracefully to the previous single-pick API.
+          try {
+            const legacy = await backendCall<{ found: boolean; path?: string; complete?: boolean }>('find_comfyui')
+            setComfyFound(legacy)
+            if (legacy.found && legacy.complete !== false) setComfyReady(true)
+          } catch {
+            setComfyFound({ found: false, complete: false })
+          }
+        })
         .finally(() => setComfyDetecting(false))
     }
   }, [step])
+
+  // Pick one of the multiple installs from the disambiguation dialog. The
+  // chosen path is persisted via set_comfyui_path so start_comfyui hits it
+  // without further user intervention.
+  const pickComfyInstall = async (choice: ComfyInstallChoice) => {
+    try { await backendCall('set_comfyui_path', { path: choice.path }) } catch {}
+    setComfyFound({ found: true, path: choice.path, complete: choice.complete })
+    if (choice.complete) setComfyReady(true)
+    setComfyChoices([])
+  }
 
   // P14 pre-flight: ensure Python is on the box before triggering ComfyUI's
   // pip install. On fresh Windows, `python` is the Microsoft Store stub
@@ -601,7 +673,9 @@ export function Onboarding() {
                 </h2>
                 <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                   {lmstudioOfflineDetected
-                    ? "LM Studio is installed but its server isn't currently running. Start it to use LM Studio as your backend — no re-install needed."
+                    ? (lmstudioModelCount > 0
+                        ? `LM Studio is installed (${lmstudioModelCount} model${lmstudioModelCount === 1 ? '' : 's'} detected) but its server isn't currently running. Start it to use LM Studio as your backend — no re-install needed.`
+                        : "LM Studio is installed but its server isn't currently running. Start it to use LM Studio as your backend — no re-install needed.")
                     : "You need a local AI backend to chat. We'll install Ollama for you — it's the easiest to set up."}
                 </p>
 
@@ -918,6 +992,58 @@ export function Onboarding() {
               </div>
             )}
 
+            {/* Bug #3: multi-install picker. When the scan found more than
+                one ComfyUI directory, LU asks the user explicitly rather
+                than guessing. Each option shows whether it's complete and
+                whether it ships its own python_embeded — both matter for
+                start_comfyui's launcher decision. */}
+            {!comfyDetecting && comfyChoices.length > 1 && !comfyFound && (
+              <div className="space-y-2 text-left">
+                <div className={`p-2.5 rounded-lg border ${isDark ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-50 border-amber-200'}`}>
+                  <p className={`text-[0.7rem] font-medium ${isDark ? 'text-amber-200' : 'text-amber-800'}`}>
+                    Multiple ComfyUI installs detected
+                  </p>
+                  <p className={`text-[0.6rem] mt-0.5 ${isDark ? 'text-amber-300/80' : 'text-amber-700'}`}>
+                    Pick the one you want LU to use. We'll remember your choice — you can change it later in Settings → ComfyUI.
+                  </p>
+                </div>
+                <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                  {comfyChoices.map((c) => (
+                    <button
+                      key={c.path}
+                      onClick={() => pickComfyInstall(c)}
+                      className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${
+                        isDark ? 'border-white/[0.08] hover:bg-white/[0.04]' : 'border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`text-[0.65rem] font-mono truncate ${isDark ? 'text-gray-200' : 'text-gray-800'}`}>{c.path}</span>
+                        <span className={`text-[0.5rem] px-1.5 py-[1px] rounded shrink-0 ${
+                          c.complete
+                            ? (isDark ? 'bg-green-500/15 text-green-400' : 'bg-green-100 text-green-700')
+                            : (isDark ? 'bg-amber-500/15 text-amber-300' : 'bg-amber-100 text-amber-700')
+                        }`}>
+                          {c.complete ? 'ready' : 'needs setup'}
+                        </span>
+                      </div>
+                      <div className={`flex items-center gap-2 mt-0.5 text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-500'}`}>
+                        <span>found via {c.source}</span>
+                        {c.has_embedded_python && (
+                          <span className={isDark ? 'text-blue-300' : 'text-blue-600'}>• bundles python_embeded</span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => { setComfyChoices([]); setComfyFound({ found: false, complete: false }) }}
+                  className={`text-[0.55rem] ${isDark ? 'text-gray-500 hover:text-gray-300' : 'text-gray-500 hover:text-gray-700'} underline`}
+                >
+                  None of these — let me install a fresh one
+                </button>
+              </div>
+            )}
+
             {/* Found AND complete (a working install). The carcass case
                 is handled in the install-options block below. */}
             {comfyFound?.found && comfyFound.complete !== false && !comfyInstalling && (
@@ -974,6 +1100,14 @@ export function Onboarding() {
                             setInstallStartTime(null)
                             // Auto-start ComfyUI
                             try { await backendCall('start_comfyui') } catch {}
+                          } else if (status.status === 'cancelled') {
+                            // Bug #1: install cancelled by user — close the
+                            // progress card and surface the install options
+                            // again so they can retry or pick another drive.
+                            clearInterval(poll)
+                            setComfyInstalling(false)
+                            setInstallStartTime(null)
+                            setComfyInstallError('Install cancelled.')
                           } else if (status.status === 'error') {
                             clearInterval(poll)
                             setComfyInstalling(false)
@@ -1076,12 +1210,44 @@ export function Onboarding() {
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <Loader2 size={14} className="animate-spin text-purple-400" />
-                    <span className="text-[0.7rem] font-medium">Installing ComfyUI...</span>
+                    <span className="text-[0.7rem] font-medium">
+                      {comfyInstallLogs.some(l => l.toLowerCase().includes('cancel')) ? 'Cancelling ComfyUI install…' : 'Installing ComfyUI...'}
+                    </span>
                   </div>
-                  <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                    {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[0.55rem] font-mono ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                      {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}
+                      {/* Bug #1: rolling ETA from download bytes when known. */}
+                      {comfyDownloadSpeed > 0 && comfyDownloadTotal > 0 && comfyDownloadProgress < comfyDownloadTotal && (() => {
+                        const remaining = comfyDownloadTotal - comfyDownloadProgress
+                        const etaSec = Math.round(remaining / Math.max(1, comfyDownloadSpeed))
+                        const m = Math.floor(etaSec / 60)
+                        const s = etaSec % 60
+                        return ` • ETA ${m}:${String(s).padStart(2, '0')}`
+                      })()}
+                    </span>
+                    {/* Cancel button (Bug #1 — techx69) */}
+                    <button
+                      onClick={async () => {
+                        try { await backendCall('cancel_comfyui_install') } catch {}
+                      }}
+                      className={`text-[0.55rem] px-1.5 py-[1px] rounded border transition-colors ${
+                        isDark
+                          ? 'border-red-500/40 text-red-300 hover:bg-red-500/10'
+                          : 'border-red-300 text-red-600 hover:bg-red-50'
+                      }`}
+                      title="Cancel ComfyUI install"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
+                {/* Disk pressure warning (push from Rust side) */}
+                {comfyInstallLogs.some(l => l.startsWith('⚠')) && (
+                  <div className={`text-[0.55rem] mb-2 px-2 py-1 rounded ${isDark ? 'bg-amber-500/10 text-amber-300' : 'bg-amber-50 text-amber-800'}`}>
+                    {comfyInstallLogs.find(l => l.startsWith('⚠'))}
+                  </div>
+                )}
                 {/* Download progress bar (shown during download phase) */}
                 {comfyInstallLogs.some(l => l.includes('Downloading')) && comfyDownloadTotal > 0 && (
                   <div className="space-y-1 mb-2">

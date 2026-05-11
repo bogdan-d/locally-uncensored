@@ -137,6 +137,11 @@ pub struct AppState {
     pub download_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub pull_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub install_status: Arc<Mutex<InstallState>>,
+    /// Cancel flag for the ComfyUI installer (Bug #1, techx69 v2.4.3).
+    /// `install_comfyui` polls this between steps; setting it from
+    /// `cancel_comfyui_install` aborts the next git/pip subprocess and
+    /// flips the install_status to "cancelled".
+    pub comfyui_install_cancel: Arc<AtomicBool>,
     pub ollama_install: Arc<Mutex<InstallState>>,
     pub lmstudio_install: Arc<Mutex<InstallState>>,
     pub python_install: Arc<Mutex<InstallState>>,
@@ -203,6 +208,7 @@ impl AppState {
             download_tokens: Arc::new(Mutex::new(HashMap::new())),
             pull_tokens: Arc::new(Mutex::new(HashMap::new())),
             install_status: Arc::new(Mutex::new(InstallState::default())),
+            comfyui_install_cancel: Arc::new(AtomicBool::new(false)),
             ollama_install: Arc::new(Mutex::new(InstallState::default())),
             lmstudio_install: Arc::new(Mutex::new(InstallState::default())),
             python_install: Arc::new(Mutex::new(InstallState::default())),

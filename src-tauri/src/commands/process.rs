@@ -316,6 +316,210 @@ pub fn find_comfyui_path() -> Option<String> {
     None
 }
 
+/// Information about a discovered ComfyUI install — surfaced to the
+/// frontend so the user picks the right one when multiple coexist.
+///
+/// Background (Bug #3 — ninjastic2008 v2.4.3): a user with both a manual
+/// `C:\Users\admin\ComfyUI` install (complete, with its own python_embeded)
+/// AND an empty `C:\ComfyUI-ai` directory hit `find_comfyui_path()` which
+/// returned only the first hit (their manual install). LU then tried to
+/// drive that install using the system Python — incompatible with the
+/// dir's bundled python_embeded — and ComfyUI loaded indefinitely. The
+/// "complete + has_embedded_python" fields let the onboarding UI explain
+/// which path to pick and why.
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct ComfyUIInstall {
+    pub path: String,
+    /// True when this directory looks ready to start without any further
+    /// pip steps (main.py + torch reachable). Same heuristic as
+    /// `is_comfyui_install_complete`.
+    pub complete: bool,
+    /// True when the directory ships its own `python_embeded\python.exe`.
+    /// Portable ComfyUI builds (and Stability Matrix packages) ship one;
+    /// from-source clones don't. We start ComfyUI with this Python when
+    /// present — using the system Python on a portable install was the
+    /// exact failure mode ninjastic2008 hit.
+    pub has_embedded_python: bool,
+    /// Where we found this install. Helps the user disambiguate.
+    pub source: String,
+}
+
+fn classify_comfy_install(path: &Path, source: &str) -> ComfyUIInstall {
+    let has_embed = path.join("python_embeded").join("python.exe").exists()
+        || path
+            .parent()
+            .map(|p| p.join("python_embeded").join("python.exe").exists())
+            .unwrap_or(false);
+    ComfyUIInstall {
+        path: path.to_string_lossy().to_string(),
+        complete: is_comfyui_install_complete(path),
+        has_embedded_python: has_embed,
+        source: source.to_string(),
+    }
+}
+
+/// Enumerate every plausible ComfyUI install on the box. Used by the
+/// onboarding UI to decide between auto-pick (one hit) and an explicit
+/// picker (multiple hits).
+///
+/// Performance contract: this MUST finish in under ~3 s even on machines
+/// with deep file trees. The implementation is `async` so it runs on
+/// tokio's blocking-thread pool instead of the IPC main thread — without
+/// that the Tauri WebView lock-up on a 200k-file home dir made the whole
+/// app report "Not responding" during the ComfyUI step. (Bug #3 sweep,
+/// found during E2E 2026-05-11.)
+///
+/// Scan tiers, in order:
+///   1. Explicit pointers — env var, config.json
+///   2. Well-known fixed locations (home/Desktop/Documents/StabilityMatrix/…)
+///   3. Bounded deep scan of the user's data dirs (depth 4, skip noise)
+///   We DO NOT walk C:\, D:\, E:\ from their roots anymore — that path was
+///   the locker. find_comfyui_path keeps its drive-root fallback for the
+///   single-hit auto-pick case which can afford a slow first-match exit.
+#[tauri::command]
+pub async fn detect_all_comfyui_installs() -> Vec<ComfyUIInstall> {
+    tokio::task::spawn_blocking(detect_all_comfyui_installs_sync)
+        .await
+        .unwrap_or_default()
+}
+
+const MAX_MULTI_DETECT_HITS: usize = 16;
+const MULTI_DETECT_DEPTH: i32 = 4;
+
+fn detect_all_comfyui_installs_sync() -> Vec<ComfyUIInstall> {
+    let mut out: Vec<ComfyUIInstall> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let push_if_new = |path: PathBuf, source: &str, out: &mut Vec<ComfyUIInstall>, seen: &mut std::collections::HashSet<String>| -> bool {
+        if !path.join("main.py").exists() {
+            return false;
+        }
+        // Canonicalise to dedupe symlinks / case-different paths on Windows
+        let key = std::fs::canonicalize(&path)
+            .map(|c| c.to_string_lossy().to_string())
+            .unwrap_or_else(|_| path.to_string_lossy().to_string())
+            .to_lowercase();
+        if seen.insert(key) {
+            out.push(classify_comfy_install(&path, source));
+            return true;
+        }
+        false
+    };
+
+    // 1. COMFYUI_PATH env var
+    if let Ok(env_path) = std::env::var("COMFYUI_PATH") {
+        push_if_new(PathBuf::from(&env_path), "COMFYUI_PATH env var", &mut out, &mut seen);
+    }
+
+    // 2. app config.json
+    if let Some(config_dir) = dirs::config_dir() {
+        let config_file = config_dir.join("locally-uncensored").join("config.json");
+        if let Ok(content) = fs::read_to_string(&config_file) {
+            if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(path) = config.get("comfyui_path").and_then(|v| v.as_str()) {
+                    push_if_new(PathBuf::from(path), "config.json", &mut out, &mut seen);
+                }
+            }
+        }
+    }
+
+    let home = dirs::home_dir().unwrap_or_default();
+
+    // 3. Well-known fixed locations
+    let mut fixed: Vec<(PathBuf, &str)> = vec![
+        (home.join("ComfyUI"), "home"),
+        (home.join("Desktop").join("ComfyUI"), "Desktop"),
+        (home.join("Documents").join("ComfyUI"), "Documents"),
+        (PathBuf::from("C:\\ComfyUI"), "C:\\"),
+        (PathBuf::from("D:\\ComfyUI"), "D:\\"),
+    ];
+    if cfg!(target_os = "windows") {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            fixed.push((PathBuf::from(&appdata).join("StabilityMatrix").join("Packages").join("ComfyUI"), "StabilityMatrix"));
+        }
+        if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+            fixed.push((PathBuf::from(&localappdata).join("StabilityMatrix").join("Packages").join("ComfyUI"), "StabilityMatrix"));
+        }
+        fixed.push((PathBuf::from("C:\\Program Files\\ComfyUI"), "Program Files"));
+        fixed.push((PathBuf::from("C:\\AI\\ComfyUI"), "C:\\AI"));
+        fixed.push((PathBuf::from("D:\\AI\\ComfyUI"), "D:\\AI"));
+    }
+    for (p, source) in fixed {
+        push_if_new(p, source, &mut out, &mut seen);
+    }
+
+    // 4. Bounded deep scan — user data dirs only. Drive roots (C:\, D:\, E:\)
+    //    are intentionally NOT walked here: the deep walk through hundreds of
+    //    thousands of system files made `detect_all_comfyui_installs` lock
+    //    Tauri for 30+ s on real Windows boxes. Power users with ComfyUI in
+    //    `D:\AI\projects\custom\dir\` still get auto-picked by find_comfyui_path
+    //    (single-hit, slow first-match-exit) — they just don't surface in the
+    //    Multi-ComfyUI picker, which is acceptable: that picker exists for
+    //    accidental multi-install collisions, not exhaustive enumeration.
+    let scan_roots: Vec<(PathBuf, &str)> = vec![
+        (home.clone(), "home (deep scan)"),
+        (home.join("Desktop"), "Desktop"),
+        (home.join("Documents"), "Documents"),
+        (home.join("Downloads"), "Downloads"),
+    ];
+    for (root, source) in &scan_roots {
+        if out.len() >= MAX_MULTI_DETECT_HITS {
+            break;
+        }
+        if root.exists() {
+            walk_for_comfyui(root, MULTI_DETECT_DEPTH, &mut |p| {
+                if out.len() >= MAX_MULTI_DETECT_HITS {
+                    return;
+                }
+                push_if_new(p, source, &mut out, &mut seen);
+            });
+        }
+    }
+
+    out
+}
+
+fn walk_for_comfyui<F: FnMut(PathBuf)>(dir: &Path, depth: i32, cb: &mut F) {
+    if depth < 0 {
+        return;
+    }
+    if dir.join("main.py").exists() && dir.join("comfy").exists() {
+        cb(dir.to_path_buf());
+        // Don't recurse into a confirmed install — its subdirs aren't
+        // independent installs.
+        return;
+    }
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if !p.is_dir() {
+            continue;
+        }
+        // Skip the obvious noise dirs that blow up walk time. node_modules
+        // and .git are common in dev projects; the rest are system locations
+        // that should never own a ComfyUI install anyway.
+        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+            if matches!(name,
+                "node_modules" | ".git" | "AppData" | "$Recycle.Bin"
+                | "Windows" | "System32" | "ProgramData" | ".cache"
+                | "target" | ".cargo" | ".rustup" | ".npm" | ".pnpm"
+                | "Library"     // macOS, harmless on Windows
+                | "OneDrive"    // huge synced trees; ComfyUI shouldn't live there
+            ) {
+                continue;
+            }
+            // Hidden dirs (Linux/macOS dotfiles) are almost never ComfyUI roots.
+            if name.starts_with('.') && name.len() > 1 {
+                continue;
+            }
+        }
+        walk_for_comfyui(&p, depth - 1, cb);
+    }
+}
+
 fn is_comfyui_running_on_port(port: u16) -> bool {
     reqwest::blocking::get(format!("http://localhost:{}/system_stats", port))
         .map(|r| r.status().is_success())
