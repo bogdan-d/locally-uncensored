@@ -975,69 +975,46 @@ fn install_ollama_windows_impl<F: Fn(&str, &str)>(
 
 #[cfg(target_os = "linux")]
 fn install_ollama_linux_impl<F: Fn(&str, &str)>(
-    ollama_state: &Arc<Mutex<InstallState>>,
+    _ollama_state: &Arc<Mutex<InstallState>>,
     update: F,
 ) {
     // If `ollama` is already on PATH (pacman -S ollama, manual install, etc.),
-    // skip the download entirely.
-    if Command::new("which").arg("ollama").output().map(|o| o.status.success()).unwrap_or(false) {
-        update("starting", "Ollama is already installed — starting service...");
-    } else {
-        // Download the official static Linux x86_64 binary from GitHub releases.
-        // (https://ollama.com/install.sh's curl|sh path needs sudo to write into
-        // /usr/local/bin, which isn't safe to drive from a desktop app. Putting
-        // the binary in ~/.local/bin avoids the sudo round-trip and works for
-        // every Linux user.)
-        let home = match std::env::var("HOME") {
-            Ok(h) => PathBuf::from(h),
-            Err(_) => {
-                update("error", "Could not resolve $HOME. Install Ollama manually: pacman -S ollama / apt install ollama / brew install ollama.");
-                return;
-            }
-        };
-        let bin_dir = home.join(".local").join("bin");
-        if let Err(e) = fs::create_dir_all(&bin_dir) {
-            update("error", &format!("Could not create {}: {}", bin_dir.display(), e));
-            return;
-        }
-        let binary_path = bin_dir.join("ollama");
-        update("downloading", &format!("Downloading ollama-linux-amd64 to {}...", binary_path.display()));
-        if let Err(e) = download_file_blocking(
-            "https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64",
-            &binary_path,
-            ollama_state,
-        ) {
-            update("error", &format!(
-                "Download failed: {}. Install Ollama manually via your distro package \
-                 manager: `pacman -S ollama` (Arch), `apt install ollama` (Debian/Ubuntu \
-                 23.10+), or download from https://ollama.com/download/linux.",
-                e
-            ));
-            return;
-        }
-        // chmod +x
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = fs::metadata(&binary_path) {
-                let mut perms = meta.permissions();
-                perms.set_mode(0o755);
-                let _ = fs::set_permissions(&binary_path, perms);
-            }
-        }
-        update("installing", &format!("Installed to {}. Note: add ~/.local/bin to your PATH if you want to run `ollama` from your shell.", binary_path.display()));
+    // skip ahead to spawning the service.
+    let already_installed = Command::new("which")
+        .arg("ollama")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if !already_installed {
+        // Bug G revisit (2026-05-17 live test on Arch VM): Ollama's GitHub
+        // release assets changed format. The old `ollama-linux-amd64` raw
+        // binary URL now returns 404 — current releases ship as
+        // `ollama-linux-amd64.tar.zst` which bundles the CUDA runtime libs
+        // (multi-GB tarball). Auto-downloading 2-3 GB from a desktop-app
+        // install button isn't user-friendly, so we surface a clear distro-
+        // specific install hint instead. Every modern Linux distro ships an
+        // ollama package or accepts ollama.com/install.sh; pointing at the
+        // right command beats a stuck 2-GB progress bar.
+        let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+        let suggestion = linux_ollama_install_hint(&os_release);
+        update(
+            "error",
+            &format!(
+                "Ollama auto-install on Linux isn't supported — current releases \
+                 are multi-GB tarballs with bundled CUDA libs that are too large \
+                 to fetch from an install button.\n\n\
+                 Install via your distro: {}\n\n\
+                 After install, click 'Re-detect' here.",
+                suggestion
+            ),
+        );
+        return;
     }
 
-    // Resolve absolute path (PATH may not include ~/.local/bin in the spawned
-    // shell environment, so prefer the explicit binary path when we know it).
-    let home = std::env::var("HOME").ok().map(PathBuf::from);
-    let explicit = home.map(|h| h.join(".local").join("bin").join("ollama"));
-    let ollama_cmd = match explicit {
-        Some(p) if p.exists() => p.to_string_lossy().to_string(),
-        _ => "ollama".to_string(),
-    };
-
-    let mut serve = Command::new(&ollama_cmd);
+    // ollama is already on PATH — spawn it and poll the API.
+    update("starting", "Ollama is already installed — starting service...");
+    let mut serve = Command::new("ollama");
     serve.arg("serve").stdout(Stdio::piped()).stderr(Stdio::piped());
     let _ = serve.spawn();
 
@@ -1047,11 +1024,45 @@ fn install_ollama_linux_impl<F: Fn(&str, &str)>(
     } else {
         update(
             "error",
-            "Ollama installed but the API isn't responding on localhost:11434. \
-             Open a terminal and run `ollama serve` manually — if that fails, \
-             the binary at ~/.local/bin/ollama may be missing executable \
-             permissions or your kernel may need an older static build.",
+            "Ollama is installed but the API isn't responding on localhost:11434. \
+             Open a terminal and run `ollama serve` manually to see the failure \
+             message — common causes: another process already binding 11434, or \
+             missing GPU drivers.",
         );
+    }
+}
+
+/// Bug G revisit — distro-specific install command for `ollama`. Same parsing
+/// shape as `linux_python_install_hint` (ID + ID_LIKE tokens, quoted values
+/// handled). Falls back to ollama.com/install.sh for unknown distros.
+pub fn linux_ollama_install_hint(os_release: &str) -> String {
+    let mut families: Vec<String> = Vec::new();
+    for line in os_release.lines() {
+        let trimmed = line.trim();
+        let (key, value) = match trimmed.split_once('=') {
+            Some(kv) => kv,
+            None => continue,
+        };
+        let key = key.trim().to_lowercase();
+        if key != "id" && key != "id_like" {
+            continue;
+        }
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        for token in value.split_whitespace() {
+            families.push(token.to_lowercase());
+        }
+    }
+    let has = |needle: &str| families.iter().any(|f| f == needle);
+    if has("arch") || has("manjaro") || has("endeavouros") || has("garuda") {
+        "`sudo pacman -S ollama`".to_string()
+    } else if has("debian") || has("ubuntu") || has("linuxmint") || has("pop") || has("elementary") {
+        "`sudo apt install ollama` (Debian 12+ / Ubuntu 23.10+) or `curl -fsSL https://ollama.com/install.sh | sh`".to_string()
+    } else if has("fedora") || has("rhel") || has("centos") || has("rocky") || has("almalinux") {
+        "`curl -fsSL https://ollama.com/install.sh | sh`".to_string()
+    } else if has("opensuse") || has("opensuse-tumbleweed") || has("opensuse-leap") || has("suse") {
+        "`sudo zypper install ollama` (Tumbleweed) or `curl -fsSL https://ollama.com/install.sh | sh`".to_string()
+    } else {
+        "`curl -fsSL https://ollama.com/install.sh | sh` (official) or download manually from https://ollama.com/download/linux".to_string()
     }
 }
 
@@ -2410,6 +2421,70 @@ mod tests {
     fn linux_hint_empty_input_falls_back() {
         let hint = linux_python_install_hint("");
         assert!(hint.contains("package manager"));
+    }
+
+    // ── Bug G revisit — linux_ollama_install_hint distro detection ────────
+    //
+    // Bug G's original "auto-download raw binary" fix shipped broken because
+    // Ollama removed the raw `ollama-linux-amd64` asset in late 2025 — current
+    // releases ship as multi-GB tarballs with bundled CUDA libs. Auto-download
+    // isn't user-friendly at that size, so we surface distro-specific install
+    // commands instead. These tests pin the matrix.
+
+    #[test]
+    fn ollama_hint_arch_recommends_pacman_ollama() {
+        let release = "NAME=\"Arch Linux\"\nID=arch\n";
+        let hint = linux_ollama_install_hint(release);
+        assert!(hint.contains("pacman -S ollama"), "got: {}", hint);
+    }
+
+    #[test]
+    fn ollama_hint_manjaro_via_id_like_arch() {
+        let release = "NAME=\"Manjaro\"\nID=manjaro\nID_LIKE=arch\n";
+        let hint = linux_ollama_install_hint(release);
+        assert!(hint.contains("pacman -S ollama"), "got: {}", hint);
+    }
+
+    #[test]
+    fn ollama_hint_ubuntu_recommends_apt_or_install_sh() {
+        let release = "NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\n";
+        let hint = linux_ollama_install_hint(release);
+        assert!(hint.contains("apt install ollama"), "got: {}", hint);
+        assert!(hint.contains("install.sh"), "should also offer official installer, got: {}", hint);
+    }
+
+    #[test]
+    fn ollama_hint_fedora_recommends_official_install_sh() {
+        let release = "NAME=\"Fedora Linux\"\nID=fedora\n";
+        let hint = linux_ollama_install_hint(release);
+        assert!(hint.contains("install.sh"), "got: {}", hint);
+    }
+
+    #[test]
+    fn ollama_hint_rocky_via_id_like_rhel() {
+        let release = "NAME=\"Rocky Linux\"\nID=rocky\nID_LIKE=\"rhel centos fedora\"\n";
+        let hint = linux_ollama_install_hint(release);
+        assert!(hint.contains("install.sh"), "RHEL-family should get install.sh, got: {}", hint);
+    }
+
+    #[test]
+    fn ollama_hint_opensuse_recommends_zypper_or_install_sh() {
+        let release = "NAME=\"openSUSE Tumbleweed\"\nID=opensuse-tumbleweed\nID_LIKE=\"opensuse suse\"\n";
+        let hint = linux_ollama_install_hint(release);
+        assert!(hint.contains("zypper install ollama") || hint.contains("install.sh"), "got: {}", hint);
+    }
+
+    #[test]
+    fn ollama_hint_unknown_distro_falls_back_to_install_sh() {
+        let release = "NAME=\"Some Custom Distro\"\nID=mystery\n";
+        let hint = linux_ollama_install_hint(release);
+        assert!(hint.contains("install.sh") || hint.contains("ollama.com"), "got: {}", hint);
+    }
+
+    #[test]
+    fn ollama_hint_empty_input_falls_back() {
+        let hint = linux_ollama_install_hint("");
+        assert!(hint.contains("install.sh") || hint.contains("ollama.com"));
     }
 
     // ── Bug E — LIVE integration test ──────────────────────────────────────
