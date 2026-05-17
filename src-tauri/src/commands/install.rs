@@ -1747,14 +1747,53 @@ pub fn install_custom_node(
             // Install requirements.txt if it exists
             let reqs = target_dir.join("requirements.txt");
             if reqs.exists() {
-                let python_bin = state.python_bin.lock().unwrap().clone();
-                println!("[Install] Installing requirements for {}...", node_name);
+                // Bug F (discovered during Arch live test on 2026-05-17):
+                // ComfyUI was installed into a venv by the Bug E path, but
+                // this function used to call pip against `state.python_bin`
+                // (the system Python). On Arch / Debian 12+ / Fedora 38+
+                // that hits PEP 668's `externally-managed-environment` and
+                // the requirements install silently fails (`let _ = pip.output()`
+                // ignored the exit code, so the user got "installed" even
+                // when requirements never landed — the next workflow build
+                // would then crash with `ModuleNotFoundError`).
+                //
+                // Fix: prefer the ComfyUI venv's Python (matches the launcher
+                // in `process.rs::start_comfyui` and the installer in
+                // `install_comfyui`) so requirements land in the same
+                // site-packages ComfyUI actually imports from. Plus we now
+                // surface a useful error when pip fails instead of swallowing it.
+                let venv_python = crate::python::resolve_comfyui_venv_python(&comfy_dir);
+                let python_bin = venv_python.unwrap_or_else(|| {
+                    state.python_bin.lock().unwrap().clone()
+                });
+                if python_bin.is_empty() {
+                    return Err(format!(
+                        "Custom node {} cloned, but cannot install requirements: \
+                         no Python available. Install Python first \
+                         (Settings → ComfyUI → Install Python).",
+                        node_name
+                    ));
+                }
+                println!("[Install] Installing requirements for {} via {}", node_name, python_bin);
                 let mut pip = Command::new(&python_bin);
-                pip.args(["-m", "pip", "install", "-r"]).arg(&reqs)
+                pip.args(["-m", "pip", "install", "--no-input", "-r"]).arg(&reqs)
                     .stdout(Stdio::piped()).stderr(Stdio::piped());
                 #[cfg(target_os = "windows")]
                 pip.creation_flags(CREATE_NO_WINDOW);
-                let _ = pip.output();
+                let pip_out = pip.output()
+                    .map_err(|e| format!("Failed to spawn pip for {} requirements: {}", node_name, e))?;
+                if !pip_out.status.success() {
+                    let stderr = String::from_utf8_lossy(&pip_out.stderr);
+                    let stdout = String::from_utf8_lossy(&pip_out.stdout);
+                    let combined = format!("{}{}", stdout, stderr);
+                    // Reuse the install_comfyui diagnose path so PEP 668 +
+                    // friends produce actionable messages here too.
+                    let diagnosis = diagnose_pip_error(&combined);
+                    return Err(format!(
+                        "Custom node {} cloned, but requirements install failed.\n\n{}",
+                        node_name, diagnosis
+                    ));
+                }
             }
 
             Ok(serde_json::json!({
@@ -2102,5 +2141,93 @@ mod tests {
         assert!(!is_transient_pip_error(
             "error: externally-managed-environment"
         ));
+    }
+
+    // ── Bug E — LIVE integration test ──────────────────────────────────────
+    //
+    // Runs against a real Python install with a real EXTERNALLY-MANAGED
+    // marker planted in its stdlib. Requires the caller to point
+    // `LU_PEP668_TEST_PYTHON` env var at a Python whose stdlib is writable
+    // (typically a temp copy of system Python — see
+    // `LU-E2E-Test-Kit/scripts/pep668_live_test.ps1` for the setup helper).
+    //
+    // Skipped by default via `#[ignore]` because:
+    // 1. needs a real, modifiable Python install (not safe to mutate the
+    //    system Python's stdlib — wedges every pip command on the box).
+    // 2. writes to the filesystem and spawns 4-5 Python subprocesses.
+    //
+    // Run with: `cargo test --release --bins -- --ignored pep668_e2e_live`
+
+    #[test]
+    #[ignore]
+    fn pep668_e2e_live_detect_and_create_venv() {
+        let fake_python = std::env::var("LU_PEP668_TEST_PYTHON")
+            .expect("set LU_PEP668_TEST_PYTHON to the fake-python path before running");
+        assert!(
+            std::path::Path::new(&fake_python).exists(),
+            "LU_PEP668_TEST_PYTHON does not exist: {}",
+            fake_python
+        );
+
+        // The helper script must have planted the marker BEFORE this test
+        // runs. If it didn't, the detection should return false — that's
+        // also informative, so we don't fail outright here; we just print
+        // and check the more interesting assertions.
+
+        // ── Phase 1: PEP 668 detection ──
+        let detected = is_pep668_protected(&fake_python);
+        assert!(
+            detected,
+            "is_pep668_protected({}) returned false — was the EXTERNALLY-MANAGED \
+             marker planted in this Python's stdlib?",
+            fake_python
+        );
+        println!("[live E2E] ✓ is_pep668_protected detected the marker");
+
+        // ── Phase 2: create_comfyui_venv ──
+        let comfy_root = std::env::temp_dir().join("lu-pep668-live-comfyui");
+        let _ = std::fs::remove_dir_all(&comfy_root);
+        std::fs::create_dir_all(&comfy_root).expect("temp dir create");
+
+        let venv_py = create_comfyui_venv(&comfy_root, &fake_python)
+            .expect("create_comfyui_venv should succeed against fake python");
+
+        assert!(venv_py.exists(), "venv python at {} should exist", venv_py.display());
+        assert!(venv_py.starts_with(&comfy_root), "venv python should be inside comfy dir");
+        println!("[live E2E] ✓ create_comfyui_venv produced {}", venv_py.display());
+
+        // ── Phase 3: nested venv's pip should be UNBLOCKED ──
+        // The venv has its own site-packages, so PEP 668 doesn't apply to
+        // it — this is the whole point of the fix. Verify pip install
+        // works inside the nested venv. We use `--dry-run` so we don't
+        // actually download anything heavy; the test is whether pip
+        // refuses or proceeds.
+        let pip_out = std::process::Command::new(venv_py.to_string_lossy().as_ref())
+            .args(["-m", "pip", "install", "--dry-run", "--no-input", "pip"])
+            .output()
+            .expect("nested venv pip should spawn");
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&pip_out.stdout),
+            String::from_utf8_lossy(&pip_out.stderr)
+        );
+        assert!(
+            !combined.to_lowercase().contains("externally-managed"),
+            "nested venv pip was STILL blocked — PEP 668 leaked through. \
+             Output:\n{}",
+            combined
+        );
+        assert!(pip_out.status.success(), "nested venv pip exit code != 0:\n{}", combined);
+        println!("[live E2E] ✓ nested venv pip runs without PEP 668 block");
+
+        // ── Phase 4: idempotency — second create_comfyui_venv must no-op ──
+        let venv_py_again = create_comfyui_venv(&comfy_root, &fake_python)
+            .expect("second create_comfyui_venv should idempotently return existing venv");
+        assert_eq!(venv_py, venv_py_again);
+        println!("[live E2E] ✓ create_comfyui_venv is idempotent");
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&comfy_root);
+        println!("[live E2E] ALL ASSERTIONS PASSED");
     }
 }
