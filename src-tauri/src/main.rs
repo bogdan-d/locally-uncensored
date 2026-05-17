@@ -13,26 +13,32 @@ use tauri::{
     image::Image,
 };
 
-fn main() {
-    // Bug D (v2.4.5 — emilmjt Discord 2026-05-11): on Arch Linux + Wayland
-    // and on a handful of Mesa versions, Tauri 2's webkit2gtk-4.1 webview
-    // initialises with DMABUF buffer-sharing or DMA-compositing enabled
-    // and the GPU path silently fails — the window opens but the page
-    // never paints, so the user sees an empty rectangle. Disabling those
-    // two paths forces webkit back onto the slower-but-reliable software
-    // composite, which is the same workaround the GNOME, KDE, and Tauri
-    // upstream maintainers recommend (tauri-apps/tauri#9304, GNOME
-    // GitLab #1731). Only applied when the user hasn't already set the
-    // vars themselves — power users with a working DMABUF setup keep it.
-    #[cfg(target_os = "linux")]
-    {
-        if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        }
-        if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
-            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-        }
+/// Bug D (v2.4.5 — emilmjt Discord 2026-05-11): on Arch Linux + Wayland
+/// and on a handful of Mesa versions, Tauri 2's webkit2gtk-4.1 webview
+/// initialises with DMABUF buffer-sharing or DMA-compositing enabled
+/// and the GPU path silently fails — the window opens but the page
+/// never paints, so the user sees an empty rectangle. Disabling those
+/// two paths forces webkit back onto the slower-but-reliable software
+/// composite, which is the same workaround the GNOME, KDE, and Tauri
+/// upstream maintainers recommend (tauri-apps/tauri#9304, GNOME
+/// GitLab #1731). Only applied when the user hasn't already set the
+/// vars themselves — power users with a working DMABUF setup keep it.
+///
+/// Extracted to a module-level function (not `#[cfg(target_os = "linux")]`)
+/// so the no-overwrite logic is unit-testable cross-platform — see
+/// `tests::webkit_workaround_*` below.
+fn apply_linux_webkit_workarounds() {
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
+    if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+    }
+}
+
+fn main() {
+    #[cfg(target_os = "linux")]
+    apply_linux_webkit_workarounds();
 
     let app_state = AppState::new();
 
@@ -237,4 +243,89 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    // env vars are process-global; serialize these tests so they don't
+    // stomp each other when cargo runs them in parallel.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    const DMABUF: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+    const COMPOSITING: &str = "WEBKIT_DISABLE_COMPOSITING_MODE";
+
+    fn cleanup() {
+        std::env::remove_var(DMABUF);
+        std::env::remove_var(COMPOSITING);
+    }
+
+    #[test]
+    fn webkit_workaround_sets_both_vars_when_unset() {
+        let _g = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+        cleanup();
+        super::apply_linux_webkit_workarounds();
+        assert_eq!(std::env::var(DMABUF).ok().as_deref(), Some("1"));
+        assert_eq!(std::env::var(COMPOSITING).ok().as_deref(), Some("1"));
+        cleanup();
+    }
+
+    #[test]
+    fn webkit_workaround_preserves_user_dmabuf_override() {
+        // User explicitly disabled the workaround — e.g. their Mesa is fine
+        // and they want full GPU compositing. We must NOT clobber.
+        let _g = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+        cleanup();
+        std::env::set_var(DMABUF, "0");
+        super::apply_linux_webkit_workarounds();
+        assert_eq!(std::env::var(DMABUF).ok().as_deref(), Some("0"), "user-set DMABUF should be preserved");
+        assert_eq!(std::env::var(COMPOSITING).ok().as_deref(), Some("1"), "unset COMPOSITING should still be applied");
+        cleanup();
+    }
+
+    #[test]
+    fn webkit_workaround_preserves_user_compositing_override() {
+        let _g = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+        cleanup();
+        std::env::set_var(COMPOSITING, "custom-value");
+        super::apply_linux_webkit_workarounds();
+        assert_eq!(std::env::var(DMABUF).ok().as_deref(), Some("1"), "unset DMABUF should still be applied");
+        assert_eq!(std::env::var(COMPOSITING).ok().as_deref(), Some("custom-value"), "user-set COMPOSITING should be preserved");
+        cleanup();
+    }
+
+    #[test]
+    fn webkit_workaround_preserves_empty_string_as_explicit_unset() {
+        // Edge case: empty value still counts as "set" via var_os().is_some(),
+        // so we don't overwrite. Some shells/wrappers use "" to mean "unset
+        // me explicitly" — respect that intent.
+        let _g = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+        cleanup();
+        std::env::set_var(DMABUF, "");
+        std::env::set_var(COMPOSITING, "");
+        super::apply_linux_webkit_workarounds();
+        assert_eq!(std::env::var(DMABUF).ok().as_deref(), Some(""));
+        assert_eq!(std::env::var(COMPOSITING).ok().as_deref(), Some(""));
+        cleanup();
+    }
+
+    #[test]
+    fn webkit_workaround_is_idempotent() {
+        // Calling twice should not change anything after the first call.
+        let _g = ENV_MUTEX.lock().unwrap_or_else(|p| p.into_inner());
+        cleanup();
+        super::apply_linux_webkit_workarounds();
+        let after_first = (
+            std::env::var(DMABUF).ok(),
+            std::env::var(COMPOSITING).ok(),
+        );
+        super::apply_linux_webkit_workarounds();
+        let after_second = (
+            std::env::var(DMABUF).ok(),
+            std::env::var(COMPOSITING).ok(),
+        );
+        assert_eq!(after_first, after_second, "second call should be a no-op");
+        cleanup();
+    }
 }
