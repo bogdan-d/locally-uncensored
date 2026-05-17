@@ -621,8 +621,19 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
         let candidate = std::path::Path::new(&comfy_path).join("python_embeded").join("python.exe");
         if candidate.exists() { Some(candidate.to_string_lossy().to_string()) } else { None }
     });
+    // Bug E (rzgrozt — Arch PEP 668): when the installer detected an
+    // externally-managed Python it created a venv at <ComfyUI>/venv and
+    // installed PyTorch + deps into it. Launch from the venv so we don't
+    // crash with `ModuleNotFoundError: torch` because the system Python
+    // (which is what `state.python_bin` resolves to) never received those
+    // packages. Falls back to bundled portable (Windows) or system (Mac /
+    // older Linux without PEP 668) when no venv exists.
+    let venv_python = crate::python::resolve_comfyui_venv_python(std::path::Path::new(&comfy_path));
     let system_python = state.python_bin.lock().unwrap().clone();
-    let python = bundled_python.clone().unwrap_or(system_python.clone());
+    let python = bundled_python
+        .clone()
+        .or_else(|| venv_python.clone())
+        .unwrap_or(system_python.clone());
     let port_str = port.to_string();
     if python.is_empty() {
         return Err(
@@ -633,6 +644,8 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
     }
     if bundled_python.is_some() {
         println!("[ComfyUI] Using bundled portable Python: {}", python);
+    } else if venv_python.is_some() {
+        println!("[ComfyUI] Using ComfyUI venv Python (PEP 668 install): {}", python);
     } else {
         println!("[ComfyUI] Using system Python: {}", python);
     }
@@ -1070,14 +1083,24 @@ pub fn auto_start_comfyui(state: &AppState) {
                     let c = std::path::Path::new(&path).join("python_embeded").join("python.exe");
                     if c.exists() { Some(c.to_string_lossy().to_string()) } else { None }
                 });
+            // Bug E: prefer the per-install venv that the PEP 668 path
+            // creates (Arch / Debian 12+ / Fedora 38+ / Ubuntu 23.04+).
+            // Without this auto-start would launch with the system Python
+            // that doesn't have torch and crash on first import.
+            let venv_python = crate::python::resolve_comfyui_venv_python(std::path::Path::new(&path));
             let system_python = state.python_bin.lock().unwrap().clone();
-            let python = portable_python.clone().unwrap_or_else(|| system_python.clone());
+            let python = portable_python
+                .clone()
+                .or_else(|| venv_python.clone())
+                .unwrap_or_else(|| system_python.clone());
             if python.is_empty() {
                 println!("[ComfyUI] Auto-start skipped: no Python available (install via P14 flow)");
                 return;
             }
             if portable_python.is_some() {
                 println!("[ComfyUI] Auto-start using bundled portable Python: {}", python);
+            } else if venv_python.is_some() {
+                println!("[ComfyUI] Auto-start using ComfyUI venv Python (PEP 668 install): {}", python);
             }
 
             let mut cmd = Command::new(&python);

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg(target_os = "windows")]
@@ -6,6 +6,38 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// Compute the path to the venv's Python interpreter for a ComfyUI install
+/// at `comfyui_dir`. Layout matches what `python -m venv` produces.
+///
+/// * Windows: `<comfyui_dir>/venv/Scripts/python.exe`
+/// * Unix:    `<comfyui_dir>/venv/bin/python`
+///
+/// The file is NOT guaranteed to exist — call `path.exists()` if you care.
+/// Used by both the installer (Bug E — PEP 668 venv creation) and the
+/// process launcher (so `start_comfyui` runs ComfyUI inside the same
+/// isolated env that pip installed PyTorch into).
+pub fn venv_python_path(comfyui_dir: &Path) -> PathBuf {
+    let venv = comfyui_dir.join("venv");
+    if cfg!(target_os = "windows") {
+        venv.join("Scripts").join("python.exe")
+    } else {
+        venv.join("bin").join("python")
+    }
+}
+
+/// Resolve the venv Python for `comfyui_dir` iff it exists. Returns the
+/// path as a String (matching the API that `process::start_comfyui` already
+/// uses for its `bundled_python` / `system_python` slots), or None when
+/// the venv has not been created — caller falls back to the system Python.
+pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
+    let candidate = venv_python_path(comfyui_dir);
+    if candidate.exists() {
+        Some(candidate.to_string_lossy().to_string())
+    } else {
+        None
+    }
+}
 
 /// Resolve the real Python binary path, filtering out the Microsoft Store stub
 /// alias (`%LOCALAPPDATA%\Microsoft\WindowsApps\python.exe`) which prints
@@ -128,4 +160,93 @@ pub fn is_real_python(bin: &str) -> bool {
         return false;
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    // ── venv_python_path layout (Bug E — Arch PEP 668 venv) ─────────────────
+
+    #[test]
+    fn venv_python_path_matches_platform_layout() {
+        let p = venv_python_path(Path::new("/home/u/ComfyUI"));
+        let s = p.to_string_lossy().to_string();
+        // On Windows expect `Scripts/python.exe`, on Unix expect `bin/python`.
+        if cfg!(target_os = "windows") {
+            assert!(
+                s.ends_with("venv\\Scripts\\python.exe") || s.ends_with("venv/Scripts/python.exe"),
+                "got {} on Windows",
+                s
+            );
+        } else {
+            assert!(s.ends_with("venv/bin/python"), "got {} on Unix", s);
+        }
+    }
+
+    #[test]
+    fn venv_python_path_is_under_comfyui_dir() {
+        let comfy = Path::new("/some/where/ComfyUI");
+        let venv_py = venv_python_path(comfy);
+        assert!(
+            venv_py.starts_with(comfy),
+            "venv python {} did not start with {}",
+            venv_py.display(),
+            comfy.display()
+        );
+    }
+
+    // ── resolve_comfyui_venv_python — existence gate ────────────────────────
+
+    #[test]
+    fn resolve_returns_none_when_venv_missing() {
+        let tmp = std::env::temp_dir().join("lu-venv-test-missing");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+        assert!(resolve_comfyui_venv_python(&tmp).is_none());
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_returns_some_when_venv_python_exists() {
+        // Build the exact layout `python -m venv` would produce so the
+        // resolver finds it without actually invoking Python.
+        let tmp = std::env::temp_dir().join("lu-venv-test-present");
+        let _ = fs::remove_dir_all(&tmp);
+        let inner = if cfg!(target_os = "windows") {
+            tmp.join("venv").join("Scripts")
+        } else {
+            tmp.join("venv").join("bin")
+        };
+        fs::create_dir_all(&inner).unwrap();
+        let py = if cfg!(target_os = "windows") {
+            inner.join("python.exe")
+        } else {
+            inner.join("python")
+        };
+        fs::write(&py, "stub").unwrap();
+        let resolved = resolve_comfyui_venv_python(&tmp);
+        assert!(resolved.is_some(), "expected resolver to find {}", py.display());
+        assert!(resolved.unwrap().contains("venv"));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    // ── is_real_python (Bug P14 — Microsoft Store stub filter) ──────────────
+
+    #[test]
+    fn real_python_rejects_empty() {
+        assert!(!is_real_python(""));
+    }
+
+    #[test]
+    fn real_python_rejects_windowsapps_stub() {
+        assert!(!is_real_python("C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe"));
+    }
+
+    #[test]
+    fn real_python_accepts_real_path() {
+        assert!(is_real_python("/usr/bin/python3"));
+        assert!(is_real_python("C:\\Python312\\python.exe"));
+    }
 }

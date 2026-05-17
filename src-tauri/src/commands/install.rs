@@ -11,6 +11,7 @@ use std::os::windows::process::CommandExt;
 
 use tauri::State;
 
+use crate::python::venv_python_path;
 use crate::state::{AppState, InstallState};
 
 /// Windows: hide console windows for spawned processes
@@ -126,6 +127,101 @@ fn push_install_log(state: &Arc<Mutex<InstallState>>, msg: &str) {
     }
 }
 
+// ── PEP 668 / venv helpers (Bug E — rzgrozt Arch externally-managed) ─────────
+
+/// True iff the Python pointed to by `python_bin` is PEP 668 protected
+/// (Arch Linux, Debian 12+, Fedora 38+, Ubuntu 23.04+ ship Python with an
+/// `EXTERNALLY-MANAGED` marker file in the stdlib dir, which makes
+/// `python -m pip install ...` exit with
+/// `error: externally-managed-environment` unless `--break-system-packages`
+/// is passed). We probe by asking Python itself whether the marker exists
+/// — robust against distro-specific path layouts and avoids parsing locale
+/// dependent pip error strings.
+///
+/// Returns `false` on any probe error (Python missing, sysconfig broken,
+/// stdout unparseable). That is the safe default: a false negative just
+/// means we install without a venv exactly like LU did before this bug,
+/// which is fine on every distro that *isn't* PEP 668 protected.
+pub fn is_pep668_protected(python_bin: &str) -> bool {
+    if python_bin.is_empty() {
+        return false;
+    }
+    let mut cmd = Command::new(python_bin);
+    cmd.args([
+        "-c",
+        "import os, sysconfig; \
+         d = sysconfig.get_path('stdlib'); \
+         print('YES' if os.path.exists(os.path.join(d, 'EXTERNALLY-MANAGED')) else 'NO')",
+    ])
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let Ok(out) = cmd.output() else { return false };
+    if !out.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&out.stdout).trim() == "YES"
+}
+
+/// Create a venv inside `comfyui_dir/venv` using the system `python_bin`.
+/// Returns the path to the venv's Python interpreter on success. On Arch
+/// boxes that haven't installed the `python-virtualenv` package this can
+/// fail with `No module named venv` — we surface that with an actionable
+/// hint pointing at the right pacman / apt invocation.
+pub fn create_comfyui_venv(comfyui_dir: &Path, python_bin: &str) -> Result<PathBuf, String> {
+    let venv_dir = comfyui_dir.join("venv");
+    // venv is idempotent: re-running on an existing dir just no-ops, but be
+    // explicit so the log reads cleanly.
+    let already_existed = venv_dir.exists() && venv_python_path(comfyui_dir).exists();
+    if already_existed {
+        return Ok(venv_python_path(comfyui_dir));
+    }
+
+    let mut cmd = Command::new(python_bin);
+    cmd.args(["-m", "venv", venv_dir.to_string_lossy().as_ref()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let out = cmd
+        .output()
+        .map_err(|e| format!("Could not spawn `python -m venv`: {}", e))?;
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let lower = stderr.to_lowercase();
+        // Most common Arch / minimal-Python failure: stdlib venv module
+        // isn't available because the distro packages it separately.
+        if lower.contains("no module named venv") || lower.contains("ensurepip") {
+            return Err(format!(
+                "Python's `venv` module is not available. Install it first:\n\
+                 • Arch:   sudo pacman -S python-virtualenv\n\
+                 • Debian/Ubuntu: sudo apt install python3-venv\n\
+                 • Fedora: sudo dnf install python3-virtualenv\n\
+                 Then retry the ComfyUI install.\n\n--- python output ---\n{}",
+                stderr.chars().take(400).collect::<String>()
+            ));
+        }
+        return Err(format!(
+            "venv creation failed: {}",
+            stderr.chars().take(400).collect::<String>()
+        ));
+    }
+
+    let venv_py = venv_python_path(comfyui_dir);
+    if !venv_py.exists() {
+        return Err(format!(
+            "venv was created at {} but no Python binary appeared at {}. \
+             This usually means the venv module is broken — try `sudo pacman -S python-virtualenv` (Arch) or the equivalent on your distro.",
+            venv_dir.display(),
+            venv_py.display()
+        ));
+    }
+    Ok(venv_py)
+}
+
 /// Detect pip errors that warrant an automatic retry with backoff.
 /// Conservative — only retries on errors caused by transient network
 /// conditions, not on auth, permission, disk-full, or python-side bugs.
@@ -162,7 +258,17 @@ fn diagnose_pip_error(stderr: &str) -> String {
     let lower = stderr.to_lowercase();
     let snippet: String = stderr.chars().take(400).collect();
 
-    let hint = if lower.contains("ssl") {
+    let hint = if lower.contains("externally-managed-environment")
+        || lower.contains("error: externally-managed")
+    {
+        "Your Python is PEP 668 protected (Arch Linux, Debian 12+, Fedora 38+, \
+         Ubuntu 23.04+ block system-wide pip installs by default). LU should have \
+         created a venv inside the ComfyUI folder automatically — if you see this \
+         error, the venv module is missing. Install it and retry:\n\
+         • Arch:   sudo pacman -S python-virtualenv\n\
+         • Debian/Ubuntu: sudo apt install python3-venv\n\
+         • Fedora: sudo dnf install python3-virtualenv"
+    } else if lower.contains("ssl") {
         "SSL error reaching pypi.org. Often caused by an antivirus / firewall \
          intercepting TLS, or a stale system clock. Disable TLS interception \
          for python.exe, fix the system clock, then retry."
@@ -492,6 +598,42 @@ pub fn install_comfyui(
             return;
         }
 
+        // Bug E (rzgrozt — Arch GH #32 comment, 2026-05-08): if the system
+        // Python is PEP 668 protected (Arch, Debian 12+, Fedora 38+, Ubuntu
+        // 23.04+), a bare `python -m pip install ...` exits with
+        // `error: externally-managed-environment` and leaves the user with
+        // a half-cloned ComfyUI dir and no diagnostic. Detect the marker
+        // file via the system Python, then create a venv inside the
+        // ComfyUI folder and use the venv's Python for every subsequent
+        // pip step. The launcher in `process.rs` mirrors this check and
+        // prefers the venv when starting ComfyUI, so the user gets a
+        // consistent isolated environment without ever touching pacman.
+        let effective_python = if is_pep668_protected(&python_bin) {
+            update(
+                "installing",
+                "Python is PEP 668 protected (Arch / Debian 12+ / Fedora 38+ / \
+                 Ubuntu 23.04+). Creating an isolated venv at ComfyUI/venv so \
+                 pip can install PyTorch + ComfyUI deps without touching your \
+                 system Python …",
+            );
+            match create_comfyui_venv(&target_dir, &python_bin) {
+                Ok(venv_py) => {
+                    let p = venv_py.to_string_lossy().to_string();
+                    update(
+                        "installing",
+                        &format!("venv ready — using {} for the install.", p),
+                    );
+                    p
+                }
+                Err(e) => {
+                    update("error", &format!("venv creation failed.\n\n{}", e));
+                    return;
+                }
+            }
+        } else {
+            python_bin.clone()
+        };
+
         // Step 2: Detect GPU and install PyTorch
         let mut nv = Command::new("nvidia-smi");
         nv.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -548,7 +690,7 @@ pub fn install_comfyui(
             ]
         };
 
-        match pip_install_streaming_with_retry_cancellable(&torch_args, &python_bin, 3, &install_status, Some(&cancel_flag)) {
+        match pip_install_streaming_with_retry_cancellable(&torch_args, &effective_python, 3, &install_status, Some(&cancel_flag)) {
             Ok(()) => {
                 update("installing", "PyTorch installed successfully.");
             }
@@ -582,7 +724,7 @@ pub fn install_comfyui(
                 "--no-input",
                 "-r", reqs_str.as_str(),
             ];
-            match pip_install_streaming_with_retry_cancellable(&req_args, &python_bin, 3, &install_status, Some(&cancel_flag)) {
+            match pip_install_streaming_with_retry_cancellable(&req_args, &effective_python, 3, &install_status, Some(&cancel_flag)) {
                 Ok(()) => {
                     update("installing", "Dependencies installed successfully.");
                 }
@@ -1884,5 +2026,81 @@ mod tests {
     #[test]
     fn compute_cap_skips_unparseable_lines() {
         assert_eq!(parse_compute_cap_output("[Not Supported]\n8.6\n"), Some(8));
+    }
+
+    // ── Bug E (rzgrozt — Arch PEP 668 externally-managed) ─────────────────
+    //
+    // The detection function spawns a Python subprocess, so we can't unit
+    // test it without a Python install. We DO test the safety guarantees:
+    // empty `python_bin` returns false (regression-safe default), and the
+    // diagnose path surfaces a useful hint when the marker error reaches
+    // the user despite the auto-venv path.
+
+    #[test]
+    fn is_pep668_protected_returns_false_for_empty_bin() {
+        // Empty sentinel from python.rs::get_python_bin must short-circuit
+        // to false so a missing Python doesn't accidentally trigger venv
+        // creation (which would also fail and confuse the error chain).
+        assert!(!is_pep668_protected(""));
+    }
+
+    #[test]
+    fn is_pep668_protected_returns_false_for_garbage_bin() {
+        // Probing a non-existent path can't crash — the function must
+        // swallow the spawn error and return false so install proceeds as
+        // it always did on systems that aren't PEP 668 protected.
+        assert!(!is_pep668_protected("/definitely/not/a/real/python-9.99"));
+    }
+
+    #[test]
+    fn diagnose_externally_managed_mentions_venv() {
+        let raw = "error: externally-managed-environment\n\
+                   × This environment is externally managed\n\
+                   ╰─> To install Python packages system-wide, try 'pacman -S python-xyz'";
+        let msg = diagnose_pip_error(raw);
+        let lower = msg.to_lowercase();
+        assert!(
+            lower.contains("pep 668") || lower.contains("externally") || lower.contains("venv"),
+            "diagnose did not surface PEP 668 context: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn diagnose_externally_managed_includes_distro_install_commands() {
+        let raw = "error: externally-managed-environment";
+        let msg = diagnose_pip_error(raw);
+        let lower = msg.to_lowercase();
+        // We want at least one of the platform-specific install commands so
+        // the user has something to copy-paste instead of just an error.
+        assert!(
+            lower.contains("pacman") || lower.contains("apt") || lower.contains("dnf"),
+            "diagnose did not include a distro install command: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn diagnose_externally_managed_alt_format_matches() {
+        // The exact wording on Arch 2026 is `error: externally-managed`
+        // without the `-environment` suffix — make sure the matcher covers
+        // both spellings.
+        let raw = "error: externally-managed (pip blocked by PEP 668)";
+        let msg = diagnose_pip_error(raw);
+        let lower = msg.to_lowercase();
+        assert!(
+            lower.contains("pacman") || lower.contains("apt"),
+            "diagnose missed the alt spelling: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn transient_rejects_externally_managed() {
+        // PEP 668 errors are deterministic — retrying without venv would
+        // just loop forever. Must NOT be classified as transient.
+        assert!(!is_transient_pip_error(
+            "error: externally-managed-environment"
+        ));
     }
 }
