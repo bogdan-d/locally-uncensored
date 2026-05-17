@@ -60,6 +60,29 @@ pub fn show_window(app: tauri::AppHandle) {
     }
 }
 
+/// Bug J: does this system need ComfyUI's --cpu fallback flag?
+///
+/// ComfyUI 0.21.x's `main.py` calls `get_torch_device()` which calls
+/// `torch.cuda.current_device()` unconditionally during import. On systems
+/// without an NVIDIA driver, that raises `RuntimeError: Found no NVIDIA
+/// driver on your system` and main.py crashes before binding the port.
+///
+/// We pass `--cpu` to fall back to CPU inference when:
+/// - Not on macOS (Mac PyTorch uses MPS, which doesn't touch cuda APIs), AND
+/// - `nvidia-smi` is missing or exits non-zero (no NVIDIA card present).
+///
+/// AMD ROCm + Intel XPU setups CURRENTLY fall into this branch too, which
+/// is conservative: they downgrade to CPU instead of crashing. A future
+/// enhancement can probe `rocm-smi` / Intel devices and skip `--cpu` for
+/// real hardware accel paths. For now the safe default is "no crash."
+pub fn needs_cpu_fallback() -> bool {
+    if cfg!(target_os = "macos") {
+        return false;
+    }
+    let probe = Command::new("nvidia-smi").output();
+    !probe.map(|o| o.status.success()).unwrap_or(false)
+}
+
 /// Skip these directories during ComfyUI search
 const SKIP_DIRS: &[&str] = &[
     "node_modules", ".git", "__pycache__", "venv", ".venv", "site-packages",
@@ -651,8 +674,29 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
     }
     println!("[ComfyUI] Starting from: {} on port {}", comfy_path, port);
 
+    // Bug J (discovered during 2026-05-17 Arch live test): on systems without
+    // an NVIDIA driver (most Linux non-NVIDIA setups: AMD, Intel, CPU-only;
+    // also Windows boxes without an NVIDIA card), ComfyUI's main.py calls
+    // get_torch_device() → torch.cuda.current_device() → which raises
+    // `RuntimeError: Found no NVIDIA driver on your system` before
+    // main.py ever binds the port. The user sees LU stuck on "ComfyUI
+    // loading..." (which Bug B's 60-s panel now correctly surfaces, but
+    // the underlying spawn-then-crash loop wastes the user's time on every
+    // start). Detect NVIDIA via `nvidia-smi` and pass --cpu when absent,
+    // except on macOS where PyTorch uses MPS and never calls cuda APIs.
+    let needs_cpu_fallback = needs_cpu_fallback();
+    let mut comfy_args: Vec<&str> = vec![
+        "main.py",
+        "--listen", "127.0.0.1",
+        "--port", &port_str,
+        "--enable-cors-header", "*",
+    ];
+    if needs_cpu_fallback {
+        comfy_args.push("--cpu");
+        println!("[ComfyUI] No NVIDIA driver detected — passing --cpu to ComfyUI (CPU inference fallback)");
+    }
     let mut cmd = Command::new(&python);
-    cmd.args(["main.py", "--listen", "127.0.0.1", "--port", &port_str, "--enable-cors-header", "*"])
+    cmd.args(&comfy_args)
         .current_dir(&comfy_path)
         .env("TQDM_DISABLE", "1")
         .env("PYTHONUNBUFFERED", "1")
@@ -1103,8 +1147,21 @@ pub fn auto_start_comfyui(state: &AppState) {
                 println!("[ComfyUI] Auto-start using ComfyUI venv Python (PEP 668 install): {}", python);
             }
 
+            // Bug J: same --cpu fallback as start_comfyui to avoid the
+            // "Found no NVIDIA driver" crash loop on non-NVIDIA systems.
+            let auto_needs_cpu = needs_cpu_fallback();
+            let mut comfy_args: Vec<&str> = vec![
+                "main.py",
+                "--listen", "127.0.0.1",
+                "--port", &port_str,
+                "--enable-cors-header", "*",
+            ];
+            if auto_needs_cpu {
+                comfy_args.push("--cpu");
+                println!("[ComfyUI] Auto-start: no NVIDIA driver — passing --cpu");
+            }
             let mut cmd = Command::new(&python);
-            cmd.args(["main.py", "--listen", "127.0.0.1", "--port", &port_str, "--enable-cors-header", "*"])
+            cmd.args(&comfy_args)
                 .current_dir(&path)
                 .env("TQDM_DISABLE", "1")
                 .env("PYTHONUNBUFFERED", "1")
@@ -1150,5 +1207,38 @@ pub fn auto_start_comfyui(state: &AppState) {
             }
         }
         None => println!("[ComfyUI] Not found. Install ComfyUI or set path in settings."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Bug J: needs_cpu_fallback platform short-circuit ─────────────────
+
+    #[test]
+    fn needs_cpu_fallback_is_false_on_macos() {
+        // On macOS, PyTorch uses MPS and never calls cuda APIs that crash
+        // the way Linux+no-NVIDIA does. The fallback must be a no-op there
+        // so we don't downgrade real Mac users (M1/M2/etc) to CPU inference.
+        if cfg!(target_os = "macos") {
+            assert!(!needs_cpu_fallback(), "macOS must short-circuit to false");
+        } else {
+            // On non-macOS, the result depends on whether nvidia-smi is
+            // installed + returns success. The function is total — it must
+            // not panic in either branch. We just call it and assert it
+            // returns a bool (compiler-enforced anyway).
+            let _ = needs_cpu_fallback();
+        }
+    }
+
+    #[test]
+    fn needs_cpu_fallback_is_deterministic_for_repeat_calls() {
+        // Two consecutive calls must agree — no time-based or random
+        // behaviour smuggled in (Bug J's fix probes nvidia-smi each call,
+        // so if nvidia-smi state doesn't change, the answer doesn't either).
+        let a = needs_cpu_fallback();
+        let b = needs_cpu_fallback();
+        assert_eq!(a, b, "needs_cpu_fallback returned inconsistent results");
     }
 }

@@ -321,7 +321,7 @@ fn diagnose_pip_error(stderr: &str) -> String {
 /// of waiting for pip to finish naturally. When `cancel` is `None`, the
 /// install runs to completion as before — used by `install_python` and
 /// callers that haven't been wired up to the new cancel flow.
-fn pip_install_streaming_with_retry_cancellable(
+pub fn pip_install_streaming_with_retry_cancellable(
     args: &[&str],
     python_bin: &str,
     max_attempts: u32,
@@ -849,100 +849,237 @@ pub fn install_ollama(state: State<'_, AppState>) -> Result<serde_json::Value, S
             }
         };
 
-        // Step 1: Download OllamaSetup.exe
-        let temp_dir = std::env::temp_dir();
-        let installer_path = temp_dir.join("OllamaSetup.exe");
-
-        println!("[Ollama] Downloading OllamaSetup.exe...");
-
-        match download_file_blocking(
-            "https://ollama.com/download/OllamaSetup.exe",
-            &installer_path,
-            &ollama_state,
-        ) {
-            Ok(()) => {
-                println!("[Ollama] Download complete");
-                update("installing", "Download complete. Installing Ollama...");
-            }
-            Err(e) => {
-                let err = format!("Download failed: {}", e);
-                println!("[Ollama] {}", err);
-                update("error", &err);
-                return;
-            }
-        }
-
-        // Step 2: Run silent install
-        println!("[Ollama] Running silent installer...");
-        let mut cmd = Command::new(&installer_path);
-        cmd.arg("/S");
+        // Bug G (discovered during 2026-05-17 Arch live test): pre-fix
+        // install_ollama unconditionally downloaded OllamaSetup.exe (a
+        // Windows-only NSIS installer) and tried to execute it with /S.
+        // On Linux that fails with "Exec format error" and on macOS with
+        // a similar binary-format mismatch — the user sees a cryptic
+        // install failure with no path forward. Dispatch by platform.
         #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
-
-        match cmd.output() {
-            Ok(output) if output.status.success() => {
-                println!("[Ollama] Installation successful");
-                update("starting", "Ollama installed. Starting Ollama...");
-            }
-            Ok(output) => {
-                let code = output.status.code().unwrap_or(-1);
-                // NSIS installer returns 0 on success; non-zero might still be OK
-                println!("[Ollama] Installer exited with code {}", code);
-                update("starting", &format!("Installer finished (code {}). Starting Ollama...", code));
-            }
-            Err(e) => {
-                let err = format!("Could not run installer: {}", e);
-                println!("[Ollama] {}", err);
-                update("error", &err);
-                return;
-            }
+        {
+            install_ollama_windows_impl(&ollama_state, update);
         }
-
-        // Cleanup installer
-        let _ = fs::remove_file(&installer_path);
-
-        // Step 3: Start ollama serve
-        println!("[Ollama] Starting ollama serve...");
-        let mut serve = Command::new("ollama");
-        serve.arg("serve").stdout(Stdio::piped()).stderr(Stdio::piped());
-        #[cfg(target_os = "windows")]
-        serve.creation_flags(CREATE_NO_WINDOW);
-
-        // Try to start — may already be running as service
-        let _ = serve.spawn();
-
-        // Step 4: Wait for Ollama to respond (up to 30 seconds)
-        println!("[Ollama] Waiting for Ollama to be ready...");
-        update("starting", "Waiting for Ollama to start...");
-
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(3))
-            .build()
-            .unwrap_or_default();
-
-        let mut ready = false;
-        for i in 0..15 {
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            match client.get("http://localhost:11434/api/tags").send() {
-                Ok(res) if res.status().is_success() => {
-                    ready = true;
-                    break;
-                }
-                _ => {
-                    println!("[Ollama] Not ready yet, attempt {}/15", i + 1);
-                }
-            }
+        #[cfg(target_os = "linux")]
+        {
+            install_ollama_linux_impl(&ollama_state, update);
         }
-
-        if ready {
-            println!("[Ollama] Ready!");
-            update("complete", "Ollama is ready!");
-        } else {
-            update("error", "Ollama installed but not responding. Try restarting the app.");
+        #[cfg(target_os = "macos")]
+        {
+            install_ollama_macos_impl(&ollama_state, update);
         }
     });
 
     Ok(serde_json::json!({"status": "downloading"}))
+}
+
+/// Bug I — Linux distro detection for the install_python error hint.
+/// Parses `/etc/os-release` line-by-line, collects `ID` and `ID_LIKE`
+/// tokens (stripping the quotes that systemd allows around multi-value
+/// fields like `ID_LIKE="rhel centos fedora"`), and returns a distro
+/// family install command. Pulled out so we can unit test the matching
+/// logic without writing to /etc on the test box.
+pub fn linux_python_install_hint(os_release: &str) -> String {
+    // Collect family tokens from ID and ID_LIKE.
+    let mut families: Vec<String> = Vec::new();
+    for line in os_release.lines() {
+        let trimmed = line.trim();
+        let (key, value) = match trimmed.split_once('=') {
+            Some(kv) => kv,
+            None => continue,
+        };
+        let key = key.trim().to_lowercase();
+        if key != "id" && key != "id_like" {
+            continue;
+        }
+        // Strip surrounding quotes if present, then split on whitespace
+        // (ID_LIKE often carries multiple space-separated tokens).
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        for token in value.split_whitespace() {
+            families.push(token.to_lowercase());
+        }
+    }
+    let has = |needle: &str| families.iter().any(|f| f == needle);
+
+    if has("arch") || has("manjaro") || has("endeavouros") || has("garuda") {
+        "`sudo pacman -S python python-pip`".to_string()
+    } else if has("debian") || has("ubuntu") || has("linuxmint") || has("pop") || has("elementary") {
+        "`sudo apt install python3 python3-pip python3-venv`".to_string()
+    } else if has("fedora") || has("rhel") || has("centos") || has("rocky") || has("almalinux") {
+        "`sudo dnf install python3 python3-pip`".to_string()
+    } else if has("opensuse") || has("opensuse-tumbleweed") || has("opensuse-leap") || has("suse") || has("sles") {
+        "`sudo zypper install python3 python3-pip`".to_string()
+    } else {
+        "your distro's package manager".to_string()
+    }
+}
+
+/// Wait for Ollama HTTP API to respond on the default port (best-effort
+/// shared startup probe used after every platform-specific install path).
+fn wait_for_ollama_ready() -> bool {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .unwrap_or_default();
+    for i in 0..15 {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        match client.get("http://localhost:11434/api/tags").send() {
+            Ok(res) if res.status().is_success() => return true,
+            _ => println!("[Ollama] Not ready yet, attempt {}/15", i + 1),
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn install_ollama_windows_impl<F: Fn(&str, &str)>(
+    ollama_state: &Arc<Mutex<InstallState>>,
+    update: F,
+) {
+    let temp_dir = std::env::temp_dir();
+    let installer_path = temp_dir.join("OllamaSetup.exe");
+    println!("[Ollama] Downloading OllamaSetup.exe...");
+    if let Err(e) = download_file_blocking(
+        "https://ollama.com/download/OllamaSetup.exe",
+        &installer_path,
+        ollama_state,
+    ) {
+        update("error", &format!("Download failed: {}", e));
+        return;
+    }
+    update("installing", "Download complete. Installing Ollama...");
+    let mut cmd = Command::new(&installer_path);
+    cmd.arg("/S");
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    match cmd.output() {
+        Ok(o) => {
+            let code = o.status.code().unwrap_or(-1);
+            update("starting", &format!("Installer finished (code {}). Starting Ollama...", code));
+        }
+        Err(e) => {
+            update("error", &format!("Could not run installer: {}", e));
+            return;
+        }
+    }
+    let _ = fs::remove_file(&installer_path);
+    let mut serve = Command::new("ollama");
+    serve.arg("serve").stdout(Stdio::piped()).stderr(Stdio::piped());
+    serve.creation_flags(CREATE_NO_WINDOW);
+    let _ = serve.spawn();
+    update("starting", "Waiting for Ollama to start...");
+    if wait_for_ollama_ready() {
+        update("complete", "Ollama is ready!");
+    } else {
+        update("error", "Ollama installed but not responding. Try restarting the app.");
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn install_ollama_linux_impl<F: Fn(&str, &str)>(
+    ollama_state: &Arc<Mutex<InstallState>>,
+    update: F,
+) {
+    // If `ollama` is already on PATH (pacman -S ollama, manual install, etc.),
+    // skip the download entirely.
+    if Command::new("which").arg("ollama").output().map(|o| o.status.success()).unwrap_or(false) {
+        update("starting", "Ollama is already installed — starting service...");
+    } else {
+        // Download the official static Linux x86_64 binary from GitHub releases.
+        // (https://ollama.com/install.sh's curl|sh path needs sudo to write into
+        // /usr/local/bin, which isn't safe to drive from a desktop app. Putting
+        // the binary in ~/.local/bin avoids the sudo round-trip and works for
+        // every Linux user.)
+        let home = match std::env::var("HOME") {
+            Ok(h) => PathBuf::from(h),
+            Err(_) => {
+                update("error", "Could not resolve $HOME. Install Ollama manually: pacman -S ollama / apt install ollama / brew install ollama.");
+                return;
+            }
+        };
+        let bin_dir = home.join(".local").join("bin");
+        if let Err(e) = fs::create_dir_all(&bin_dir) {
+            update("error", &format!("Could not create {}: {}", bin_dir.display(), e));
+            return;
+        }
+        let binary_path = bin_dir.join("ollama");
+        update("downloading", &format!("Downloading ollama-linux-amd64 to {}...", binary_path.display()));
+        if let Err(e) = download_file_blocking(
+            "https://github.com/ollama/ollama/releases/latest/download/ollama-linux-amd64",
+            &binary_path,
+            ollama_state,
+        ) {
+            update("error", &format!(
+                "Download failed: {}. Install Ollama manually via your distro package \
+                 manager: `pacman -S ollama` (Arch), `apt install ollama` (Debian/Ubuntu \
+                 23.10+), or download from https://ollama.com/download/linux.",
+                e
+            ));
+            return;
+        }
+        // chmod +x
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = fs::metadata(&binary_path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o755);
+                let _ = fs::set_permissions(&binary_path, perms);
+            }
+        }
+        update("installing", &format!("Installed to {}. Note: add ~/.local/bin to your PATH if you want to run `ollama` from your shell.", binary_path.display()));
+    }
+
+    // Resolve absolute path (PATH may not include ~/.local/bin in the spawned
+    // shell environment, so prefer the explicit binary path when we know it).
+    let home = std::env::var("HOME").ok().map(PathBuf::from);
+    let explicit = home.map(|h| h.join(".local").join("bin").join("ollama"));
+    let ollama_cmd = match explicit {
+        Some(p) if p.exists() => p.to_string_lossy().to_string(),
+        _ => "ollama".to_string(),
+    };
+
+    let mut serve = Command::new(&ollama_cmd);
+    serve.arg("serve").stdout(Stdio::piped()).stderr(Stdio::piped());
+    let _ = serve.spawn();
+
+    update("starting", "Waiting for Ollama to start...");
+    if wait_for_ollama_ready() {
+        update("complete", "Ollama is ready!");
+    } else {
+        update(
+            "error",
+            "Ollama installed but the API isn't responding on localhost:11434. \
+             Open a terminal and run `ollama serve` manually — if that fails, \
+             the binary at ~/.local/bin/ollama may be missing executable \
+             permissions or your kernel may need an older static build.",
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn install_ollama_macos_impl<F: Fn(&str, &str)>(
+    _ollama_state: &Arc<Mutex<InstallState>>,
+    update: F,
+) {
+    if Command::new("which").arg("ollama").output().map(|o| o.status.success()).unwrap_or(false) {
+        update("starting", "Ollama already installed — starting service...");
+        let mut serve = Command::new("ollama");
+        serve.arg("serve").stdout(Stdio::piped()).stderr(Stdio::piped());
+        let _ = serve.spawn();
+        if wait_for_ollama_ready() {
+            update("complete", "Ollama is ready!");
+        } else {
+            update("error", "Ollama is installed but the API isn't responding. Try restarting Ollama.app.");
+        }
+        return;
+    }
+    // We don't auto-install on macOS because the official distribution is
+    // the signed Ollama.app from ollama.com/download/mac. Surfacing a clear
+    // pointer beats trying to script around macOS gatekeeper.
+    update(
+        "error",
+        "On macOS, download Ollama.app from https://ollama.com/download/mac and \
+         move it to /Applications, then come back here and click Re-detect.",
+    );
 }
 
 #[tauri::command]
@@ -1198,6 +1335,38 @@ pub fn install_lmstudio(state: State<'_, AppState>) -> Result<serde_json::Value,
                 s.logs.push(msg.to_string());
             }
         };
+
+        // Bug H (discovered during 2026-05-17 Arch live test): pre-fix
+        // install_lmstudio unconditionally downloaded LMStudioSetup.exe
+        // (Windows installer) and tried to `cmd.arg("/S")` it. On Linux
+        // the execve crashes with "Exec format error"; on macOS the
+        // mismatch is the same. LM Studio's Linux distribution is an
+        // AppImage whose URL rotates with every release, so we can't
+        // mirror it from a stable in-binary string — surface a clear
+        // download pointer instead of pretending to auto-install.
+        #[cfg(target_os = "linux")]
+        {
+            update(
+                "error",
+                "LM Studio's Linux distribution is an AppImage with a URL that \
+                 rotates per release. Download it from https://lmstudio.ai/download \
+                 (pick 'Linux AppImage'), `chmod +x` the file, run it once to \
+                 finish bootstrap, then come back to LU and click Re-detect.\n\n\
+                 Tip: if you prefer the CLI-only path, the `lms` CLI ships with \
+                 the AppImage and lands at ~/.lmstudio/bin/lms after first run.",
+            );
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            update(
+                "error",
+                "On macOS, download LM Studio.app from https://lmstudio.ai/download, \
+                 drag it to /Applications, launch it once to finish setup, then \
+                 come back to LU and click Re-detect.",
+            );
+            return;
+        }
 
         // Pre-check: if LM Studio is already installed (an `lms.exe` is
         // findable in any of the locations `lmstudio_lms_path()` knows about)
@@ -1494,6 +1663,40 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
                 s.logs.push(msg.to_string());
             }
         };
+
+        // Bug I (discovered during 2026-05-17 Arch live test): pre-fix
+        // install_python unconditionally invoked `winget` which is
+        // Windows-exclusive. On Linux that fails with "winget: command
+        // not found" and the user gets stuck. In practice every modern
+        // Linux distro ships Python in the base group so the install
+        // button rarely needs to fire — but when it does, surfacing the
+        // right distro-specific install command beats a cryptic spawn
+        // error.
+        #[cfg(target_os = "linux")]
+        {
+            let os_release = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
+            let suggestion = linux_python_install_hint(&os_release);
+            update(
+                "error",
+                &format!(
+                    "Python isn't installed system-wide. On Linux, install it via {} \
+                     then click Re-detect. (LU's auto-installer is Windows-only — on \
+                     Linux your package manager is the right tool.)",
+                    suggestion
+                ),
+            );
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        {
+            update(
+                "error",
+                "Python isn't installed system-wide. On macOS, install it via \
+                 `brew install python` (Homebrew) or download Python 3.12+ from \
+                 https://www.python.org/downloads/macos/ then click Re-detect.",
+            );
+            return;
+        }
 
         // Stream-friendly winget invocation. `--silent --accept-*-agreements`
         // drops the EULA prompts; without them winget will sit and wait for
@@ -2141,6 +2344,72 @@ mod tests {
         assert!(!is_transient_pip_error(
             "error: externally-managed-environment"
         ));
+    }
+
+    // ── Bug I — linux_python_install_hint distro detection ────────────────
+
+    #[test]
+    fn linux_hint_arch_via_id_field() {
+        let release = "NAME=\"Arch Linux\"\nID=arch\nID_LIKE=archlinux\n";
+        let hint = linux_python_install_hint(release);
+        assert!(hint.contains("pacman"), "got: {}", hint);
+        assert!(hint.contains("python") && hint.contains("pip"));
+    }
+
+    #[test]
+    fn linux_hint_manjaro_via_id_like_arch() {
+        let release = "NAME=\"Manjaro\"\nID=manjaro\nID_LIKE=arch\n";
+        let hint = linux_python_install_hint(release);
+        assert!(hint.contains("pacman"), "Manjaro should map to Arch family, got: {}", hint);
+    }
+
+    #[test]
+    fn linux_hint_ubuntu_via_id_like_debian() {
+        let release = "NAME=\"Ubuntu\"\nID=ubuntu\nID_LIKE=debian\n";
+        let hint = linux_python_install_hint(release);
+        assert!(hint.contains("apt"), "got: {}", hint);
+        assert!(hint.contains("python3"));
+    }
+
+    #[test]
+    fn linux_hint_debian_via_id() {
+        let release = "NAME=\"Debian GNU/Linux\"\nID=debian\n";
+        let hint = linux_python_install_hint(release);
+        assert!(hint.contains("apt"), "got: {}", hint);
+    }
+
+    #[test]
+    fn linux_hint_fedora_via_id() {
+        let release = "NAME=\"Fedora Linux\"\nID=fedora\nID_LIKE=\"fedora\"\n";
+        let hint = linux_python_install_hint(release);
+        assert!(hint.contains("dnf"), "got: {}", hint);
+    }
+
+    #[test]
+    fn linux_hint_rocky_via_id_like_rhel() {
+        let release = "NAME=\"Rocky Linux\"\nID=rocky\nID_LIKE=\"rhel centos fedora\"\n";
+        let hint = linux_python_install_hint(release);
+        assert!(hint.contains("dnf"), "RHEL-family should suggest dnf, got: {}", hint);
+    }
+
+    #[test]
+    fn linux_hint_opensuse_via_id_like() {
+        let release = "NAME=\"openSUSE Tumbleweed\"\nID=opensuse-tumbleweed\nID_LIKE=\"opensuse suse\"\n";
+        let hint = linux_python_install_hint(release);
+        assert!(hint.contains("zypper"), "got: {}", hint);
+    }
+
+    #[test]
+    fn linux_hint_unknown_distro_falls_back() {
+        let release = "NAME=\"Some Custom Distro\"\nID=mystery\n";
+        let hint = linux_python_install_hint(release);
+        assert!(hint.contains("package manager"), "got: {}", hint);
+    }
+
+    #[test]
+    fn linux_hint_empty_input_falls_back() {
+        let hint = linux_python_install_hint("");
+        assert!(hint.contains("package manager"));
     }
 
     // ── Bug E — LIVE integration test ──────────────────────────────────────
