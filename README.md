@@ -35,33 +35,32 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.4.4 — Current Release
+## v2.4.5 — Current Release
 
-**Hotfix: 8 fixes for the v2.4.3 follow-up sweep.**
+**Hotfix: 14 fixes on top of v2.4.4.**
 
-Drop-in hotfix on top of v2.4.3. Auto-update prompts on next launch.
+Drop-in hotfix on top of v2.4.4. Auto-update prompts on next launch.
 
-Reports collected on Discord, Reddit, and GitHub Discussions between 2026-05-04 and 2026-05-11. Thanks to **techx69**, **ninjastic2008**, **phantomderp**, **vokurta**, **vvvxxxvvv_80435**, and **Turbulent_Tomato7559** for the repros.
+Six user-reported plus eight surfaced during a full Arch real-tester sweep between v2.4.4 release and 2026-05-17. Thanks to **miguelkodoatie**, **Turbulent_Tomato7559**, **dethlux**, **Anson192**, **emilmjt**, **rzgrozt**, and **phantomderp** for the repros.
 
 ### What's fixed
-- **LM Studio system-wide install now detected** (techx69) — `lmstudio_lms_path()` walks `%PROGRAMFILES%`, `%PROGRAMFILES(X86)%`, `%PROGRAMW6432%`, plus a registry sweep of `Uninstall\…\InstallLocation`. Soft-detect via a bounded walk of `~/.lmstudio/models/` for GGUFs means users with models on disk but the server down get a **"Start LM Studio server"** primary CTA instead of "no models found".
-- **Multi-ComfyUI picker in onboarding** (ninjastic2008) — new `detect_all_comfyui_installs` enumerates every ComfyUI on disk with provenance tags (config.json, deep home scan, etc.). When more than one match exists the user picks explicitly; single-hit and zero-hit cases keep the previous auto-pick / install-fresh flow.
-- **ComfyUI install: Cancel + disk-pressure pre-flight + ETA** (techx69) — the 45-min hang case now has a Cancel button (cleanly kills git/pip child via `Arc<AtomicBool>` poll), a `< 5 GB free` warning before the pip step kicks off, and a rolling ETA next to the elapsed timer.
-- **PyTorch wheels respect GPU compute capability** (vokurta — RTX 6000 Blackwell) — `nvidia-smi --query-gpu=compute_cap` routes SM 12.0+ to `cu128`, everything else to `cu121`. Fixes `CUDA error: no kernel image is available for execution on the device` on Blackwell silicon.
-- **TokenCounter respects the Settings `maxTokens` override live** (phantomderp) — header re-renders on every settings tick instead of caching the model manifest value at mount.
-- **DownloadBadge X-button cancels the Rust pull stream** (phantomderp) — `dismissPull` now aborts the `AbortController` AND invokes `cancel_model_pull`. No more respawn from late `pull-progress` events, no more half-installed models in Ollama.
-- **Agent-Mode hint when a model emits `<tool_call>` JSON without the toggle on** (phantomderp) — amber banner with a one-click "Enable Agent" button instead of rendering raw JSON.
-- **Video workflow architecture install hints + .webp warning** (vvvxxxvvv_80435, Turbulent_Tomato7559) — CogVideoX, FramePack, Pyramid Flow, and Allegro throw a typed `WorkflowUnavailableError` with `installHint: { pack, url }` when their wrapper nodes are missing instead of producing the cryptic "could not detect model type" error or an animated `.webp` instead of an `.mp4`. The Create flow also warns up front when `VHS_VideoCombine` is missing.
+- **Video output produces real `.mp4` files** (Bug A — miguelkodoatie, Turbulent_Tomato7559). When ComfyUI lacks `VHS_VideoCombine`, clicking generate on a video model now opens a modal with a one-click install (git clone of `kosinkadink/videohelpersuite` + pip + ComfyUI restart, ~30 s) instead of silently falling through to `SaveAnimatedWEBP`.
+- **"ComfyUI loading…" gets an actionable panel after 60 s** (Bug B — dethlux GH #38). Shows elapsed time, inline log viewer (last 30 lines), `Kill process`, and `Restart` buttons so users can diagnose or recover without restarting LU.
+- **One-click repair for Ollama "unable to load model: …blobs/sha256-…"** (Bug C — Anson192 GH Discussion #39, RTX 4090). New `missing-blob` error classification surfaces a `Refresh` chip that runs `ollama pull <model>` to re-fetch the missing blob.
+- **Dynamic context-window detection** (Bug K — phantomderp Discord). LU now probes the LM Studio Enhanced API (`/api/v0/models/<id>`) and the generic `/v1/models/<id>` to surface the real max context per model. No more capped 8k display when the model supports 32k / 128k. Also covers Ollama architecture-specific keys (`qwen2.context_length`, `llama.context_length`).
+- **Arch + Wayland AppImage no longer opens to an empty window** (Bug D — emilmjt Discord). Sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` + `WEBKIT_DISABLE_COMPOSITING_MODE=1` at startup on Linux (upstream-recommended workaround for `tauri-apps/tauri#9304`), and ships explicit `webkit2gtk-4.1` / `gtk3` / `libayatana-appindicator3-1` deps plus AppImage media framework bundling.
+- **PEP 668 protected Pythons no longer brick the ComfyUI install** (Bug E — rzgrozt GH #32). Installer detects the marker (Arch, Debian 12+, Fedora 38+, Ubuntu 23.04+) and auto-creates `<ComfyUI>/venv`, then routes all pip work through the venv Python so the system Python's PEP 668 block never fires. Launcher mirrors the lookup so ComfyUI boots with the venv it was installed against.
+- **Linux installer family overhaul** (Bugs F, G, H, I, J — Arch real-tester sweep). Custom-node install respects the ComfyUI venv on PEP 668 distros (Bug F). Ollama Linux install surfaces a distro-specific package command (`sudo pacman -S ollama`, `sudo apt install ollama` on Debian 12+, etc.) instead of trying to download a Windows `.exe` or a multi-GB tarball (Bug G). LM Studio + Python install dispatch by `target_os` instead of always running `winget` / Windows installers (Bugs H + I). ComfyUI gets a `--cpu` fallback on systems without an NVIDIA driver so it stops crashing before binding port 8188 on AMD / Intel Arc / fresh Linux boxes (Bug J).
 
 ### Stability
-- `vitest`: 93 files / 2264 tests green (+10 vs. v2.4.3 for cancel propagation and install-hint coverage)
-- `cargo test --release`: 52 passed (+8 for `parse_compute_cap_output` covering Ampere / Ada / Hopper / Blackwell / multi-GPU pick-highest / edge cases)
-- `tsc --noEmit`: clean, `cargo check`: clean (1 dead-code warning, pre-existing)
-- Phase 1 + Phase 2 live-E2E via Computer-Use: 5/8 bugs verified live in both configured-state and complete-fresh-state runs. 3 remaining (ComfyUI install cancel, wrapper workflows, Blackwell wheels) are code + unit-test verified — invasive to validate live without Blackwell silicon, a 100%-busy drive, or CogVideoX wrapper nodes installed.
+- `vitest`: 93 files / **2284 tests** green (+13 for Bug K context-window detection across `provider-openai.test.ts` and `provider-ollama.test.ts`, +7 for missing-blob error coverage, +1 smoke test for `videohelpersuite` registry).
+- `cargo test --release`: **89 passed + 1 ignored** (+5 Bug D webkit env-vars, +13 Bug E PEP 668 / venv, +9 Bug I distro hint, +2 Bug J nvidia-smi probe, +8 Bug G refix distro hint).
+- `tsc --noEmit`: clean. `cargo check`: clean (1 dead-code warning, pre-existing).
+- Bug A, B, C, D, E, F, G, J, K live-verified via Computer-Use on Windows 10 + RTX 3060 Ti AND on a real Arch Linux VM (kernel 7.0.8, headless sway). Multi-tool agent-loop E2E test: gemma4:e4b batched 5 parallel `fs_write` calls in one response, all 5 markdown files landed correctly. Image gen: Juggernaut-XL 1024x1024 20 steps → 80 s. Video gen: Wan 2.1 T2V 1.3B 480x480 17 frames → 122 s.
 - No breaking changes, no localStorage migration — upgrade in place.
 
 ### Heads-up
-Same as the v2.4.3 sweep: `#bug-reports` / `#help-*` / GitHub will be checked daily for the next few days for any regression. v2.4.4 is a Windows + Linux release; macOS is not part of this build.
+`#bug-reports` / `#help-*` / GitHub will be checked daily for the next few days for any regression. v2.4.5 is a Windows + Linux release; macOS is not part of this build.
 
 For older releases, see [CHANGELOG.md](CHANGELOG.md).
 
