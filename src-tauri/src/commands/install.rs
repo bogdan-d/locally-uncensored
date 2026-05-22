@@ -526,6 +526,23 @@ pub fn install_comfyui(
             return;
         }
 
+        // Bug N (juliandiggins-stack issue #40, 2026-05-18) — probe Windows
+        // git BEFORE clone so a WSL/non-native git on PATH surfaces a clear
+        // hint instead of failing the clone halfway with cryptic stderr.
+        #[cfg(target_os = "windows")]
+        {
+            let probe = windows_git_probe();
+            if let Some(hint) = windows_git_install_hint(&probe) {
+                if probe == WindowsGitState::Missing {
+                    update("error", &hint);
+                    return;
+                }
+                // NonNative — log the warning to the install panel but
+                // proceed; many MSYS/Cygwin gits handle Windows paths fine.
+                update("downloading", &hint);
+            }
+        }
+
         // Step 1: Git clone — spawn+poll instead of cmd.output() so the
         // Cancel button can kill an in-flight clone (Bug #1).
         println!("[Install] Cloning ComfyUI to {:?}", target_dir);
@@ -910,6 +927,84 @@ pub fn linux_python_install_hint(os_release: &str) -> String {
         "`sudo zypper install python3 python3-pip`".to_string()
     } else {
         "your distro's package manager".to_string()
+    }
+}
+
+/// Bug N — git probe before ComfyUI install (juliandiggins-stack issue #40).
+///
+/// On Windows the in-app ComfyUI install + custom-node install both shell out
+/// to `git clone`. The previous spawn-error guard only catches a flat
+/// "git not on PATH" — but on a Windows machine where a WSL / Linux-mounted
+/// git binary is first on PATH, `git --version` succeeds and clone *starts*,
+/// then dies because the Linux binary can't handle Windows-style target paths.
+/// juliandiggins-stack hit this on v2.4.5: clone silently fails, user gets
+/// a half-installed ComfyUI with no actionable hint.
+///
+/// Probe at start of every clone path, classify, and surface the right hint:
+/// Missing → "install Git for Windows", NonNative → "WSL/non-native git on
+/// PATH may break Windows-path clones", Native → proceed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WindowsGitState {
+    /// `git --version` failed to run (not installed or not on PATH).
+    Missing,
+    /// `git version 2.x.x.windows.y` — Git for Windows. Clone will work.
+    Native,
+    /// `git --version` ran but output doesn't include the `.windows` tag —
+    /// could be WSL git, MSYS git, Cygwin git, or something else. May work,
+    /// may break on Windows paths. Surface a soft warning, proceed anyway.
+    NonNative,
+}
+
+/// Pure helper for testability. Classifies a `git --version` invocation
+/// from its stdout (trimmed) plus the spawn/exit status.
+pub fn windows_git_probe_from_output(stdout: &str, exited_successfully: bool) -> WindowsGitState {
+    if !exited_successfully {
+        return WindowsGitState::Missing;
+    }
+    let lower = stdout.to_lowercase();
+    if !lower.starts_with("git version") {
+        // Some non-git binary on PATH that responded to --version with garbage.
+        return WindowsGitState::Missing;
+    }
+    if lower.contains(".windows") {
+        WindowsGitState::Native
+    } else {
+        WindowsGitState::NonNative
+    }
+}
+
+/// Run `git --version` and classify. Only meaningful on Windows; on other
+/// platforms a stock `git` is fine.
+#[cfg(target_os = "windows")]
+pub fn windows_git_probe() -> WindowsGitState {
+    let mut cmd = Command::new("git");
+    cmd.arg("--version").creation_flags(CREATE_NO_WINDOW);
+    match cmd.output() {
+        Ok(o) if o.status.success() => {
+            let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            windows_git_probe_from_output(&stdout, true)
+        }
+        _ => WindowsGitState::Missing,
+    }
+}
+
+/// User-facing hint for the probed state. Returns `None` for Native (no hint
+/// needed). For Missing the hint is fatal; for NonNative it's a soft warning.
+pub fn windows_git_install_hint(state: &WindowsGitState) -> Option<String> {
+    match state {
+        WindowsGitState::Native => None,
+        WindowsGitState::Missing => Some(
+            "Git is not installed or not on PATH. Install Git for Windows from \
+             https://git-scm.com/download/win and restart LU so the new PATH \
+             is picked up.".to_string(),
+        ),
+        WindowsGitState::NonNative => Some(
+            "A non-native `git` binary is first on PATH (likely WSL or a Linux \
+             mount). It may fail to clone into Windows-style paths. If the \
+             ComfyUI install errors out during clone, install Git for Windows \
+             from https://git-scm.com/download/win and make sure its `cmd` \
+             folder is ahead of any WSL git in your PATH.".to_string(),
+        ),
     }
 }
 
@@ -1930,6 +2025,21 @@ pub fn install_custom_node(
             .map_err(|e| format!("Failed to create custom_nodes directory: {}", e))?;
     }
 
+    // Bug N — same git probe as install_comfyui. Block on missing git, log
+    // a soft hint when a non-native git is first on PATH.
+    #[cfg(target_os = "windows")]
+    {
+        let probe = windows_git_probe();
+        if probe == WindowsGitState::Missing {
+            return Err(windows_git_install_hint(&probe).unwrap_or_default());
+        }
+        if probe == WindowsGitState::NonNative {
+            if let Some(hint) = windows_git_install_hint(&probe) {
+                println!("[Install] {}", hint);
+            }
+        }
+    }
+
     if target_dir.exists() {
         // Already exists — git pull to update
         println!("[Install] Custom node {} already exists, updating...", node_name);
@@ -2573,5 +2683,138 @@ mod tests {
         // Cleanup
         let _ = std::fs::remove_dir_all(&comfy_root);
         println!("[live E2E] ALL ASSERTIONS PASSED");
+    }
+
+    // ── Bug N — windows_git_probe classification matrix ──────────────────
+    //
+    // juliandiggins-stack hit a half-installed ComfyUI on Windows because a
+    // WSL git on PATH ran the clone but choked on the Windows-style target
+    // path. The probe is the gate that should surface a clear hint instead.
+    // These tests pin the classification — the actual `git --version` call
+    // is integration-only and lives in the live E2E section.
+
+    #[test]
+    fn git_probe_native_git_for_windows() {
+        // Git for Windows always tags its version with `.windows.<n>`.
+        let stdout = "git version 2.43.0.windows.1";
+        let state = windows_git_probe_from_output(stdout, true);
+        assert_eq!(state, WindowsGitState::Native);
+    }
+
+    #[test]
+    fn git_probe_native_git_for_windows_recent_build() {
+        // Newer Git for Windows builds keep the same tag shape.
+        let stdout = "git version 2.45.2.windows.1";
+        let state = windows_git_probe_from_output(stdout, true);
+        assert_eq!(state, WindowsGitState::Native);
+    }
+
+    #[test]
+    fn git_probe_wsl_git_is_non_native() {
+        // WSL ships stock upstream git — no `.windows` tag.
+        let stdout = "git version 2.43.0";
+        let state = windows_git_probe_from_output(stdout, true);
+        assert_eq!(state, WindowsGitState::NonNative);
+    }
+
+    #[test]
+    fn git_probe_msys_git_is_non_native() {
+        // MSYS2 git: also no `.windows` tag, even though it can sometimes
+        // handle Windows paths. We classify as NonNative and let the user
+        // decide based on the soft warning.
+        let stdout = "git version 2.44.0.msys";
+        let state = windows_git_probe_from_output(stdout, true);
+        assert_eq!(state, WindowsGitState::NonNative);
+    }
+
+    #[test]
+    fn git_probe_failed_exit_is_missing() {
+        // `git --version` ran but exited non-zero (broken install).
+        let state = windows_git_probe_from_output("", false);
+        assert_eq!(state, WindowsGitState::Missing);
+    }
+
+    #[test]
+    fn git_probe_empty_stdout_is_missing() {
+        // Spawn succeeded but no output — shouldn't happen with real git.
+        let state = windows_git_probe_from_output("", true);
+        assert_eq!(state, WindowsGitState::Missing);
+    }
+
+    #[test]
+    fn git_probe_garbage_output_is_missing() {
+        // Some other binary on PATH answered to --version. Treat as missing
+        // git (the user wants the *real* git, not whatever-this-is).
+        let state = windows_git_probe_from_output("hello world", true);
+        assert_eq!(state, WindowsGitState::Missing);
+    }
+
+    #[test]
+    fn git_probe_case_insensitive_match() {
+        // Defensive: real git always emits lowercase "git version", but a
+        // theoretical shim could uppercase it. We lower-case before checking.
+        let stdout = "GIT VERSION 2.43.0.WINDOWS.1";
+        let state = windows_git_probe_from_output(stdout, true);
+        assert_eq!(state, WindowsGitState::Native);
+    }
+
+    // ── windows_git_install_hint copy ─────────────────────────────────────
+
+    #[test]
+    fn git_hint_native_returns_none() {
+        // Native git → no hint needed, install proceeds silently.
+        assert!(windows_git_install_hint(&WindowsGitState::Native).is_none());
+    }
+
+    #[test]
+    fn git_hint_missing_mentions_git_scm_download() {
+        let hint = windows_git_install_hint(&WindowsGitState::Missing).unwrap();
+        let lower = hint.to_lowercase();
+        // Must point at the canonical install URL so users can copy-paste.
+        assert!(
+            lower.contains("git-scm.com/download/win"),
+            "Missing hint must point at canonical Git for Windows download: {}",
+            hint
+        );
+        // Must use the word "install" so users understand the action.
+        assert!(lower.contains("install"), "got: {}", hint);
+    }
+
+    /// LIVE E2E for Bug N — only runs on real Windows hosts because
+    /// `windows_git_probe` is `cfg(target_os = "windows")`. Verifies that
+    /// the actual `git --version` on the build machine classifies the way
+    /// we expect. On a fresh Windows tester box with Git for Windows
+    /// installed (the common case), this is `Native` and silent.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn git_probe_live_on_this_host() {
+        let state = windows_git_probe();
+        // We can't assert a specific variant — that depends on what's on
+        // the build box. But we can assert the result is well-formed and
+        // that whatever variant came back the hint is consistent.
+        let hint = windows_git_install_hint(&state);
+        match state {
+            WindowsGitState::Native => assert!(hint.is_none(), "Native must produce no hint"),
+            _ => {
+                let h = hint.expect("Non-Native states must produce a hint");
+                assert!(h.to_lowercase().contains("git-scm.com/download/win"));
+            }
+        }
+        println!("[live E2E] windows_git_probe() on this host returned: {:?}", state);
+    }
+
+    #[test]
+    fn git_hint_nonnative_warns_about_wsl_and_path() {
+        let hint = windows_git_install_hint(&WindowsGitState::NonNative).unwrap();
+        let lower = hint.to_lowercase();
+        // Must call out the WSL/PATH ordering scenario juliandiggins hit so
+        // users know exactly what to check.
+        assert!(lower.contains("path"), "NonNative hint must mention PATH: {}", hint);
+        assert!(
+            lower.contains("wsl") || lower.contains("linux"),
+            "NonNative hint should mention WSL or Linux: {}",
+            hint
+        );
+        assert!(lower.contains("git-scm.com/download/win"), "got: {}", hint);
     }
 }

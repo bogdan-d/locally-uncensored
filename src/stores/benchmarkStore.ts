@@ -53,6 +53,27 @@ export function getAverageSpeed(results: Record<string, BenchmarkResult[]>, mode
   return Math.round(avg * 10) / 10
 }
 
+/**
+ * Compute tokens-per-second excluding time-to-first-token / stream init.
+ *
+ * Pre-v2.4.7 we used (tokenCount / totalTime), which lumped stream-init +
+ * connection-setup + TTFT into the denominator and undercounted local model
+ * speed. nightmare13740 (Discord 2026-05-19) caught this on RTX 4070 Laptop:
+ * benchmark showed 12 tok/s, manual chat measurement 23-25 tok/s, ollama CLI
+ * baseline 30 tok/s. Generation-phase rate (post-first-token) matches the CLI
+ * within run-to-run noise, so we drop TTFT from the denominator and surface
+ * it as its own stat.
+ */
+export function computeGenerationTps(
+  tokenCount: number,
+  totalTimeMs: number,
+  firstTokenTimeMs: number,
+): number {
+  const generationTimeMs = totalTimeMs - firstTokenTimeMs
+  if (generationTimeMs <= 0 || tokenCount <= 0) return 0
+  return (tokenCount / generationTimeMs) * 1000
+}
+
 /** Get leaderboard sorted by avg tokens/sec */
 export function getLeaderboard(results: Record<string, BenchmarkResult[]>): { model: string; avgTps: number; runs: number }[] {
   return Object.entries(results)

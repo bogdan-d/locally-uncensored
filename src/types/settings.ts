@@ -26,6 +26,13 @@ export interface Settings {
   agentMaxIterations: number
   /** Override for the HuggingFace GGUF download directory. Empty = auto-detect from active openai-compat provider (e.g. LM Studio models folder). */
   hfDownloadPathOverride: string
+  // Generation timeouts (Bug P v2.4.7 — ake0n_official Discord 2026-05-19,
+  // Intel UHD CPU-only setup hit the 20-min cap at sampling 9/25 on a 1024px
+  // Juggernaut-XL gen).
+  /** Image generation timeout in minutes. Default 20. */
+  imageGenTimeoutMinutes: number
+  /** Video generation timeout in minutes. Default 60. */
+  videoGenTimeoutMinutes: number
 }
 
 export interface Persona {

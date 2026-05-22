@@ -2,6 +2,7 @@ import {
   classifyModel,
   isVideoModelType,
   isImageModelType,
+  extractComfyOutputFiles,
   MODEL_TYPE_DEFAULTS,
   COMPONENT_REGISTRY,
 } from '../comfyui'
@@ -334,5 +335,140 @@ describe('determineStrategy', () => {
     const nodes = makeNodes({ loaders: [] })
     const r = determineStrategy('flux', false, nodes, emptyModels)
     expect(r.strategy).toBe('unavailable')
+  })
+})
+
+// ─── extractComfyOutputFiles (Bug R — v2.4.7, silentrunningcaUSA #6) ───
+//
+// Pre-v2.4.7 LU only checked `images` / `gifs` / `videos` on each history
+// node output. Custom save nodes (Civitai workflows, SaveImageWithMetadata,
+// audio nodes) publish under other keys; their files landed on disk but
+// never made it into LU's gallery, exactly the symptom in Discussion #6.
+// These tests pin the contract: every keyed array with file-shaped entries
+// is collected, regardless of the key name, and subfolder/type defaults
+// stay safe for downstream URL construction.
+
+describe('extractComfyOutputFiles', () => {
+  it('extracts canonical SaveImage output (images key)', () => {
+    const node = {
+      images: [
+        { filename: 'gen_00001.png', subfolder: '', type: 'output' },
+      ],
+    }
+    const files = extractComfyOutputFiles(node)
+    expect(files).toHaveLength(1)
+    expect(files[0].filename).toBe('gen_00001.png')
+    expect(files[0].type).toBe('output')
+  })
+
+  it('extracts SaveAnimatedWEBP output (gifs key)', () => {
+    const node = {
+      gifs: [
+        { filename: 'gen_00001.webp', subfolder: '', type: 'output' },
+      ],
+    }
+    const files = extractComfyOutputFiles(node)
+    expect(files).toHaveLength(1)
+    expect(files[0].filename).toBe('gen_00001.webp')
+  })
+
+  it('extracts VHS_VideoCombine output (videos key)', () => {
+    const node = {
+      videos: [
+        { filename: 'gen_00001.mp4', subfolder: '', type: 'output' },
+      ],
+    }
+    const files = extractComfyOutputFiles(node)
+    expect(files).toHaveLength(1)
+    expect(files[0].filename).toBe('gen_00001.mp4')
+  })
+
+  it('extracts files from a custom save node under a non-canonical key', () => {
+    // Real example: SaveImageWithMetadata posts under `result`.
+    const node = {
+      result: [
+        { filename: 'meta_00001.png', subfolder: '', type: 'output' },
+      ],
+    }
+    const files = extractComfyOutputFiles(node)
+    expect(files).toHaveLength(1)
+    expect(files[0].filename).toBe('meta_00001.png')
+  })
+
+  it('extracts audio output (audio key, used by AudioSave nodes)', () => {
+    const node = {
+      audio: [
+        { filename: 'speech.wav', subfolder: 'tts', type: 'output' },
+      ],
+    }
+    const files = extractComfyOutputFiles(node)
+    expect(files).toHaveLength(1)
+    expect(files[0].filename).toBe('speech.wav')
+    expect(files[0].subfolder).toBe('tts')
+  })
+
+  it('fills subfolder + type defaults when a custom node omits them', () => {
+    // Some homemade save nodes only emit { filename } — LU still needs
+    // subfolder + type to build the comfyImageUrl, so we default safely.
+    const node = {
+      files: [{ filename: 'bare.png' }],
+    }
+    const files = extractComfyOutputFiles(node)
+    expect(files).toHaveLength(1)
+    expect(files[0].filename).toBe('bare.png')
+    expect(files[0].subfolder).toBe('')
+    expect(files[0].type).toBe('output')
+  })
+
+  it('collects files from multiple keys on the same node', () => {
+    // VHS_VideoCombine sometimes emits both gifs (preview) and videos
+    // (final mp4) in the same node output — make sure we surface both.
+    const node = {
+      gifs: [{ filename: 'preview.webp', subfolder: '', type: 'output' }],
+      videos: [{ filename: 'final.mp4', subfolder: '', type: 'output' }],
+    }
+    const files = extractComfyOutputFiles(node)
+    expect(files).toHaveLength(2)
+    expect(files.map(f => f.filename)).toContain('preview.webp')
+    expect(files.map(f => f.filename)).toContain('final.mp4')
+  })
+
+  it('ignores non-array values (latents, metadata blobs, etc.)', () => {
+    // ComfyUI history payloads can contain non-file data on the same node
+    // — for instance LATENT outputs are nested objects. We skip anything
+    // that isn't an array of file-shaped objects.
+    const node = {
+      images: [{ filename: 'real.png', subfolder: '', type: 'output' }],
+      latent: { /* a non-array object */ },
+      ui: 'some string',
+      n: 42,
+    }
+    const files = extractComfyOutputFiles(node)
+    expect(files).toHaveLength(1)
+    expect(files[0].filename).toBe('real.png')
+  })
+
+  it('ignores array entries that lack a string filename', () => {
+    // Defensive: a node might post arrays of metadata items without a
+    // filename. Skip those — picking them up would crash the gallery.
+    const node = {
+      images: [
+        { filename: 'good.png', subfolder: '', type: 'output' },
+        { not_a_filename: 'oops' },
+        { filename: 42 }, // non-string filename
+        null,
+      ],
+    }
+    const files = extractComfyOutputFiles(node)
+    expect(files).toHaveLength(1)
+    expect(files[0].filename).toBe('good.png')
+  })
+
+  it('returns [] for empty / null / undefined input', () => {
+    expect(extractComfyOutputFiles({})).toEqual([])
+    expect(extractComfyOutputFiles(null)).toEqual([])
+    expect(extractComfyOutputFiles(undefined)).toEqual([])
+    expect(extractComfyOutputFiles('not-an-object')).toEqual([])
+    expect(extractComfyOutputFiles(123)).toEqual([])
   })
 })

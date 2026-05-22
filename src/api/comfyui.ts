@@ -30,6 +30,47 @@ export interface ComfyUIOutput {
   type: string
 }
 
+/**
+ * Bug R (v2.4.7 — silentrunningcaUSA GH Discussion #6, 2026-05-20).
+ *
+ * Pre-v2.4.7 LU only scraped `images` / `gifs` / `videos` from a ComfyUI
+ * history `outputs[nodeId]` payload. That worked for the canonical SaveImage
+ * / SaveAnimatedWEBP / VHS_VideoCombine nodes, but plenty of custom save
+ * nodes (community workflows from CivitAI, SaveImageWithMetadata,
+ * SaveImageHTML, audio save nodes, etc.) post under different keys —
+ * `audio`, `result`, `files`, `latents`, `meshes`, model-specific keys.
+ * The file lands in ComfyUI's `output/` folder but never makes it into LU's
+ * gallery, exactly the symptom silentrunningcaUSA reported.
+ *
+ * Generic extractor: scan every key on the node output, collect any array
+ * whose entries look like `{ filename, subfolder?, type? }`. Defaults fill
+ * in subfolder='' and type='output' so the gallery + comfyImageUrl can build
+ * a working URL even when a custom save node omits them.
+ */
+export function extractComfyOutputFiles(nodeOutput: unknown): ComfyUIOutput[] {
+  if (!nodeOutput || typeof nodeOutput !== 'object') return []
+  const found: ComfyUIOutput[] = []
+  for (const value of Object.values(nodeOutput as Record<string, unknown>)) {
+    if (!Array.isArray(value)) continue
+    for (const item of value) {
+      if (
+        item &&
+        typeof item === 'object' &&
+        'filename' in item &&
+        typeof (item as { filename: unknown }).filename === 'string'
+      ) {
+        const it = item as { filename: string; subfolder?: unknown; type?: unknown }
+        found.push({
+          filename: it.filename,
+          subfolder: typeof it.subfolder === 'string' ? it.subfolder : '',
+          type: typeof it.type === 'string' ? it.type : 'output',
+        })
+      }
+    }
+  }
+  return found
+}
+
 export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 

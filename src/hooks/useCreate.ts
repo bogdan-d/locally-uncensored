@@ -14,6 +14,7 @@ import {
   buildTxt2ImgWorkflow,
   buildTxt2VidWorkflow,
   classifyModel,
+  extractComfyOutputFiles,
   type ClassifiedModel,
   type ComfyUIOutput,
   type VideoBackend,
@@ -28,6 +29,7 @@ import { getAllNodeInfo } from '../api/comfyui-nodes'
 import { installCustomNodes } from '../api/discover'
 import { backendCall } from '../api/backend'
 import { useCreateStore, type GalleryItem } from '../stores/createStore'
+import { useSettingsStore } from '../stores/settingsStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { injectParameters } from '../api/workflows'
 import { preflightCheck } from '../api/preflight'
@@ -420,8 +422,16 @@ export function useCreate() {
         }
       }
 
-      // Try WebSocket-driven progress, fall back to polling
-      const maxTime = mode === 'video' ? 60 * 60 * 1000 : 20 * 60 * 1000
+      // Try WebSocket-driven progress, fall back to polling.
+      // Bug P (v2.4.7, ake0n_official Discord 2026-05-19): CPU-only users
+      // on Intel UHD ran into the 20-min cap at sampling 9/25 on a single
+      // 1024px Juggernaut-XL gen. Move the cap into Settings so slow
+      // hardware can finish a gen instead of timing out mid-sampler.
+      // Defaults stay 20min image / 60min video to match pre-2.4.7 behavior.
+      const settings = useSettingsStore.getState().settings
+      const imgMin = Math.max(1, settings.imageGenTimeoutMinutes || 20)
+      const vidMin = Math.max(1, settings.videoGenTimeoutMinutes || 60)
+      const maxTime = mode === 'video' ? vidMin * 60 * 1000 : imgMin * 60 * 1000
       let useWS = false
       try {
         await comfyWS.connect(3000)
@@ -470,10 +480,11 @@ export function useCreate() {
                 const outputs = history.outputs ?? {}
                 let found = false
                 for (const nodeId of Object.keys(outputs)) {
-                  const nodeOutput = outputs[nodeId]
-                  const files: ComfyUIOutput[] = [
-                    ...(nodeOutput.images ?? []), ...(nodeOutput.gifs ?? []), ...(nodeOutput.videos ?? []),
-                  ]
+                  // Bug R (v2.4.7) — extract files from any keyed array,
+                  // not just images/gifs/videos. Custom save nodes use
+                  // other keys (audio, result, files, …); previously LU
+                  // dropped those outputs even though they existed on disk.
+                  const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
                   for (const file of files) {
                     found = true
                     addToGallery({
@@ -567,10 +578,8 @@ export function useCreate() {
                   const outputs = history.outputs ?? {}
                   let found = false
                   for (const nodeId of Object.keys(outputs)) {
-                    const nodeOutput = outputs[nodeId]
-                    const files: ComfyUIOutput[] = [
-                      ...(nodeOutput.images ?? []), ...(nodeOutput.gifs ?? []), ...(nodeOutput.videos ?? []),
-                    ]
+                    // Bug R (v2.4.7) — see comment at the WS branch above.
+                    const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
                     for (const file of files) {
                       found = true
                       addToGallery({
@@ -662,10 +671,11 @@ export function useCreate() {
                 const outputs = history.outputs ?? {}
                 let found = false
                 for (const nodeId of Object.keys(outputs)) {
-                  const nodeOutput = outputs[nodeId]
-                  const files: ComfyUIOutput[] = [
-                    ...(nodeOutput.images ?? []), ...(nodeOutput.gifs ?? []), ...(nodeOutput.videos ?? []),
-                  ]
+                  // Bug R (v2.4.7) — extract files from any keyed array,
+                  // not just images/gifs/videos. Custom save nodes use
+                  // other keys (audio, result, files, …); previously LU
+                  // dropped those outputs even though they existed on disk.
+                  const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
                   for (const file of files) {
                     found = true
                     addToGallery({

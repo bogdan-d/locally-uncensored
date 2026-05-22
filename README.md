@@ -35,25 +35,31 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.4.6 — Current Release
+## v2.4.7 — Current Release
 
-**Hotfix: 1 fix on top of v2.4.5.**
+**Hotfix: 5 fixes on top of v2.4.6.** Four user-reported, one internal hardening.
 
-Auto-update prompts on next launch. Reported by **nightmare13740** on Discord 2026-05-18 with a clean ollama-CLI A/B comparison.
+Auto-update prompts on next launch.
 
 ### What's fixed
-- **Chat throughput restored on tight-VRAM cards** (Bug L — nightmare13740 Discord). LU was sending `num_gpu: 99` on every Ollama chat request, forcing all model layers onto the GPU regardless of free VRAM. On 8 GB-VRAM laptop cards (e.g. RTX 4070 Laptop + gemma3:4b) the KV cache had nowhere to live except system RAM, dragging chat speed from **30 tok/s** in ollama CLI down to **6.9 tok/s** in LU. v2.4.6 drops the override entirely so Ollama applies its own VRAM-aware layer-placement logic — no-op on cards with headroom, full CLI parity on tight cards.
+- **Benchmark tok/s now matches actual chat throughput** (Bug M — nightmare13740 Discord). Pre-v2.4.7 the benchmark counted time-to-first-token + stream init in the tok/s denominator, so any local model looked slower in the Benchmark tab than in real chat. On nightmare13740's RTX 4070 Laptop 8 GB + gemma4:e4b: ollama CLI 30 tok/s, manual chat 23–25 tok/s, pre-v2.4.7 benchmark 12 tok/s. v2.4.7 starts the clock at first-token-received so generation-phase throughput matches CLI / chat baselines; TTFT continues to surface as its own stat.
+- **Windows ComfyUI install probes `git --version` before clone** (Bug N — juliandiggins-stack GH #40). If a WSL / Linux-mounted git is first on PATH, the previous code let the clone start and die mid-flight with cryptic stderr. New tri-state probe (Native / NonNative / Missing) either proceeds silently, surfaces a clear "install Git for Windows" hint when missing, or logs a soft warning when a non-native git might still work.
+- **Anthropic custom-proxy provider no longer double-prefixes `/v1`** (Bug O — 0yagizz Discord). Users pointing the Anthropic provider at a proxy (claude-relay-server, LiteLLM, opencode-zen) whose docs end the baseUrl with `/v1` got a silent 404 on `…/v1/v1/messages`. v2.4.7 collapses the duplicate.
+- **Image / video generation timeouts now configurable in Settings** (Bug P — ake0n_official Discord). CPU-only / iGPU users finished sampling mid-run when the previous hard-coded 20-min image cap hit. v2.4.7 surfaces both image and video timeouts as numeric inputs (defaults stay 20 min / 60 min, range 1–480 min).
+- **Custom ComfyUI save nodes' outputs now surface in LU's gallery** (Bug R — silentrunningcaUSA GH Discussion #6). Pre-v2.4.7 LU only scraped `images` / `gifs` / `videos` from the history payload, missing every community workflow that uses a non-canonical save node (audio, custom metadata, CivitAI flows). v2.4.7 generic extractor accepts any keyed array of file-shaped objects.
 
 ### Stability
-- `vitest`: 93 files / **2284 tests** green (rewrote 3 assertions to lock in the absence of `num_gpu` in chat-request bodies).
-- `cargo test --release`: **89 passed + 1 ignored** (unchanged; Rust edits were inside the JS remote-access template, not Rust unit-tested).
+- `vitest`: **2306 tests** green (+22 across Bug M, O, R).
+- `cargo test --release`: **100 passed + 1 ignored** (+11 for Bug N's `WindowsGitState` matrix).
 - `tsc --noEmit`: clean. `cargo check`: clean (pre-existing dead-code warnings only).
-- No breaking changes, no localStorage migration — upgrade in place.
+- No breaking changes, settings auto-migrate with safe defaults.
 
 ### Heads-up
-v2.4.6 is a Windows + Linux release; macOS is not part of this build. `#bug-reports` / `#help-*` / GitHub will be monitored daily for regression reports.
+v2.4.7 is a Windows + Linux release; macOS is not part of this build. `#bug-reports` / `#help-*` / GitHub will be monitored daily for regression reports.
 
-For previous release notes (v2.4.5 — 14 bugs), see [CHANGELOG.md](CHANGELOG.md).
+Still investigating: OpenRouter half of 0yagizz's report (needs F12 console output to repro); wakeywakeynow's LM-Studio-model-picker GH #41 (most plausible cause is LM Studio server stopped between sessions — needs reporter confirmation). Both carried into v2.4.8 outreach queue.
+
+For previous release notes (v2.4.6 — 1 bug, v2.4.5 — 14 bugs), see [CHANGELOG.md](CHANGELOG.md).
 
 For older releases, see [CHANGELOG.md](CHANGELOG.md).
 

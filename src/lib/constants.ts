@@ -27,6 +27,9 @@ export const DEFAULT_SETTINGS: Settings = {
   agentMaxToolCalls: 50,
   agentMaxIterations: 25,
   hfDownloadPathOverride: '',
+  // Generation timeouts (Bug P v2.4.7)
+  imageGenTimeoutMinutes: 20,
+  videoGenTimeoutMinutes: 60,
 }
 
 /** Caveman mode system prompt prefixes — credit: github.com/JuliusBrussee/caveman (MIT) */

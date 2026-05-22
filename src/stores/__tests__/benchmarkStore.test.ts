@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useBenchmarkStore, getAverageSpeed, getLeaderboard } from '../benchmarkStore'
+import { useBenchmarkStore, getAverageSpeed, getLeaderboard, computeGenerationTps } from '../benchmarkStore'
 import type { BenchmarkResult } from '../../lib/benchmark-prompts'
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -218,6 +218,57 @@ describe('benchmarkStore', () => {
       expect(board[0].model).toBe('only-one')
       expect(board[0].avgTps).toBe(42.7)
       expect(board[0].runs).toBe(1)
+    })
+  })
+
+  // ── computeGenerationTps (Bug M — v2.4.7, nightmare13740) ──
+
+  describe('computeGenerationTps', () => {
+    it('excludes time-to-first-token from the denominator', () => {
+      // 100 tokens, 5000ms total, 2000ms TTFT → 3000ms of pure generation
+      // pre-v2.4.7 formula: 100/5000*1000 = 20 tok/s
+      // post-v2.4.7 formula: 100/3000*1000 ≈ 33.3 tok/s
+      const tps = computeGenerationTps(100, 5000, 2000)
+      expect(tps).toBeCloseTo(33.333, 2)
+    })
+
+    it('matches nightmare13740 RTX 4070 Laptop scenario', () => {
+      // nightmare's report: 23-25 tok/s in chat, 12 tok/s in pre-v2.4.7 benchmark.
+      // Reconstruct: ~60 tokens, total ~5000ms (so 12 tok/s under old math),
+      // TTFT ~2500ms → generation ~2500ms → 24 tok/s in new math.
+      const tps = computeGenerationTps(60, 5000, 2500)
+      expect(tps).toBe(24)
+    })
+
+    it('returns 0 when tokenCount is 0', () => {
+      expect(computeGenerationTps(0, 5000, 100)).toBe(0)
+    })
+
+    it('returns 0 when generation time would be zero or negative', () => {
+      // pathological: totalTime === firstTokenTime → division by zero guarded
+      expect(computeGenerationTps(50, 1000, 1000)).toBe(0)
+      // even more pathological: firstTokenTime > totalTime (shouldn't happen,
+      // but guard anyway)
+      expect(computeGenerationTps(50, 1000, 1500)).toBe(0)
+    })
+
+    it('returns 0 when totalTime is 0', () => {
+      // never-started stream
+      expect(computeGenerationTps(0, 0, 0)).toBe(0)
+    })
+
+    it('handles small TTFT relative to totalTime', () => {
+      // remote/fast model: 100 tokens, 1000ms total, 50ms TTFT
+      // generation = 950ms → 100/950*1000 ≈ 105.26 tok/s
+      const tps = computeGenerationTps(100, 1000, 50)
+      expect(tps).toBeCloseTo(105.263, 2)
+    })
+
+    it('handles single token (degenerate but valid)', () => {
+      // 1 token at 500ms TTFT, total 510ms → generation 10ms → 100 tok/s
+      // Math is correct but practically meaningless; we don't special-case it.
+      const tps = computeGenerationTps(1, 510, 500)
+      expect(tps).toBe(100)
     })
   })
 })

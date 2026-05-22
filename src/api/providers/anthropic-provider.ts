@@ -56,6 +56,22 @@ export class AnthropicProvider implements ProviderClient {
     return this.config.baseUrl.replace(/\/+$/, '')
   }
 
+  /**
+   * Bug O — v2.4.7. When users point the Anthropic provider at a proxy
+   * (claude-relay-server, LiteLLM, opencode-zen, etc.) they sometimes
+   * configure the baseUrl with `/v1` already included. Pre-v2.4.7 we always
+   * appended `/v1/messages`, producing `https://proxy.example/v1/v1/messages`
+   * which 404s silently. Strip a trailing `/v1` so users can paste whichever
+   * shape their proxy docs use.
+   */
+  private messagesUrl(): string {
+    const base = this.baseUrl
+    if (/\/v1$/i.test(base)) {
+      return `${base}/messages`
+    }
+    return `${base}/v1/messages`
+  }
+
   private get headers(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
@@ -91,7 +107,7 @@ export class AnthropicProvider implements ProviderClient {
       body.thinking = { type: 'enabled', budget_tokens: 5000 }
     }
 
-    let res = await fetch(`${this.baseUrl}/v1/messages`, {
+    let res = await fetch(this.messagesUrl(), {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
@@ -102,7 +118,7 @@ export class AnthropicProvider implements ProviderClient {
     // Claude versions don't support `thinking`).
     if (!res.ok && res.status === 400 && 'thinking' in body) {
       delete body.thinking
-      res = await fetch(`${this.baseUrl}/v1/messages`, {
+      res = await fetch(this.messagesUrl(), {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(body),
@@ -199,7 +215,7 @@ export class AnthropicProvider implements ProviderClient {
       }))
     }
 
-    let res = await fetch(`${this.baseUrl}/v1/messages`, {
+    let res = await fetch(this.messagesUrl(), {
       method: 'POST',
       headers: this.headers,
       body: JSON.stringify(body),
@@ -209,7 +225,7 @@ export class AnthropicProvider implements ProviderClient {
     // Retry without extended thinking if the model rejects it.
     if (!res.ok && res.status === 400 && 'thinking' in body) {
       delete body.thinking
-      res = await fetch(`${this.baseUrl}/v1/messages`, {
+      res = await fetch(this.messagesUrl(), {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(body),
@@ -253,7 +269,7 @@ export class AnthropicProvider implements ProviderClient {
 
     try {
       // Send a minimal request to verify the API key
-      const res = await fetch(`${this.baseUrl}/v1/messages`, {
+      const res = await fetch(this.messagesUrl(), {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify({

@@ -248,4 +248,72 @@ describe('AnthropicProvider', () => {
       vi.restoreAllMocks()
     })
   })
+
+  // ── Bug O (v2.4.7) — messages URL construction across custom proxies ──
+  //
+  // 0yagizz reported Custom-Anthropic "not working" on v2.4.5. Most proxies
+  // (claude-relay-server, LiteLLM, opencode-zen) document baseUrls in two
+  // shapes: either `https://proxy.example` (canonical Anthropic style) or
+  // `https://proxy.example/v1` (where the operator already pinned the API
+  // version). Pre-v2.4.7 we always appended `/v1/messages`, breaking the
+  // second shape with a `/v1/v1/messages` 404. Pin both shapes here.
+
+  describe('messages URL construction (Bug O)', () => {
+    it('default api.anthropic.com produces /v1/messages', async () => {
+      const provider = new AnthropicProvider(makeConfig({ baseUrl: 'https://api.anthropic.com' }))
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ content: [{ type: 'text', text: 'ok' }] }), { status: 200 })
+      )
+      await provider.chatWithTools('claude-sonnet-4-20250514', [{ role: 'user', content: 'hi' }], [])
+      expect(fetchSpy.mock.calls[0][0]).toBe('https://api.anthropic.com/v1/messages')
+      vi.restoreAllMocks()
+    })
+
+    it('proxy with /v1 suffix does not double up', async () => {
+      const provider = new AnthropicProvider(makeConfig({ baseUrl: 'https://proxy.example/v1' }))
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ content: [{ type: 'text', text: 'ok' }] }), { status: 200 })
+      )
+      await provider.chatWithTools('claude-sonnet-4-20250514', [{ role: 'user', content: 'hi' }], [])
+      // Pre-v2.4.7: https://proxy.example/v1/v1/messages → 404
+      // Post-v2.4.7: https://proxy.example/v1/messages
+      expect(fetchSpy.mock.calls[0][0]).toBe('https://proxy.example/v1/messages')
+      vi.restoreAllMocks()
+    })
+
+    it('proxy with trailing slash on /v1 still resolves correctly', async () => {
+      const provider = new AnthropicProvider(makeConfig({ baseUrl: 'https://proxy.example/v1/' }))
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ content: [{ type: 'text', text: 'ok' }] }), { status: 200 })
+      )
+      await provider.chatWithTools('claude-sonnet-4-20250514', [{ role: 'user', content: 'hi' }], [])
+      // baseUrl getter strips trailing slashes, so this behaves like the
+      // previous test.
+      expect(fetchSpy.mock.calls[0][0]).toBe('https://proxy.example/v1/messages')
+      vi.restoreAllMocks()
+    })
+
+    it('proxy with no /v1 prefix gets the standard /v1/messages path', async () => {
+      const provider = new AnthropicProvider(makeConfig({ baseUrl: 'https://proxy.example' }))
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ content: [{ type: 'text', text: 'ok' }] }), { status: 200 })
+      )
+      await provider.chatWithTools('claude-sonnet-4-20250514', [{ role: 'user', content: 'hi' }], [])
+      expect(fetchSpy.mock.calls[0][0]).toBe('https://proxy.example/v1/messages')
+      vi.restoreAllMocks()
+    })
+
+    it('preserves nested paths that happen to contain "v1" but not as suffix', async () => {
+      // Defensive: a proxy that's deployed at a versioned sub-path like
+      // `/api-v1` should still get the standard `/v1/messages` append.
+      const provider = new AnthropicProvider(makeConfig({ baseUrl: 'https://proxy.example/api-v1' }))
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ content: [{ type: 'text', text: 'ok' }] }), { status: 200 })
+      )
+      await provider.chatWithTools('claude-sonnet-4-20250514', [{ role: 'user', content: 'hi' }], [])
+      // /api-v1 doesn't end in /v1, so we add /v1/messages
+      expect(fetchSpy.mock.calls[0][0]).toBe('https://proxy.example/api-v1/v1/messages')
+      vi.restoreAllMocks()
+    })
+  })
 })

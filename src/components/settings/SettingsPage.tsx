@@ -659,6 +659,36 @@ export function SettingsPage() {
             </div>
           </Section>
 
+          <Section title="Image / Video Generation Timeouts">
+            <div className="text-[0.6rem] text-gray-500 dark:text-gray-500 leading-relaxed pb-1.5">
+              Maximum minutes a ComfyUI generation can run before LU aborts it. Bump these up if you run on iGPU or CPU only — a 1024px image on integrated graphics can take 30+ min.
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Image timeout (min)</span>
+              <input
+                type="number"
+                value={settings.imageGenTimeoutMinutes ?? 20}
+                onChange={(e) => updateSettings({ imageGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 20)) })}
+                min={1}
+                max={480}
+                placeholder="20"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Video timeout (min)</span>
+              <input
+                type="number"
+                value={settings.videoGenTimeoutMinutes ?? 60}
+                onChange={(e) => updateSettings({ videoGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 60)) })}
+                min={1}
+                max={480}
+                placeholder="60"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
+              />
+            </div>
+          </Section>
+
           <Section title="Privacy">
             <div className="space-y-2 py-1 text-[0.65rem] text-gray-500 dark:text-gray-400 leading-relaxed">
               <div className="flex items-start gap-2">
