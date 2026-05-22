@@ -667,8 +667,8 @@ export function SettingsPage() {
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Image timeout (min)</span>
               <input
                 type="number"
-                value={settings.imageGenTimeoutMinutes}
-                onChange={(e) => updateSettings({ imageGenTimeoutMinutes: Math.max(1, parseInt(e.target.value) || 20) })}
+                value={settings.imageGenTimeoutMinutes ?? 20}
+                onChange={(e) => updateSettings({ imageGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 20)) })}
                 min={1}
                 max={480}
                 placeholder="20"
@@ -679,8 +679,8 @@ export function SettingsPage() {
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Video timeout (min)</span>
               <input
                 type="number"
-                value={settings.videoGenTimeoutMinutes}
-                onChange={(e) => updateSettings({ videoGenTimeoutMinutes: Math.max(1, parseInt(e.target.value) || 60) })}
+                value={settings.videoGenTimeoutMinutes ?? 60}
+                onChange={(e) => updateSettings({ videoGenTimeoutMinutes: Math.min(480, Math.max(1, parseInt(e.target.value) || 60)) })}
                 min={1}
                 max={480}
                 placeholder="60"
