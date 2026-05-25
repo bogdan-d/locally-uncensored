@@ -35,26 +35,67 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.4.9 — Current Release
+## v2.5.0 — Current Release
 
-**Five bug fixes + two leonsk29 feature requests on top of v2.4.8.** All user-reported (GH levoy1 / kj103x Discord / nightmare13740 Discord / leonsk29 Discord + GH).
+**Minor release. 24+ changes backported from the companion repo (`uselu`).** Three reporter-facing bug fixes (B1 cinemazverev / B2 vanja-san / B3 THobbs23) plus the codex / agent sprint (Sprint A / B / C) ride along. Production hardening (B4 / B5) and the iteration-cap bump (200 iters / 400 tool calls, from 25 / 50) lift the autonomy ceiling so a real scaffold→install→fix→verify loop fits inside one turn. Bundles all v2.4.9 contents.
 
 Auto-update prompts on next launch.
 
 ### What's fixed
-- **ComfyUI Desktop App is detected and accepted in onboarding** (Bug U — levoy1 GH #47). The Comfy-Org/desktop app installs to `%LOCALAPPDATA%\Programs\ComfyUI` with `ComfyUI.exe` but no `main.py` — the actual Working Directory with `main.py` / `models/` / `custom_nodes/` is at `~\Documents\ComfyUI` by default. Pre-v2.4.9 both auto-detect and manual path entry rejected the binary folder with "Invalid path — main.py not found". v2.4.9 follows the breadcrumb: when given a folder with `ComfyUI.exe`, it walks a probe list (`~\Documents\ComfyUI` / `%APPDATA%\ComfyUI` / `config.json basePath` / `%LOCALAPPDATA%\ComfyUI` / the app's bundled resources) until it finds `main.py`, and silently re-routes to the Working Directory.
-- **Chats with attached RAG documents persist across NSIS auto-update / WebView2 data reset** (Bug V/a — kj103x Discord 2026-05-23). v2.3.4 closed the chat-message half (3-leg localStorage backup), but RAG embedding chunks live in IndexedDB (768-float vectors per chunk, can't fit in localStorage) and were never backed up. After an auto-update the document metadata restored but the chunks were lost — every RAG chat showed the document and returned no retrievals. v2.4.9 adds a separate 30 s / `beforeunload` IndexedDB backup → `%APPDATA%\Locally Uncensored\rag_chunks_backup.json`, restores on cold start AND on warm starts when IndexedDB is empty while the doc metadata isn't. Backup never clobbers newer in-app activity (only imports entries the live store is missing).
-- **LU-spawned Ollama is killed when you quit LU** (Bug V/b — same kj103x report). Pre-v2.4.9 `ollama serve` lingered as a ~200 MB orphan with no tray icon. v2.4.9 stores the spawned `Child` on `AppState` and kills it on `Drop` using the same taskkill `/T /F` pattern as ComfyUI. The pre-spawn tasklist check stays — a user-managed Ollama that was already running when LU launched is left alone, so quitting LU never kills someone else's daemon. (Hide-to-tray via the `X` button is unaffected; Ollama only dies on a real Quit from the tray menu.)
-- **Benchmark per-model display shows the latest session's tok/s, not a drifting historical average** (Bug W — nightmare13740 Discord 2026-05-23/24, Bug M retest). After the v2.4.8 server-eval-metric fix, ten benchmark runs on gemma4:e4b read 15.2 → 17.9 tok/s. Per-run measurements were stable; the UI was averaging every historical sample. v2.4.9 adds `getLatestSpeed` that groups runs into "sessions" via a 10 s timestamp gap and returns the mean of the most recent session only. Leaderboard keeps the cross-model average since that's the comparison that benefits from averaging out noise.
-- **Thinking + Agent toggles light up for community-uncensored Gemma 4 builds** (Bug X — leonsk29 Discord 2026-05-24). Official `gemma4:e4b` worked but TrevorJS / nohurry / Stabhappy / LiconStudio / huihui-ai community variants pulled via `hf.co/<user>/<repo>:<quant>` had both toggles grayed out. Three stacked issues: the family-name normalizer only stripped one path segment (`hf.co/` but not `trevorjs/`), the dashed-family collapse was anchored to start-of-string (so `gemma-4-…` mid-string never normalized to `gemma4`), and the final match used `.startsWith` which couldn't see past a community prefix like `Huihui-Qwen3.5-…`. v2.4.9 rewrites `normalizeFamily` as a greedy strip + suffix/quant peel + family-dash collapse `/g`, then switches to a word-boundary contains-check so the family token can sit anywhere in the normalized name without false positives.
+- **Ollama auto-detection persists across launches** (B1 — cinemazverev). User's deliberate re-enable is now authoritative; auto-detect can only add backends, never remove ones the user explicitly turned on.
+- **Multi-backend modal persists Ollama choice** (B2 — vanja-san). Picking Ollama in the modal, closing it, and re-opening now keeps Ollama selected instead of resetting to "Auto".
+- **LM Studio per-model load/unload backend** (B3 — THobbs23). Three new Tauri commands (`lmstudio_list_loaded`, `lmstudio_load_model`, `lmstudio_unload_model`) ship now; the UI integration lands in the next hotfix.
 
-### What's new
-- **Onboarding suggests `nomic-embed-text` for Document Chat / RAG** (GH #45 — leonsk29). New step between Models and Done that auto-detects existing embedding models (skipped with "✓ already installed" if any are present) or offers a one-click 274 MB pull. Skip button always available.
-- **VRAM filter for text models in Discover** (GH #46 — leonsk29). The Lightweight ≤10 GB / Mid-Range 10–16 GB / High-End >16 GB chips that image and video already had now also filter the text tab, derived from each model's GGUF `sizeGB`. Cloud / `canPull:false` entries bypass the filter.
+### What's new — codex / agent (Sprint A / B / C from uselu)
+- **Architect / Editor split** — separate "architect" model plans (no tools), regular Codex model applies (with tools). Aider-style, ~30 % better edit accuracy on multi-file refactors. Toggle in Settings → Agent → Codex Agent.
+- **Repo-Map injection (Aider PageRank)** — bridge ranks repo files by import-graph PageRank, top-N (default 20, clamped 1–200) get injected into the editor system prompt.
+- **Multi-File Stage-and-Approve** — `file_write` calls queue as pending changes for per-file review instead of touching disk directly.
+- **Test-Driven Loop** — new `run_tests` tool lets the agent invoke the project's test runner, watch failures, iterate on a fix.
+- **Typed git + gh tools** — `git_status`, `git_commit`, `git_push`, `git_log`, `git_diff`, `gh_pr_create` replace previous shell-wrapped patterns.
+- **Code-Review mode** — read-only agent for PR pre-check (file_write + shell_execute blocked, system prompt switched to "inline comments only").
+- **Long-running background shell tasks** — four tools (`shell_execute_background`, `shell_task_status`, `shell_task_kill`, `shell_task_list`) for dev servers / multi-minute builds that shouldn't block the turn.
+- **Multi-Repo Agent** — hold multiple workspaces in parallel, switch between them per chat.
+- **`.lurules` per-repo config** — pin per-project agent conventions without leaking into other repos.
+- **`pr_resume`** — pick up an in-flight PR workflow where it stopped instead of starting over.
+- **`project_init`** — scaffold new projects (directory layout, README stub, language-appropriate gitignore, optional CI starter).
+- **Parallel sub-agents** — sub-agent branches now run concurrently.
+- **Diff rendering for `file_write`** — agent surface shows a real diff per proposal.
+- **Per-chat workspace picker for Agent + Codex** — both surfaces share the same workspace concept and picker dialog.
 
-For previous release notes (v2.4.8 — 9 changes, v2.4.6 — 1 bug, v2.4.5 — 14 bugs), see [CHANGELOG.md](CHANGELOG.md).
+### What's hardened
+- **Structured logger with key-substring redaction** (B4, `src/lib/logger.ts`). Any object key containing `token` / `key` / `secret` / `password` / `auth` is redacted before emit so log lines pasted into bug reports don't leak credentials.
+- **`console.log` stripped from production builds** (B5). `vite.config.ts` esbuild `pure` drops the calls in `vite build` output; errors and warnings stay.
+- **Iteration cap bump** — `agentMaxIterations` 25 → 200, `agentMaxToolCalls` 50 → 400. Real scaffold→install→fix→verify loops on a 35B local model hit the old caps mid-useful-work; the new ones are roomy enough for multi-file refactors yet still bounded.
+
+### Stability
+- `vitest`: **2488 tests** green (previously 2312; +176 across new bg_tasks, repo_map, architect-split, stage-mode, code-review-mode, logger, .lurules, pr_resume, project_init paths).
+- `cargo test --release`: **117 passed** (previously 100; +17 across `bg_tasks` and `repo_map` modules).
+- `tsc --noEmit`: clean. `cargo check`: clean (pre-existing dead-code warnings only).
+- No breaking changes; settings auto-default, cap bump is upward-only.
+
+For previous release notes (v2.4.9 — 5 bugs + 2 features, v2.4.8 — 9 changes, v2.4.6 — 1 bug, v2.4.5 — 14 bugs), see [CHANGELOG.md](CHANGELOG.md).
+
+Contributors with feature requests queued for v2.5.1: cinemazverev, vanja-san, THobbs23, juliandiggins-stack.
 
 ---
+
+<details>
+<summary>v2.4.9 — superseded</summary>
+
+**Five bug fixes + two leonsk29 feature requests on top of v2.4.8.** All user-reported (GH levoy1 / kj103x Discord / nightmare13740 Discord / leonsk29 Discord + GH).
+
+### What's fixed
+- **ComfyUI Desktop App is detected and accepted in onboarding** (Bug U — levoy1 GH #47). Pre-v2.4.9 both auto-detect and manual path entry rejected the `%LOCALAPPDATA%\Programs\ComfyUI` binary folder with "Invalid path — main.py not found". v2.4.9 walks a probe list when given a folder with `ComfyUI.exe` until it finds the actual Working Directory with `main.py`.
+- **Chats with attached RAG documents persist across NSIS auto-update / WebView2 data reset** (Bug V/a — kj103x Discord 2026-05-23). Separate 30 s / `beforeunload` IndexedDB backup → `%APPDATA%\Locally Uncensored\rag_chunks_backup.json` restores chunks on cold start and on warm starts where IndexedDB is empty.
+- **LU-spawned Ollama is killed when you quit LU** (Bug V/b — same kj103x report). `ollama serve` no longer lingers as a ~200 MB orphan after a tray-menu Quit. User-managed Ollama running pre-launch is still left alone.
+- **Benchmark per-model display shows the latest session's tok/s, not a drifting historical average** (Bug W — nightmare13740 Discord 2026-05-23/24). New `getLatestSpeed` groups runs into sessions via a 10 s timestamp gap; leaderboard keeps the cross-model average.
+- **Thinking + Agent toggles light up for community-uncensored Gemma 4 builds** (Bug X — leonsk29 Discord 2026-05-24). `normalizeFamily` rewritten as a greedy strip + suffix/quant peel + family-dash collapse `/g`, plus word-boundary contains-check.
+
+### What's new
+- **Onboarding suggests `nomic-embed-text` for Document Chat / RAG** (GH #45 — leonsk29). Auto-detects existing embedding models or offers a one-click 274 MB pull.
+- **VRAM filter for text models in Discover** (GH #46 — leonsk29). Lightweight ≤10 GB / Mid-Range 10–16 GB / High-End >16 GB chips on the text tab.
+
+</details>
 
 <details>
 <summary>v2.4.8 — superseded</summary>
@@ -95,7 +136,7 @@ For older releases, see [CHANGELOG.md](CHANGELOG.md).
 |---------|:-:|:-:|:-:|:-:|
 | AI Chat | **Yes** | Yes | Yes | Yes |
 | **Coding Agent (Codex)** | **Yes** | No | No | No |
-| **14 Agent Tools + MCP** | **Yes** | No | No | No |
+| **28 Agent Tools + MCP** | **Yes** | No | No | No |
 | **Plug & Play Setup** | **12 Backends** | No | Built-in | No |
 | **Multi-Provider** (20+ Presets) | **Yes** | Yes | Yes | No |
 | **A/B Model Compare** | **Yes** | No | No | No |
@@ -126,8 +167,8 @@ For older releases, see [CHANGELOG.md](CHANGELOG.md).
 - **Plug & Play Setup** — First-launch wizard auto-detects 12 local backends. Nothing installed? One-click in-app Ollama download and install with progress bar. ComfyUI one-click install with step-by-step progress. Configurable ComfyUI port and path in Settings. Zero config needed.
 - **Uncensored AI Chat** — Abliterated models with zero restrictions. Streaming + thinking display.
 - **Multi-Provider** — 20+ presets. Local: Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang, TGI. Cloud: OpenAI, Anthropic, OpenRouter, Groq, Together, DeepSeek, Mistral. Switch per conversation.
-- **Codex Coding Agent** — Live streaming between tool calls, continue capability, AUTONOMY CONTRACT. File tree, folder picker, up to 50 iterations.
-- **Agent Mode** — 14 tools + MCP: web search/fetch, file I/O, shell, code execution, screenshots, system info, time. Parallel execution, sub-agents, budget system.
+- **Codex Coding Agent** — Live streaming between tool calls, continue capability, AUTONOMY CONTRACT. File tree, folder picker, up to 200 iterations / 400 tool calls. v2.5.0 adds Architect/Editor split, Repo-Map (Aider PageRank), Multi-File Stage-and-Approve, Test-Driven Loop, typed git + gh tools, Code-Review mode, long-running background shell tasks, per-repo `.lurules`, `pr_resume`, `project_init`, parallel sub-agents.
+- **Agent Mode** — 28 tools + MCP: web search/fetch, file I/O, shell, code execution, screenshots, system info, time, typed git/gh, background shell tasks, run_tests, project_init. Parallel execution, sub-agents, budget system, multi-repo workspace switching.
 - **Remote Access** — Access your AI from your phone via LAN or Cloudflare Tunnel. Full mobile web app with Agent Mode, Codex, plugins, file attach.
 - **Image Generation** — FLUX 2 Klein, FLUX.1 (schnell/dev), Z-Image Turbo/Base, Juggernaut XL, RealVisXL, DreamShaper XL via ComfyUI. Full parameter control, no content filter.
 - **Image-to-Image** — Upload a source image, adjust denoise strength, transform with any image model.
@@ -283,6 +324,9 @@ Open the **Create** tab. ComfyUI is auto-detected or one-click installed. Models
 - [x] Auto-Update (signed NSIS installer)
 - [x] Qwen 3.6 Day-0 Support
 - [x] Plugins Dropdown (Caveman + Personas)
+- [x] Codex Architect/Editor split + Repo-Map + Stage-and-Approve (v2.5.0)
+- [x] Code-Review mode + Test-Driven Loop + typed git/gh tools (v2.5.0)
+- [x] Multi-Repo Agent + `.lurules` + `pr_resume` + `project_init` (v2.5.0)
 - [ ] Voice Mode (Qwen Omni live voice)
 - [ ] Upscale + Inpainting
 
