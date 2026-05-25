@@ -10,11 +10,19 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { isAgentCompatible } from '../../lib/model-compatibility'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { AgentTutorial } from './AgentTutorial'
+import { AgentWorkspaceDialog } from './AgentWorkspaceDialog'
+import type { AgentWorkspace } from '../../types/agent-workspace'
 
 export function AgentModeToggle() {
   const [showTutorial, setShowTutorial] = useState(false)
   const [showNewChatModal, setShowNewChatModal] = useState(false)
   const [neverShowChecked, setNeverShowChecked] = useState(false)
+  // Workspace picker — opens after a fresh agent-mode activation when
+  // the conversation doesn't yet have a workspace assigned. Cancelable
+  // (the bridge falls back to its per-chat sandbox), but offered so
+  // power users can point the agent at a real folder up front.
+  const [showWorkspaceDialog, setShowWorkspaceDialog] = useState(false)
+  const [workspaceDialogConvId, setWorkspaceDialogConvId] = useState<string | null>(null)
   const activeConversationId = useChatStore((s) => s.activeConversationId)
   const conversations = useChatStore((s) => s.conversations)
   const createConversation = useChatStore((s) => s.createConversation)
@@ -29,6 +37,21 @@ export function AgentModeToggle() {
   const conversation = conversations.find((c) => c.id === activeConversationId)
   const hasMessages = (conversation?.messages?.length ?? 0) > 0
 
+  /**
+   * After an agent-mode activate, if the conversation hasn't picked a
+   * workspace yet, open AgentWorkspaceDialog so the user can choose
+   * between sandbox and a real folder. Skipped when a workspace is
+   * already set (toggling back on after a deactivate) or when the user
+   * has a `settings.defaultWorkspace` configured.
+   */
+  const maybeOpenWorkspaceDialog = (convId: string) => {
+    const hasPerChat = !!useAgentModeStore.getState().workspaces[convId]
+    const hasDefault = !!useSettingsStore.getState().settings.defaultWorkspace
+    if (hasPerChat || hasDefault) return
+    setWorkspaceDialogConvId(convId)
+    setShowWorkspaceDialog(true)
+  }
+
   const createNewAgentChat = () => {
     if (!activeModel) return
     const persona = useSettingsStore.getState().getActivePersona()
@@ -37,6 +60,7 @@ export function AgentModeToggle() {
       useAgentModeStore.getState().setTutorialCompleted()
     }
     useAgentModeStore.getState().toggleAgentMode(newId)
+    maybeOpenWorkspaceDialog(newId)
   }
 
   const handleToggle = () => {
@@ -60,12 +84,16 @@ export function AgentModeToggle() {
     }
 
     toggleAgentMode(activeConversationId)
+    // If the user just turned agent ON (was inactive, now active) and
+    // hasn't picked a workspace for this conversation, prompt for one.
+    if (!isActive) maybeOpenWorkspaceDialog(activeConversationId)
   }
 
   const handleTutorialComplete = () => {
     setShowTutorial(false)
     useAgentModeStore.getState().setTutorialCompleted()
     toggleAgentMode(activeConversationId)
+    maybeOpenWorkspaceDialog(activeConversationId)
   }
 
   const handleNewAgentChat = () => {
@@ -75,6 +103,20 @@ export function AgentModeToggle() {
     createNewAgentChat()
     setShowNewChatModal(false)
     setNeverShowChecked(false)
+  }
+
+  const handleWorkspaceChoose = (workspace: AgentWorkspace) => {
+    if (workspaceDialogConvId) {
+      useAgentModeStore.getState().setWorkspace(workspaceDialogConvId, workspace)
+    }
+    setShowWorkspaceDialog(false)
+    setWorkspaceDialogConvId(null)
+  }
+
+  const handleWorkspaceClose = () => {
+    // Cancel just dismisses — bridge will fall back to per-chat sandbox.
+    setShowWorkspaceDialog(false)
+    setWorkspaceDialogConvId(null)
   }
 
   return (
@@ -146,6 +188,15 @@ export function AgentModeToggle() {
           open={showTutorial}
           onClose={() => setShowTutorial(false)}
           onComplete={handleTutorialComplete}
+        />
+      )}
+
+      {showWorkspaceDialog && workspaceDialogConvId && (
+        <AgentWorkspaceDialog
+          open={showWorkspaceDialog}
+          conversationId={workspaceDialogConvId}
+          onChoose={handleWorkspaceChoose}
+          onClose={handleWorkspaceClose}
         />
       )}
     </>

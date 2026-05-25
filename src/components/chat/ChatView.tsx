@@ -9,6 +9,7 @@ import { MessageList } from './MessageList'
 import { ChatInput } from './ChatInput'
 import { RAGPanel } from './RAGPanel'
 import { AgentModeToggle } from './AgentModeToggle'
+import { AgentWorkspaceBadge } from './AgentWorkspaceBadge'
 import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
@@ -276,6 +277,10 @@ export function ChatView() {
                     <Bot size={10} />
                     <span>Agent</span>
                     <AgentModeToggle />
+                    {/* Workspace badge — only renders when agent mode is
+                        on AND a workspace has been chosen. Click pops
+                        AgentWorkspaceDialog so the user can swap mid-chat. */}
+                    <AgentWorkspaceBadge />
                   </div>
                 )}
               </div>
