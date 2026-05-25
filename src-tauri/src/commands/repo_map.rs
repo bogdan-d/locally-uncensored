@@ -15,7 +15,7 @@
 //!
 //! Ported 1:1 from uselu's `apps/bridge/src/commands/repo_map.rs` — the
 //! PageRank algorithm and per-language import regexes are battle-tested
-//! upstream. Only the outermost `repo_map_cmd` is wrapped in
+//! upstream. Only the outermost `repo_map` function is wrapped in
 //! `#[tauri::command]` for the desktop IPC bridge.
 
 use crate::commands::{bad_request, internal, CmdResult};
@@ -563,8 +563,14 @@ async fn repo_map_impl(args: &Value) -> CmdResult {
     }))
 }
 
+// Tauri command entry point — kept name-aligned with the frontend
+// `backendCall('repo_map', …)` in `src/api/agents/repo-map.ts`. Earlier
+// drafts used a `_cmd` suffix which produced a silent "command not
+// found" at runtime because the frontend hadn't been wired up yet
+// (codexRepoMapEnabled was a stub). When the flag is consumed in
+// useCodex, the name has to match exactly.
 #[tauri::command]
-pub async fn repo_map_cmd(
+pub async fn repo_map(
     _state: tauri::State<'_, AppState>,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
