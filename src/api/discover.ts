@@ -18,6 +18,12 @@ export interface DiscoverModel {
   hot?: boolean       // Featured/trending model
   agent?: boolean     // Supports Agent Mode tool calling
   released?: string   // Release date YYYY-MM for sorting (newest first)
+  // F4 (juliandiggins-stack GH#21): explicit CPU-only / ≤8 GB RAM
+  // tag. Surfaces a green "CPU-friendly" badge in DiscoverModels and
+  // exposes the optional "Lightweight" filter. Set true for ≤4B
+  // uncensored models we have personally test-loaded on a CPU-only
+  // 8 GB box.
+  lightweight?: boolean
   // Multi-provider
   provider?: ProviderId   // Which provider this model belongs to
   providerName?: string   // Display name of the provider
@@ -361,7 +367,7 @@ function sortByRelease(models: DiscoverModel[]): DiscoverModel[] {
 export function getUncensoredTextModels(): DiscoverModel[] {
   return sortByRelease([
     // ── HOT: Hermes 3 ──
-    { name: 'Hermes 3 Llama 3.2 3B', description: 'NousResearch Hermes 3 — uncensored + native tool calling. Lightweight.', pulls: '500K+', tags: ['3B', 'Q4_K_M', '2 GB'], updated: 'Hot', agent: true, released: '2024-08', downloadUrl: HF('bartowski/Hermes-3-Llama-3.2-3B-GGUF', 'Hermes-3-Llama-3.2-3B-Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.2-3B-Q4_K_M.gguf', sizeGB: 2 },
+    { name: 'Hermes 3 Llama 3.2 3B', description: 'NousResearch Hermes 3 — uncensored + native tool calling. Runs on 8 GB RAM, CPU-only.', pulls: '500K+', tags: ['3B', 'Q4_K_M', '2 GB'], updated: 'Hot', agent: true, lightweight: true, released: '2024-08', downloadUrl: HF('bartowski/Hermes-3-Llama-3.2-3B-GGUF', 'Hermes-3-Llama-3.2-3B-Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.2-3B-Q4_K_M.gguf', sizeGB: 2 },
     { name: 'Hermes 3 Llama 3.1 8B', description: 'NousResearch Hermes 3 — uncensored + native tool calling. THE agent model.', pulls: '500K+', tags: ['8B', 'Q4_K_M', '5 GB'], updated: 'Hot', agent: true, released: '2024-08', downloadUrl: HF('bartowski/Hermes-3-Llama-3.1-8B-GGUF', 'Hermes-3-Llama-3.1-8B-Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.1-8B-Q4_K_M.gguf', sizeGB: 5 },
     { name: 'Hermes 3 Llama 3.1 70B', description: 'NousResearch Hermes 3 70B — maximum intelligence, uncensored.', pulls: '500K+', tags: ['70B', 'Q4_K_M', '42 GB'], updated: 'Hot', agent: true, released: '2024-08', downloadUrl: HF('bartowski/Hermes-3-Llama-3.1-70B-GGUF', 'Hermes-3-Llama-3.1-70B-Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.1-70B-Q4_K_M.gguf', sizeGB: 42 },
     // ── HOT: Dolphin 3 ──
@@ -402,7 +408,9 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // ── Popular: GLM 4.6 Abliterated ──
     { name: 'GLM 4 9B Abliterated', description: 'GLM 4 9B abliterated — strong coding and reasoning.', pulls: '5K+', tags: ['9B', 'Q4_K_M', '5 GB'], updated: 'New', agent: true, released: '2026-03', downloadUrl: HF('bartowski/glm-4-9b-chat-abliterated-GGUF', 'glm-4-9b-chat-abliterated-Q4_K_M.gguf'), filename: 'glm-4-9b-chat-abliterated-Q4_K_M.gguf', sizeGB: 5 },
     // ── Popular: Gemma 3 Abliterated ──
-    { name: 'Gemma 3 4B Abliterated', description: 'Google Gemma 3 4B abliterated — lightweight, vision support.', pulls: '20K+', tags: ['4B', 'Q4_K_M', '2.3 GB'], updated: 'Popular', released: '2025-03', downloadUrl: HF('bartowski/mlabonne_gemma-3-4b-it-abliterated-GGUF', 'mlabonne_gemma-3-4b-it-abliterated-Q4_K_M.gguf'), filename: 'mlabonne_gemma-3-4b-it-abliterated-Q4_K_M.gguf', sizeGB: 2.3 },
+    { name: 'Gemma 3 4B Abliterated', description: 'Google Gemma 3 4B abliterated — vision support, runs on 8 GB RAM CPU-only.', pulls: '20K+', tags: ['4B', 'Q4_K_M', '2.3 GB'], updated: 'Popular', lightweight: true, released: '2025-03', downloadUrl: HF('bartowski/mlabonne_gemma-3-4b-it-abliterated-GGUF', 'mlabonne_gemma-3-4b-it-abliterated-Q4_K_M.gguf'), filename: 'mlabonne_gemma-3-4b-it-abliterated-Q4_K_M.gguf', sizeGB: 2.3 },
+    // ── Lightweight pinned for CPU-only / ≤8 GB RAM (F4 juliandiggins-stack GH#21) ──
+    { name: 'Llama 3.2 3B Abliterated', description: 'Meta Llama 3.2 3B abliterated — proven small uncensored, low resource footprint.', pulls: '50K+', tags: ['3B', 'Q4_K_M', '2 GB'], updated: 'Popular', agent: true, lightweight: true, released: '2024-09', downloadUrl: HF('mradermacher/Llama-3.2-3B-Instruct-abliterated-GGUF', 'Llama-3.2-3B-Instruct-abliterated.Q4_K_M.gguf'), filename: 'Llama-3.2-3B-Instruct-abliterated.Q4_K_M.gguf', sizeGB: 2 },
     { name: 'Gemma 3 12B Abliterated', description: 'Google Gemma 3 12B abliterated — vision support, great quality.', pulls: '20K+', tags: ['12B', 'Q4_K_M', '8 GB'], updated: 'Popular', released: '2025-03', downloadUrl: HF('bartowski/mlabonne_gemma-3-12b-it-abliterated-GGUF', 'mlabonne_gemma-3-12b-it-abliterated-Q4_K_M.gguf'), filename: 'mlabonne_gemma-3-12b-it-abliterated-Q4_K_M.gguf', sizeGB: 8 },
     { name: 'Gemma 3 27B Abliterated', description: 'Google Gemma 3 27B abliterated — strong reasoning + vision.', pulls: '20K+', tags: ['27B', 'Q4_K_M', '17 GB'], updated: 'Popular', released: '2025-03', downloadUrl: HF('bartowski/mlabonne_gemma-3-27b-it-abliterated-GGUF', 'mlabonne_gemma-3-27b-it-abliterated-Q4_K_M.gguf'), filename: 'mlabonne_gemma-3-27b-it-abliterated-Q4_K_M.gguf', sizeGB: 17 },
     // ── Popular: Qwen3 14B Abliterated (two quants) ──

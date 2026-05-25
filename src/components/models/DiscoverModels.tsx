@@ -57,6 +57,17 @@ function ModelDiscoverCard({ model, index, isText, getModelDownloadState, isMode
               {isModelFullyInstalled(model) && <span className="text-[0.55rem] px-1.5 py-0.5 rounded bg-green-500/15 text-green-500 font-bold border border-green-500/30 shrink-0">INSTALLED</span>}
               {model.hot && !isModelFullyInstalled(model) && <span className="text-[0.55rem] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-500 font-bold border border-orange-500/30 shrink-0">HOT</span>}
               {model.agent && <span className="text-[0.55rem] px-1.5 py-0.5 rounded bg-green-500/15 text-green-500 font-bold border border-green-500/30 shrink-0">AGENT</span>}
+              {/* F4 (juliandiggins-stack GH#21) — explicit CPU-only / ≤8 GB RAM badge.
+                  Pinned to a small curated set of uncensored models that we have
+                  test-loaded on an 8 GB box without a discrete GPU. */}
+              {model.lightweight && (
+                <span
+                  className="text-[0.55rem] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 font-bold border border-emerald-500/30 shrink-0"
+                  title="Runs on 8 GB RAM, CPU-only. No discrete GPU required."
+                >
+                  CPU-FRIENDLY
+                </span>
+              )}
               <span>{model.description || model.name}</span>
             </h3>
             <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">{model.name}</p>

@@ -804,6 +804,10 @@ export function SettingsPage() {
           </Section>
 
           <UpdateSection />
+
+          <Section title="Troubleshoot">
+            <TroubleshootSection />
+          </Section>
         </>)}
 
         {/* ── AI Backends tab ──────────────────────────── */}
@@ -1038,5 +1042,147 @@ function UpdateSection() {
         </button>
       </div>
     </Section>
+  )
+}
+
+// ── B7 Troubleshoot section — one-shot diagnostic probe ───────
+
+interface BackendProbe {
+  status: 'ok' | 'unreachable' | 'not_installed' | 'error'
+  detail: string
+  endpoint: string
+}
+
+interface SystemHealthReport {
+  version: string
+  host: {
+    os: string
+    os_version: string
+    arch: string
+    cpu_count: number
+    ram_gb: number
+    disk_free_gb: number
+  }
+  ollama: BackendProbe
+  comfyui: BackendProbe
+  lm_studio: BackendProbe
+}
+
+function ProbeBadge({ probe }: { probe: BackendProbe }) {
+  const colors: Record<BackendProbe['status'], string> = {
+    ok: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30',
+    unreachable: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
+    not_installed: 'bg-gray-500/15 text-gray-500 border-gray-500/30',
+    error: 'bg-red-500/15 text-red-500 border-red-500/30',
+  }
+  const labels: Record<BackendProbe['status'], string> = {
+    ok: 'Reachable',
+    unreachable: 'Not running',
+    not_installed: 'Not installed',
+    error: 'Error',
+  }
+  return (
+    <span
+      className={`text-[0.55rem] px-1.5 py-0.5 rounded border font-medium ${colors[probe.status]}`}
+      title={probe.detail || probe.endpoint}
+    >
+      {labels[probe.status]}
+    </span>
+  )
+}
+
+function TroubleshootSection() {
+  const [report, setReport] = useState<SystemHealthReport | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const run = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const r = await backendCall<SystemHealthReport>('system_health', {})
+      setReport(r)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Auto-run on first open so the panel never starts empty.
+  useEffect(() => {
+    void run()
+  }, [])
+
+  return (
+    <div className="space-y-3 py-2">
+      <p className="text-[0.6rem] text-gray-500 leading-relaxed">
+        One-shot probe of the local backends and host facts. Use this when
+        the app behaves oddly — most "model not found" / "ComfyUI doesn't
+        respond" issues become obvious here.
+      </p>
+
+      {error && (
+        <div className="rounded-lg bg-red-500/[0.08] border border-red-500/20 p-2.5 text-[0.65rem] text-red-400">
+          system_health failed: {error}
+        </div>
+      )}
+
+      {report && (
+        <div className="space-y-2">
+          {/* Backends */}
+          <div className="rounded-lg border border-white/[0.06] p-2.5 space-y-2">
+            <div className="text-[0.55rem] uppercase tracking-widest text-gray-500">Backends</div>
+            <div className="flex items-center justify-between">
+              <span className="text-[0.65rem] text-gray-300">Ollama</span>
+              <ProbeBadge probe={report.ollama} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[0.65rem] text-gray-300">ComfyUI</span>
+              <ProbeBadge probe={report.comfyui} />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[0.65rem] text-gray-300">LM Studio</span>
+              <ProbeBadge probe={report.lm_studio} />
+            </div>
+          </div>
+
+          {/* Host facts */}
+          <div className="rounded-lg border border-white/[0.06] p-2.5 space-y-1.5">
+            <div className="text-[0.55rem] uppercase tracking-widest text-gray-500">Host</div>
+            <div className="flex items-center justify-between text-[0.65rem]">
+              <span className="text-gray-500">LU version</span>
+              <span className="text-gray-300 font-mono">v{report.version}</span>
+            </div>
+            <div className="flex items-center justify-between text-[0.65rem]">
+              <span className="text-gray-500">OS</span>
+              <span className="text-gray-300 font-mono">{report.host.os} {report.host.os_version}</span>
+            </div>
+            <div className="flex items-center justify-between text-[0.65rem]">
+              <span className="text-gray-500">Arch / CPUs</span>
+              <span className="text-gray-300 font-mono">{report.host.arch} / {report.host.cpu_count}</span>
+            </div>
+            <div className="flex items-center justify-between text-[0.65rem]">
+              <span className="text-gray-500">RAM</span>
+              <span className="text-gray-300 font-mono">{report.host.ram_gb} GB</span>
+            </div>
+            <div className="flex items-center justify-between text-[0.65rem]">
+              <span className="text-gray-500">Disk free (home)</span>
+              <span className={`font-mono ${report.host.disk_free_gb < 10 ? 'text-amber-400' : 'text-gray-300'}`}>
+                {report.host.disk_free_gb} GB
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={run}
+        disabled={loading}
+        className="w-full px-3 py-1.5 rounded-md text-[0.65rem] font-medium bg-gray-100 dark:bg-white/[0.06] hover:bg-gray-200 dark:hover:bg-white/10 text-gray-800 dark:text-gray-200 transition-colors disabled:opacity-50"
+      >
+        {loading ? 'Probing…' : 'Re-probe'}
+      </button>
+    </div>
   )
 }
