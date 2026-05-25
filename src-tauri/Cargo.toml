@@ -46,6 +46,11 @@ rand = "0.8"
 sha2 = "0.10"
 local-ip-address = "0.6"
 socket2 = "0.5"
+# Structured tracing — used for the JSON-log mode behind `LU_LOG_FORMAT=json`
+# (uselu Phase 3 parity). Default formatter is the compact text layer so
+# the existing console output stays readable for a desktop user.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_JobObjects", "Win32_System_Threading", "Win32_Foundation", "Win32_Security"] }

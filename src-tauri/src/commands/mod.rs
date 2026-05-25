@@ -4,6 +4,7 @@ pub mod repo_map;
 pub mod claude_code;
 pub mod download;
 pub mod filesystem;
+pub mod health;
 pub mod install;
 pub mod process;
 pub mod proxy;

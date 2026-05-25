@@ -36,9 +36,44 @@ fn apply_linux_webkit_workarounds() {
     }
 }
 
+/// Initialise tracing-subscriber once on app start. `LU_LOG_FORMAT=json`
+/// switches to single-line JSON output (one object per event) for users
+/// who pipe LU's stdout into Loki / Vector / a log file consumed by
+/// something machine-readable. Default is the compact text formatter
+/// because most desktop users just want a readable terminal.
+///
+/// `RUST_LOG` is honored as the filter — common values are `info`,
+/// `locally_uncensored=debug`, or a per-module spec.
+fn init_tracing() {
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+    // `try_init` instead of `init` so we never panic if something else
+    // (a test harness, a re-import) already set the global subscriber.
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let json_mode = std::env::var("LU_LOG_FORMAT")
+        .map(|v| v.eq_ignore_ascii_case("json"))
+        .unwrap_or(false);
+    if json_mode {
+        let _ = tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt::layer().json().with_current_span(false).with_span_list(false))
+            .try_init();
+    } else {
+        let _ = tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt::layer().compact())
+            .try_init();
+    }
+}
+
 fn main() {
     #[cfg(target_os = "linux")]
     apply_linux_webkit_workarounds();
+
+    init_tracing();
+    tracing::info!(
+        version = env!("CARGO_PKG_VERSION"),
+        "Locally Uncensored starting"
+    );
 
     let app_state = AppState::new();
 
@@ -158,6 +193,8 @@ fn main() {
             commands::proxy::proxy_localhost_stream,
             commands::proxy::pull_model_stream,
             commands::proxy::cancel_model_pull,
+            // B7 (uselu Phase 4 inspiration) — one-shot diagnostic probe
+            commands::health::system_health,
             // Codex / Sprint A #2 — Repo-Map with Aider PageRank
             commands::repo_map::repo_map,
             // Codex / Sprint C #7 — long-running background shell tasks
