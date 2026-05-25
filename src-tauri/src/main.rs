@@ -158,6 +158,8 @@ fn main() {
             commands::proxy::proxy_localhost_stream,
             commands::proxy::pull_model_stream,
             commands::proxy::cancel_model_pull,
+            // Codex / Sprint A #2 — Repo-Map with Aider PageRank
+            commands::repo_map::repo_map_cmd,
             // Codex / Sprint C #7 — long-running background shell tasks
             commands::bg_tasks::shell_task_start,
             commands::bg_tasks::shell_task_status,

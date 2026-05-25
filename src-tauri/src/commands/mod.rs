@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod bg_tasks;
+pub mod repo_map;
 pub mod claude_code;
 pub mod download;
 pub mod filesystem;
