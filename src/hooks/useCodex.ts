@@ -20,6 +20,7 @@ import { fetchRepoMap, renderRepoMapSection } from '../api/agents/repo-map'
 import { isLocalModelByName } from '../api/agents/model-locality'
 import { useStagedChangesStore } from '../stores/stagedChangesStore'
 import { computeUnifiedDiff } from '../lib/diff'
+import { log } from '../lib/logger'
 import type { CodexEvent } from '../types/codex'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
 import { selectRelevantTools } from '../lib/tool-selection'
@@ -377,8 +378,10 @@ export function useCodex() {
             useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
           }
         } catch (e) {
-          // Architect is advisory — never blocks the editor loop.
-          console.warn('[codex] architect pass failed:', (e as Error)?.message)
+          // Architect is advisory — never blocks the editor loop. Use
+          // the structured logger so the redaction layer scrubs any
+          // accidental secrets in the error context.
+          log.warn('codex.architect_pass_failed', { err: e })
         }
       }
     }
@@ -403,7 +406,7 @@ export function useCodex() {
           useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
         }
       } catch (e) {
-        console.warn('[codex] repo-map pre-fetch failed:', (e as Error)?.message)
+        log.warn('codex.repo_map_fetch_failed', { err: e })
       }
     }
 

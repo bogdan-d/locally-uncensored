@@ -4,7 +4,7 @@ import { SliderControl } from '../settings/SliderControl'
 import { WorkflowFinder } from './WorkflowFinder'
 import { Dice5, Info, AlertTriangle, Film, ImageIcon, ImagePlus } from 'lucide-react'
 import type { ClassifiedModel, ModelType } from '../../api/comfyui'
-import { snapToVideoGrid, isI2VModel } from '../../api/comfyui'
+import { snapToVideoGrid, isI2VModel, getLoraModels, getVAEModels } from '../../api/comfyui'
 
 interface Props {
   imageModels: ClassifiedModel[]
@@ -234,6 +234,15 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
         <SliderControl label="Denoise" value={store.denoise} min={0.05} max={1.0} step={0.05} onChange={store.setDenoise} />
       )}
 
+      {/* F2 (cinemazverev GH#4) + F3 (vanja-san GH#4) — extended params.
+          LoRA / VAE / Skip CLIP only matter for image generation; we
+          hide them for video to keep the panel terse. The LoRA list is
+          fetched lazily from ComfyUI's LoraLoader node enum the first
+          time the panel mounts. */}
+      {!isVideo && (
+        <ExtendedComfyParams />
+      )}
+
       {/* Size */}
       <div>
         <label className={lbl}>Size ({store.width}x{store.height})</label>
@@ -311,6 +320,95 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
           modelType={isVideo ? (models.find(m => m.name === activeModel)?.type ?? 'unknown') : store.imageModelType}
         />
       </div>
+    </div>
+  )
+}
+
+// ── F2 + F3 extended params (image generation only) ──────────────
+//
+// Lazy-loads the LoRA + VAE enum from ComfyUI's `/object_info/...` once
+// per mount. Both lists silently fall back to empty when the node isn't
+// registered — F2/F3 then degrade to "no LoRA" / "VAE: auto".
+
+function ExtendedComfyParams() {
+  const store = useCreateStore()
+  const [loras, setLoras] = useState<string[]>([])
+  const [vaes, setVaes] = useState<string[]>([])
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void Promise.all([getLoraModels(), getVAEModels()]).then(([l, v]) => {
+      if (cancelled) return
+      setLoras(l)
+      setVaes(v)
+      setLoaded(true)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const sel = 'w-full px-2 py-1 rounded bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/10 text-[0.7rem] text-gray-800 dark:text-gray-200 focus:outline-none focus:border-blue-400/40'
+  const lbl = 'text-[0.55rem] text-gray-500 mb-1 block'
+
+  return (
+    <div className="space-y-2 pt-1 border-t border-gray-200 dark:border-white/5">
+      <div className="text-[0.55rem] uppercase tracking-widest text-gray-500">Extended</div>
+
+      {/* LoRA (F2) — single slot, no chain. Empty option = no LoRA. */}
+      <div>
+        <label className={lbl}>LoRA {!loaded && <span className="text-gray-400">(loading…)</span>}</label>
+        <select
+          value={store.selectedLora}
+          onChange={(e) => store.setSelectedLora(e.target.value)}
+          className={sel}
+          disabled={!loaded}
+        >
+          <option value="">— none —</option>
+          {loras.map((l) => (
+            <option key={l} value={l}>{l}</option>
+          ))}
+        </select>
+        {store.selectedLora && (
+          <SliderControl
+            label="LoRA strength"
+            value={store.loraStrength}
+            min={0}
+            max={2}
+            step={0.05}
+            onChange={store.setLoraStrength}
+          />
+        )}
+      </div>
+
+      {/* VAE override (F3) */}
+      <div>
+        <label className={lbl}>VAE</label>
+        <select
+          value={store.selectedVae}
+          onChange={(e) => store.setSelectedVae(e.target.value)}
+          className={sel}
+          disabled={!loaded}
+        >
+          <option value="auto">auto (use checkpoint VAE)</option>
+          {vaes.map((v) => (
+            <option key={v} value={v}>{v}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Skip CLIP (F3) — 0 = none. 1-2 is the SD1.5 / SDXL sweet spot
+          for some abliterated finetunes. >2 only makes sense for very
+          specialised use. */}
+      <SliderControl
+        label="Skip CLIP layers"
+        value={store.clipSkip}
+        min={0}
+        max={12}
+        step={1}
+        onChange={store.setClipSkip}
+      />
     </div>
   )
 }

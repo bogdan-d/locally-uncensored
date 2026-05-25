@@ -66,6 +66,15 @@ interface CreateState {
   frames: number
   fps: number
   denoise: number  // Denoise strength for I2I (0.0–1.0)
+  // F2 (cinemazverev GH#4) — 1 LoRA slot. Empty string = none.
+  selectedLora: string
+  loraStrength: number  // 0..2, mirrors LoraLoader's `strength_model` slider
+  // F3 (vanja-san GH#4) — top extended ComfyUI params surfaced in
+  // the param panel. selectedVae = 'auto' lets the checkpoint's
+  // bundled VAE win; an explicit pick overrides with a VAELoader.
+  // clipSkip = 0 means no Skip-CLIP layer is injected.
+  selectedVae: string
+  clipSkip: number
   i2iImage: string | null  // Uploaded image filename for I2I
   i2vImage: string | null  // Uploaded image filename for I2V models (SVD, FramePack)
   isGenerating: boolean
@@ -109,6 +118,10 @@ interface CreateState {
   setFrames: (frames: number) => void
   setFps: (fps: number) => void
   setDenoise: (denoise: number) => void
+  setSelectedLora: (name: string) => void
+  setLoraStrength: (strength: number) => void
+  setSelectedVae: (name: string) => void
+  setClipSkip: (skip: number) => void
   setI2iImage: (image: string | null) => void
   setI2vImage: (image: string | null) => void
   setIsGenerating: (generating: boolean) => void
@@ -148,6 +161,10 @@ export const useCreateStore = create<CreateState>()(
       frames: 24,
       fps: 8,
       denoise: 0.7,
+      selectedLora: '',
+      loraStrength: 0.8,
+      selectedVae: 'auto',
+      clipSkip: 0,
       i2iImage: null,
       i2vImage: null,
       isGenerating: false,
@@ -231,6 +248,10 @@ export const useCreateStore = create<CreateState>()(
       setFrames: (frames) => set({ frames: Math.max(1, Math.min(120, Math.floor(frames))) }),
       setFps: (fps) => set({ fps: Math.max(1, Math.min(60, Math.floor(fps))) }),
       setDenoise: (denoise) => set({ denoise: Math.max(0, Math.min(1, denoise)) }),
+      setSelectedLora: (name) => set({ selectedLora: name || '' }),
+      setLoraStrength: (strength) => set({ loraStrength: Math.max(0, Math.min(2, strength)) }),
+      setSelectedVae: (name) => set({ selectedVae: name || 'auto' }),
+      setClipSkip: (skip) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(skip))) }),
       setI2iImage: (image) => set({ i2iImage: image }),
       setI2vImage: (image) => set({ i2vImage: image }),
       setIsGenerating: (generating) => set({ isGenerating: generating, ...(generating ? {} : { progressPhase: 'idle' as ProgressPhase }) }),

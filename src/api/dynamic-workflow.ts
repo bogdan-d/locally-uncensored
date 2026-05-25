@@ -394,6 +394,62 @@ export async function buildDynamicWorkflow(
     samplerModelId = evolvedId
   }
 
+  // ─── Phase 1b: Optional LoRA + VAE + Skip-CLIP injection (F2 + F3) ───
+  //
+  // Single LoRA slot (cinemazverev GH#4): LoraLoader takes (model, clip)
+  // and outputs new (model, clip) — we rewire both refs so the rest of
+  // the pipeline sees the LoRA-modified versions.
+  //
+  // VAE override (vanja-san GH#4): VAELoader replaces vaeSourceId. The
+  // checkpoint's bundled VAE stays unused.
+  //
+  // Skip CLIP (vanja-san GH#4): CLIPSetLastLayer takes a negative
+  // `stop_at_clip_layer` index — passing -clipSkip mirrors A1111 /
+  // ComfyUI conventions.
+  //
+  // All three are skipped (no extra nodes) when the corresponding
+  // param is unset, so workflows without F2/F3 enabled stay byte-
+  // identical to the previous behaviour.
+  if (params.lora) {
+    const loraId = String(n++)
+    workflow[loraId] = {
+      class_type: 'LoraLoader',
+      inputs: {
+        lora_name: params.lora,
+        strength_model: params.loraStrength ?? 0.8,
+        strength_clip: params.loraStrength ?? 0.8,
+        model: [samplerModelId, 0],
+        clip: [clipSourceId, clipOutputSlot],
+      },
+    }
+    samplerModelId = loraId
+    clipSourceId = loraId
+    clipOutputSlot = 1
+  }
+
+  if (params.vae && params.vae !== 'auto') {
+    const vaeId = String(n++)
+    workflow[vaeId] = {
+      class_type: 'VAELoader',
+      inputs: { vae_name: params.vae },
+    }
+    vaeSourceId = vaeId
+    vaeOutputSlot = 0
+  }
+
+  if (params.clipSkip && params.clipSkip > 0) {
+    const skipId = String(n++)
+    workflow[skipId] = {
+      class_type: 'CLIPSetLastLayer',
+      inputs: {
+        stop_at_clip_layer: -Math.abs(params.clipSkip),
+        clip: [clipSourceId, clipOutputSlot],
+      },
+    }
+    clipSourceId = skipId
+    clipOutputSlot = 0
+  }
+
   // ─── Phase 2: Text Encoding ───
 
   const posId = String(n++)

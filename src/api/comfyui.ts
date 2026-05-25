@@ -1,4 +1,5 @@
 import { comfyuiUrl, localFetch } from "./backend"
+import { log } from "../lib/logger"
 
 // ─── Types ───
 
@@ -16,6 +17,18 @@ export interface GenerateParams {
   batchSize: number
   inputImage?: string   // I2I source image filename (uploaded to ComfyUI)
   denoise?: number      // I2I denoise strength (0.0–1.0, default 1.0 = full txt2img)
+  // F2 (cinemazverev GH#4): a single LoRA slot. Empty = no LoRA.
+  // `loraStrength` mirrors LoraLoader's `strength_model` (0..2 typical).
+  lora?: string
+  loraStrength?: number
+  // F3 (vanja-san GH#4): override the checkpoint's bundled VAE with an
+  // explicit VAELoader. 'auto' / undefined / empty = keep the
+  // checkpoint VAE.
+  vae?: string
+  // F3: optional CLIPSetLastLayer injection. 0 = no skip (the
+  // checkpoint default). Common values: 1 for SD1.5/SDXL,
+  // 2 for some abliterated finetunes.
+  clipSkip?: number
 }
 
 export interface VideoParams extends GenerateParams {
@@ -371,7 +384,7 @@ export async function getVAEModels(): Promise<string[]> {
     const data = await res.json()
     return data?.VAELoader?.input?.required?.vae_name?.[0] ?? []
   } catch (err) {
-    console.warn('[ComfyUI] Failed to fetch VAE models:', err)
+    log.warn('comfyui.fetch_vae_failed', { err })
     return []
   }
 }
@@ -383,7 +396,25 @@ export async function getCLIPModels(): Promise<string[]> {
     const data = await res.json()
     return data?.CLIPLoader?.input?.required?.clip_name?.[0] ?? []
   } catch (err) {
-    console.warn('[ComfyUI] Failed to fetch CLIP models:', err)
+    log.warn('comfyui.fetch_clip_failed', { err })
+    return []
+  }
+}
+
+/**
+ * F2 (cinemazverev GH#4): list LoRA files ComfyUI knows about. Pulls
+ * the same enum LoraLoader's `lora_name` dropdown shows — anything the
+ * user dropped into `<comfyui>/models/loras/`. Soft-fails to `[]` when
+ * the LoraLoader node isn't registered (custom-node ComfyUI distros).
+ */
+export async function getLoraModels(): Promise<string[]> {
+  try {
+    const res = await localFetch(comfyuiUrl('/object_info/LoraLoader'))
+    if (!res.ok) return []
+    const data = await res.json()
+    return data?.LoraLoader?.input?.required?.lora_name?.[0] ?? []
+  } catch (err) {
+    log.warn('comfyui.fetch_lora_failed', { err })
     return []
   }
 }
