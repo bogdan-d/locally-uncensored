@@ -3,7 +3,7 @@
 import type { MCPToolDefinition } from './types'
 import type { ToolRegistry } from './tool-registry'
 import { backendCall, fetchExternal } from '../backend'
-import { getActiveChatId } from '../agent-context'
+import { getActiveChatId, getActiveWorkspace } from '../agent-context'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import { WorkflowEngine } from '../../lib/workflow-engine'
 import type { StepResult } from '../../types/agent-workflows'
@@ -15,9 +15,18 @@ import { DELEGATE_TASK_TOOL_DEF, buildDelegateExecutor } from '../agents/sub-age
  * Rust side then falls back to `agent-workspace/default/` for relative
  * paths (and uses absolute paths as-is regardless).
  */
-function chatCtx(): { chatId?: string } {
+function chatCtx(): { chatId?: string; workingDirectory?: string } {
   const id = getActiveChatId()
-  return id ? { chatId: id } : {}
+  if (!id) return {}
+  // If the agent loop picked a real folder, thread it through so the
+  // bridge resolves relative paths against that folder instead of the
+  // per-chat sandbox. The workspace pointer is set on loop start by
+  // useAgentChat / useCodex (see agent-context.setActiveWorkspace).
+  const ws = getActiveWorkspace()
+  if (ws?.kind === 'folder' && ws.path) {
+    return { chatId: id, workingDirectory: ws.path }
+  }
+  return { chatId: id }
 }
 
 // ── Tool Definitions ────────────────────────────────────────────
@@ -175,6 +184,248 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
         language: { type: 'string', description: 'Programming language: "python" or "shell"', enum: ['python', 'shell'] },
       },
       required: ['code'],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'shell_execute_background',
+    description:
+      'Spawn a shell command on the bridge as a LONG-RUNNING BACKGROUND task. '
+      + 'Returns an opaque task `id` immediately — the user can close the browser, '
+      + 'come back later, and use `shell_task_status` to read the tail of stdout/stderr. '
+      + 'USE for batch refactors, large `pnpm install`, `cargo build`, dataset transforms — '
+      + 'anything that would time out a normal `shell_execute` call.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Shell command to run.' },
+        cwd: { type: 'string', description: 'Working directory.' },
+      },
+      required: ['command'],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'shell_task_status',
+    description:
+      'Read the status of a background task started via `shell_execute_background`. '
+      + 'Returns running/finished, exit code, cancelled flag, and the last ~64 KiB of '
+      + 'output. Poll periodically while a task is running.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Task id returned by shell_execute_background.' },
+      },
+      required: ['id'],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'shell_task_kill',
+    description:
+      'Cancel a running background task. No-op if the task already finished.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Task id to cancel.' },
+      },
+      required: ['id'],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'shell_task_list',
+    description:
+      'List all background tasks the bridge knows about (newest first). Use for '
+      + '"what is still running?" queries.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'git_status',
+    description:
+      'Run `git status --porcelain=2 --branch` and return a STRUCTURED summary: '
+      + 'branch, ahead/behind counts, per-file status codes, clean-tree flag. '
+      + 'PREFER over shell_execute for "what changed" queries — output is greppable.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: 'Working directory (defaults to chat workspace).' },
+      },
+      required: [],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'git_commit',
+    description:
+      'Stage files (or all tracked changes) and create a commit with `message`. '
+      + 'When `allTracked` is true → `git add -A` then `git commit`; '
+      + 'when `files` is given → only those paths are staged; '
+      + 'otherwise commits whatever is already staged. '
+      + 'NEVER passes `--no-verify` — fix hook failures, don\'t skip them. '
+      + 'Output includes the new commit SHA on success.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', description: 'Commit message (multi-line OK).' },
+        allTracked: { type: 'boolean', description: 'Stage every tracked change first.' },
+        files: { type: 'array', items: { type: 'string' }, description: 'Specific files to stage.' },
+        cwd: { type: 'string', description: 'Working directory.' },
+      },
+      required: ['message'],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'git_push',
+    description:
+      'Run `git push`. With no args pushes the current branch to its tracked upstream. '
+      + 'WARN: not for `main`/`master` without explicit user instruction — '
+      + 'check git_status first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        remote: { type: 'string', description: 'Remote name (default: origin).' },
+        branch: { type: 'string', description: 'Branch to push (default: current).' },
+        setUpstream: { type: 'boolean', description: 'Pass `-u` for first-time push.' },
+        cwd: { type: 'string', description: 'Working directory.' },
+      },
+      required: [],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'git_log',
+    description:
+      'Recent commits in one-line format. Returns parsed [{sha, subject}]. '
+      + 'PREFER over shell_execute when answering "what changed recently" — output is greppable.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max commits to return (default 20).' },
+        cwd: { type: 'string', description: 'Working directory.' },
+      },
+      required: [],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'git_diff',
+    description:
+      'Run `git diff` between HEAD (or a ref) and the working tree. '
+      + 'Returns the raw unified diff — pair with file_search if you only need a path. '
+      + 'For staged changes pass `staged: true`.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref: { type: 'string', description: 'Base ref (e.g. main, HEAD~3). Defaults to HEAD.' },
+        path: { type: 'string', description: 'Limit to a path.' },
+        staged: { type: 'boolean', description: 'Diff the index instead of the working tree.' },
+        cwd: { type: 'string', description: 'Working directory.' },
+      },
+      required: [],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'project_init',
+    description:
+      'Scaffold a new project from a known stack recipe. With no `recipe` arg, lists '
+      + 'available stacks (next-postgres, next-supabase, next-stripe, rust-axum, vite-react). '
+      + 'With a `recipe` arg, returns a markdown plan of ordered shell commands the model '
+      + 'can then execute via shell_execute. Workspace-sandboxed IDEs can\'t do this — LU '
+      + 'can because the bridge has real shell + filesystem access.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        recipe: {
+          type: 'string',
+          description: 'Stack id (e.g. "next-postgres"). Omit to list available recipes.',
+        },
+      },
+      required: [],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'pr_resume',
+    description:
+      'Pick up where a GitHub PR left off. Given a PR URL, fetches title, body, head '
+      + 'branch, latest comments, and the full diff via the local `gh` CLI in one call, '
+      + 'and returns a markdown summary. USE when the user says "continue this PR" / '
+      + '"/resume <url>" / "pick up review of #123".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string', description: 'PR URL (https://github.com/owner/repo/pull/N).' },
+        cwd: { type: 'string', description: 'Working directory (default: chat workspace).' },
+      },
+      required: ['url'],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'gh_pr_create',
+    description:
+      'Open a new GitHub pull request via the `gh` CLI. Requires the user to be authed against GitHub locally. '
+      + 'Pushes the current branch first if it has no upstream. Returns the PR URL on success.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'PR title (under 70 chars).' },
+        body: { type: 'string', description: 'PR description in markdown.' },
+        base: { type: 'string', description: 'Base branch (default: repo default).' },
+        cwd: { type: 'string', description: 'Working directory.' },
+      },
+      required: ['title'],
+    },
+    category: 'terminal',
+    source: 'builtin',
+  },
+  {
+    name: 'run_tests',
+    description:
+      'Run the project test suite and return a STRUCTURED summary: passed/failed counts, '
+      + 'failing test names, last 40 output lines. AUTO-DETECTS the runner '
+      + '(vitest, jest, cargo, pytest) from files in the working directory unless `runner` is given. '
+      + 'PREFER this over shell_execute when the user says "run the tests", "make this green", '
+      + 'or you are iterating on a failing assertion — the output is greppable instead of an opaque dump. '
+      + 'Default timeout 300 s. Pass `command` to override the auto-detected command (e.g. a single-file scope).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        runner: {
+          type: 'string',
+          description: 'Force a runner: "vitest" | "jest" | "cargo" | "pytest". Auto if omitted.',
+          enum: ['vitest', 'jest', 'cargo', 'pytest'],
+        },
+        command: {
+          type: 'string',
+          description: 'Override the test command entirely. Use for single-file runs (`pnpm exec vitest run path/to/x.test.ts`).',
+        },
+        cwd: {
+          type: 'string',
+          description: 'Override working directory. Defaults to the chat workspace.',
+        },
+        timeout: {
+          type: 'number',
+          description: 'Timeout in ms (default 300_000 — tests can take a while).',
+        },
+      },
+      required: [],
     },
     category: 'terminal',
     source: 'builtin',
@@ -405,6 +656,230 @@ async function executeCodeExecute(args: Record<string, any>): Promise<string> {
   return output || (err ? `stderr: ${err}` : 'Done.')
 }
 
+async function runShell(command: string, cwd: string | undefined, timeout = 60000) {
+  return backendCall('shell_execute', {
+    command,
+    args: null,
+    cwd: cwd || null,
+    timeout,
+    shell: null,
+    ...chatCtx(),
+  })
+}
+
+async function executeShellExecuteBg(args: Record<string, any>): Promise<string> {
+  const { bgStart } = await import('../agents/bg-tasks')
+  const { id } = await bgStart({ command: args.command, cwd: args.cwd })
+  return `Task started: ${id}. Use shell_task_status to poll, shell_task_kill to cancel.`
+}
+
+async function executeShellTaskStatus(args: Record<string, any>): Promise<string> {
+  const { bgStatus, renderBgStatusOneLine } = await import('../agents/bg-tasks')
+  const s = await bgStatus(args.id)
+  const head = renderBgStatusOneLine(s)
+  const tail = s.output_tail ? `\n---\n${s.output_tail}` : ''
+  return `${head}${tail}`
+}
+
+async function executeShellTaskKill(args: Record<string, any>): Promise<string> {
+  const { bgKill } = await import('../agents/bg-tasks')
+  const r = await bgKill(args.id)
+  return r.cancelled ? `Cancelled ${args.id}.` : `${args.id}: already finished.`
+}
+
+async function executeShellTaskList(): Promise<string> {
+  const { bgList, renderBgStatusOneLine } = await import('../agents/bg-tasks')
+  const { tasks } = await bgList()
+  if (!tasks.length) return '(no background tasks)'
+  return tasks.map(renderBgStatusOneLine).join('\n')
+}
+
+async function executeGitStatus(args: Record<string, any>): Promise<string> {
+  const { parseGitStatus, renderGitStatus } = await import('../agents/git-tools')
+  const data = await runShell('git status --porcelain=2 --branch', args.cwd)
+  if (data.exitCode && data.exitCode !== 0) {
+    return `git_status failed: ${data.stderr || data.stdout || `exit ${data.exitCode}`}`
+  }
+  const parsed = parseGitStatus(data.stdout || '')
+  return renderGitStatus(parsed)
+}
+
+async function executeGitCommit(args: Record<string, any>): Promise<string> {
+  const { buildGitCommitCommand } = await import('../agents/git-tools')
+  const cmd = buildGitCommitCommand({
+    message: args.message,
+    files: Array.isArray(args.files) ? args.files : undefined,
+    allTracked: !!args.allTracked,
+  })
+  if (!cmd) return 'git_commit: a non-empty `message` is required.'
+  const data = await runShell(cmd, args.cwd)
+  const output = `${data.stdout || ''}\n${data.stderr || ''}`.trim()
+  if (data.exitCode && data.exitCode !== 0) {
+    return `git_commit failed (exit ${data.exitCode}):\n${output}`
+  }
+  const m = output.match(/\[(\S+)\s+([0-9a-f]{7,40})\]/)
+  return m ? `Committed on ${m[1]} as ${m[2]}.\n${output}` : output
+}
+
+async function executeGitPush(args: Record<string, any>): Promise<string> {
+  const { shellQuote } = await import('../agents/git-tools')
+  const flags: string[] = []
+  if (args.setUpstream) flags.push('-u')
+  if (args.remote) flags.push(shellQuote(args.remote))
+  if (args.branch) flags.push(shellQuote(args.branch))
+  const cmd = `git push ${flags.join(' ')}`.trim()
+  const data = await runShell(cmd, args.cwd, 120000)
+  const output = `${data.stdout || ''}\n${data.stderr || ''}`.trim()
+  if (data.exitCode && data.exitCode !== 0) {
+    return `git_push failed (exit ${data.exitCode}):\n${output}`
+  }
+  return output || 'git push: ok.'
+}
+
+async function executeGitLog(args: Record<string, any>): Promise<string> {
+  const { parseGitLog } = await import('../agents/git-tools')
+  const limit = typeof args.limit === 'number' ? Math.max(1, Math.min(200, args.limit)) : 20
+  const cmd = `git log --oneline -n ${limit}`
+  const data = await runShell(cmd, args.cwd)
+  if (data.exitCode && data.exitCode !== 0) {
+    return `git_log failed: ${data.stderr || data.stdout || `exit ${data.exitCode}`}`
+  }
+  const entries = parseGitLog(data.stdout || '')
+  if (!entries.length) return '(no commits)'
+  return entries.map((e) => `${e.sha} ${e.subject}`).join('\n')
+}
+
+async function executeGitDiff(args: Record<string, any>): Promise<string> {
+  const { shellQuote } = await import('../agents/git-tools')
+  const parts = ['git', 'diff']
+  if (args.staged) parts.push('--cached')
+  if (args.ref) parts.push(shellQuote(String(args.ref)))
+  if (args.path) parts.push('--', shellQuote(String(args.path)))
+  const data = await runShell(parts.join(' '), args.cwd, 120000)
+  if (data.exitCode && data.exitCode !== 0 && data.exitCode !== 1) {
+    return `git_diff failed: ${data.stderr || `exit ${data.exitCode}`}`
+  }
+  const out = data.stdout || ''
+  if (!out.trim()) return '(no diff)'
+  return out.length > 16000 ? `${out.slice(0, 16000)}\n…(truncated)` : out
+}
+
+async function executeProjectInit(args: Record<string, any>): Promise<string> {
+  const { findRecipe, renderInitPlan, listRecipes } = await import('../agents/project-init')
+  const recipeId = typeof args.recipe === 'string' ? args.recipe.trim() : ''
+  if (!recipeId) {
+    const list = listRecipes()
+    return [
+      'Available project_init recipes:',
+      '',
+      ...list.map((r) => `- **${r.id}** — ${r.name}: ${r.summary}`),
+      '',
+      'Call again with `recipe` set to one of the ids above to get the full plan.',
+    ].join('\n')
+  }
+  const recipe = findRecipe(recipeId)
+  if (!recipe) {
+    return `project_init: unknown recipe "${recipeId}". Call without args to see the list.`
+  }
+  return renderInitPlan(recipe)
+}
+
+async function executePrResume(args: Record<string, any>): Promise<string> {
+  const { parsePrUrl, normalisePrJson, renderPrResume } = await import('../agents/pr-resume')
+  const loc = parsePrUrl(String(args.url ?? ''))
+  if (!loc) return 'pr_resume: not a GitHub PR URL (expected https://github.com/owner/repo/pull/N).'
+  const view = await runShell(
+    `gh pr view ${loc.number} --repo ${loc.owner}/${loc.repo} --json title,body,state,headRefName,baseRefName,author,comments`,
+    args.cwd,
+    60000,
+  )
+  if (view.exitCode && view.exitCode !== 0) {
+    return `pr_resume: gh pr view failed (exit ${view.exitCode}): ${view.stderr || view.stdout || ''}`
+  }
+  let raw: any
+  try {
+    raw = JSON.parse(view.stdout || '{}')
+  } catch (e) {
+    return `pr_resume: unparseable gh output (${e instanceof Error ? e.message : String(e)})`
+  }
+  const meta = normalisePrJson(raw, String(args.url))
+  const diff = await runShell(
+    `gh pr diff ${loc.number} --repo ${loc.owner}/${loc.repo}`,
+    args.cwd,
+    60000,
+  )
+  return renderPrResume({
+    ...meta,
+    diff: diff.exitCode === 0 ? diff.stdout || '' : '',
+  })
+}
+
+async function executeGhPrCreate(args: Record<string, any>): Promise<string> {
+  const { buildGhPrCreateCommand } = await import('../agents/git-tools')
+  const cmd = buildGhPrCreateCommand({
+    title: args.title,
+    body: args.body ?? '',
+    base: args.base,
+  })
+  if (!cmd) return 'gh_pr_create: a non-empty `title` is required.'
+  const data = await runShell(cmd, args.cwd, 60000)
+  const output = `${data.stdout || ''}\n${data.stderr || ''}`.trim()
+  if (data.exitCode && data.exitCode !== 0) {
+    return `gh_pr_create failed (exit ${data.exitCode}):\n${output}`
+  }
+  // `gh pr create` prints the URL on stdout.
+  const urlMatch = output.match(/https:\/\/github\.com\/\S+\/pull\/\d+/)
+  return urlMatch ? `Opened PR: ${urlMatch[0]}\n${output}` : output
+}
+
+async function executeRunTests(args: Record<string, any>): Promise<string> {
+  const { commandForRunner, detectRunnerFromFiles, parseForRunner, renderResult } =
+    await import('../agents/test-runner')
+
+  let runner = args.runner as Runner | undefined
+  let command = typeof args.command === 'string' ? args.command : ''
+
+  if (!command) {
+    if (!runner) {
+      // List the workspace root to find a config marker.
+      try {
+        const listing = await backendCall('fs_list', {
+          path: '.',
+          recursive: false,
+          ...chatCtx(),
+        })
+        const names: string[] = Array.isArray(listing.items)
+          ? listing.items.map((it: any) => String(it.name ?? '')).filter(Boolean)
+          : []
+        runner = detectRunnerFromFiles(names)
+      } catch {
+        runner = 'unknown'
+      }
+    }
+    command = commandForRunner(runner as Runner)
+  }
+  if (!command) {
+    return 'run_tests: could not detect a test runner. Pass `command` or `runner` explicitly.'
+  }
+
+  const shellArgs = {
+    command,
+    args: null,
+    cwd: args.cwd || null,
+    timeout: args.timeout || 300000,
+    shell: null,
+    ...chatCtx(),
+  }
+  const data = await backendCall('shell_execute', shellArgs)
+  if (data.timedOut) {
+    return `Test run timed out after ${shellArgs.timeout / 1000}s. Partial output:\n${(data.stdout || '').slice(-2000)}`
+  }
+  const combined = `${data.stdout || ''}\n${data.stderr || ''}`.trim()
+  const parsed = parseForRunner(runner ?? 'unknown', combined)
+  return renderResult(parsed)
+}
+type Runner = 'vitest' | 'cargo' | 'pytest' | 'jest' | 'unknown'
+
 async function executeSystemInfo(): Promise<string> {
   const data = await backendCall('system_info', {})
   return Object.entries(data).map(([k, v]) => `${k}: ${v}`).join('\n')
@@ -568,6 +1043,19 @@ const EXECUTOR_MAP: Record<string, (args: Record<string, any>) => Promise<string
   file_search: executeFileSearch,
   shell_execute: executeShellExecute,
   code_execute: executeCodeExecute,
+  run_tests: executeRunTests,
+  shell_execute_background: executeShellExecuteBg,
+  shell_task_status: executeShellTaskStatus,
+  shell_task_kill: executeShellTaskKill,
+  shell_task_list: executeShellTaskList,
+  git_status: executeGitStatus,
+  git_commit: executeGitCommit,
+  git_push: executeGitPush,
+  git_log: executeGitLog,
+  git_diff: executeGitDiff,
+  gh_pr_create: executeGhPrCreate,
+  pr_resume: executePrResume,
+  project_init: executeProjectInit,
   system_info: executeSystemInfo,
   process_list: executeProcessList,
   screenshot: executeScreenshot,

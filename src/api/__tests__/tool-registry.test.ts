@@ -9,9 +9,12 @@ import {
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
 describe('AGENT_TOOL_DEFS', () => {
-  it('contains exactly 15 tool definitions', () => {
-    // Phase 13 v2.4.0: delegate_task added as a builtin.
-    expect(AGENT_TOOL_DEFS).toHaveLength(15)
+  it('contains exactly 28 tool definitions', () => {
+    // Phase 13 v2.4.0: delegate_task added as a builtin (→ 15 tools).
+    // v2.5.0 sprint A/B/C from uselu: +13 codex tools — shell_task_*,
+    // shell_execute_background, git_*, gh_pr_create, pr_resume,
+    // project_init, run_tests (→ 28 tools).
+    expect(AGENT_TOOL_DEFS).toHaveLength(28)
   })
 
   const expectedTools = [
@@ -23,6 +26,19 @@ describe('AGENT_TOOL_DEFS', () => {
     'file_search',
     'code_execute',
     'shell_execute',
+    'shell_execute_background',
+    'shell_task_status',
+    'shell_task_kill',
+    'shell_task_list',
+    'git_status',
+    'git_commit',
+    'git_push',
+    'git_log',
+    'git_diff',
+    'gh_pr_create',
+    'pr_resume',
+    'project_init',
+    'run_tests',
     'image_generate',
     'run_workflow',
     'screenshot',
@@ -54,13 +70,19 @@ describe('AGENT_TOOL_DEFS', () => {
     expect(autoNames).toEqual(['get_current_time', 'process_list', 'system_info', 'web_fetch', 'web_search'])
   })
 
-  it('confirm-permission tools include file ops, code, shell, image, workflow, screenshot, delegate_task', () => {
+  it('confirm-permission tools include file ops, code, shell, image, workflow, screenshot, delegate_task, sprint A/B/C tools', () => {
     const confirmTools = AGENT_TOOL_DEFS.filter((t) => t.permission === 'confirm')
     const confirmNames = confirmTools.map((t) => t.name).sort()
     // Phase 13 v2.4.0: delegate_task added under workflow category (confirm default).
+    // v2.5.0 sprint A/B/C from uselu: codex tools default to confirm (writes,
+    // shell, git, gh, project_init, run_tests — all touch the user's machine).
     expect(confirmNames).toEqual([
       'code_execute', 'delegate_task', 'file_list', 'file_read', 'file_search',
-      'file_write', 'image_generate', 'run_workflow', 'screenshot', 'shell_execute',
+      'file_write', 'gh_pr_create', 'git_commit', 'git_diff', 'git_log',
+      'git_push', 'git_status', 'image_generate', 'pr_resume', 'project_init',
+      'run_tests', 'run_workflow', 'screenshot', 'shell_execute',
+      'shell_execute_background', 'shell_task_kill', 'shell_task_list',
+      'shell_task_status',
     ])
   })
 })
