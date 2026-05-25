@@ -1,7 +1,9 @@
 import { useRef, useState, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import { chatNonStreaming } from '../api/agents'
-import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug } from '../api/agent-context'
+import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace } from '../api/agent-context'
+import { resolveWorkspace } from '../api/agents/workspace-resolve'
+import { useAgentModeStore } from '../stores/agentModeStore'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { useChatStore } from '../stores/chatStore'
 import { agentVariantExists, createAgentVariant, getAgentModelName, canFixModel } from '../api/model-template-fix'
@@ -273,6 +275,18 @@ export function useAgentChat() {
     const convForSlug = useChatStore.getState().conversations.find((c) => c.id === convId)
     const slug = chatWorkspaceSlug(convId, convForSlug?.title)
     setActiveChatId(slug)
+
+    // Multi-Repo Agent (B15) + workspace unification (B17): pin the
+    // resolved workspace so chatCtx() in builtin-tools.ts threads it
+    // through to the Tauri side, and the system-prompt section can
+    // list any extra repo paths. Precedence: per-chat pick →
+    // settings.defaultWorkspace → null (bridge keeps using the slug
+    // sandbox under ~/agent-workspace/<slug>/).
+    const resolvedWorkspace = resolveWorkspace({
+      perChat: useAgentModeStore.getState().workspaces[convId],
+      defaultWorkspace: settings.defaultWorkspace,
+    })
+    setActiveWorkspace(resolvedWorkspace)
 
     // Add user message
     const userMessage = {

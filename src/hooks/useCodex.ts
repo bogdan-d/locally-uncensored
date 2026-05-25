@@ -10,7 +10,11 @@ import { usePermissionStore } from '../stores/permissionStore'
 import { getToolCallingStrategy } from '../lib/model-compatibility'
 import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { chatNonStreaming } from '../api/agents'
-import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug } from '../api/agent-context'
+import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace } from '../api/agent-context'
+import { resolveWorkspace } from '../api/agents/workspace-resolve'
+import { useAgentModeStore } from '../stores/agentModeStore'
+import { loadLurules, renderRulesSection, type RulesReader } from '../lib/lurules'
+import { backendCall } from '../api/backend'
 import type { CodexEvent } from '../types/codex'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
 import { selectRelevantTools } from '../lib/tool-selection'
@@ -69,6 +73,45 @@ const streamWithTools = streamOllamaChatWithTools
 // Coding-relevant tool categories
 const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web'] as const
 
+// Tools blocked in Code-Review Mode (B13). The agent goes read-only —
+// it inspects the codebase and writes inline comments, but never
+// mutates the filesystem, the shell, or remote state. Anything that
+// could change a file, run a command, or push to git/GitHub goes here.
+// Read-only inspectors (git_status / git_log / git_diff, pr_resume,
+// shell_task_status / shell_task_list, file_read / file_list / file_search)
+// stay allowed so the agent can do its job.
+const REVIEW_MODE_FORBIDDEN_TOOLS = new Set([
+  'file_write',
+  'shell_execute',
+  'code_execute',
+  'shell_execute_background',
+  'shell_task_kill',
+  'git_commit',
+  'git_push',
+  'project_init',
+  'gh_pr_create',
+  'run_tests',
+  'image_generate',
+  'run_workflow',
+])
+
+// `.lurules` reader — backendCall wraps the desktop Tauri `file_read`
+// command. Resolves absolute paths as-is (Bug "doubled path" fix in
+// v2.3 made the drive-letter detection robust), so the absolute lurules
+// path we compute below lands at the user's real `.lurules` file. The
+// reader swallows errors to a null return so loadLurules() can treat
+// "missing file" and "fs error" identically.
+const lurulesReader: RulesReader = {
+  async read(path: string): Promise<string | null> {
+    try {
+      const r = await backendCall<{ content?: string }>('file_read', { path })
+      return r?.content ?? null
+    } catch {
+      return null
+    }
+  },
+}
+
 // Detect when the model emits a re-introduction of itself ("Hello, I am
 // Codex, an autonomous coding agent…") instead of the actual answer.
 // Gemma 4 + smaller models do this after a tool error — they re-spawn
@@ -112,13 +155,37 @@ export function useCodex() {
     const convForSlug = store.conversations.find((c) => c.id === convId)
     setActiveChatId(chatWorkspaceSlug(convId, convForSlug?.title))
 
+    // Multi-Repo Agent (B15) + Codex/Agent workspace unification (B17):
+    // pin the resolved workspace so the bridge resolves relative paths
+    // against it and the system-prompt section advertises any extras.
+    // Precedence: per-chat pick → settings.defaultWorkspace → null
+    // (bridge falls back to per-chat sandbox).
+    const codexWorkspace = resolveWorkspace({
+      perChat: useAgentModeStore.getState().workspaces[convId],
+      defaultWorkspace: settings.defaultWorkspace,
+    })
+    setActiveWorkspace(codexWorkspace)
+
     // Init codex thread if needed
     if (!codexStore.getThread(convId)) {
       codexStore.initThread(convId, codexStore.workingDirectory || '.')
     }
 
     const thread = codexStore.getThread(convId)!
-    const workDir = thread.workingDirectory || codexStore.workingDirectory || '.'
+    // Resolve working directory with this precedence:
+    //   1. Explicit codex thread.workingDirectory (file-tree picker)
+    //   2. Resolved agent workspace path (when folder-kind)
+    //   3. Global codexStore.workingDirectory
+    //   4. '.' (bridge's per-chat sandbox)
+    const workspacePath =
+      codexWorkspace && codexWorkspace.kind === 'folder' && codexWorkspace.path
+        ? codexWorkspace.path
+        : null
+    const workDir =
+      (thread.workingDirectory && thread.workingDirectory !== '.' ? thread.workingDirectory : null) ||
+      workspacePath ||
+      codexStore.workingDirectory ||
+      '.'
 
     // Add instruction event
     codexStore.addEvent(convId, {
@@ -177,9 +244,38 @@ export function useCodex() {
       // Memory injection is best-effort
     }
 
+    // `.lurules` per-repo configuration (B16). Read project conventions
+    // from the workspace root and append them to the system prompt as a
+    // fenced section so the model treats them as project rules. Skipped
+    // for sandbox mode (no real workDir) — there's no checkout to look
+    // at. Failures (no file, permission error) are swallowed silently
+    // by the reader so the codex loop still starts.
+    if (workDir && workDir !== '.') {
+      try {
+        const rules = await loadLurules(workDir, lurulesReader)
+        if (rules) {
+          systemPrompt += renderRulesSection(rules)
+        }
+      } catch {
+        // Belt-and-braces: reader already swallows errors, but if the
+        // join logic ever throws we don't want it to wedge the loop.
+      }
+    }
+
     // For non-Ollama providers, inject thinking via system prompt
     if (settings.thinkingEnabled && providerId !== 'ollama') {
       systemPrompt += '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
+    }
+
+    // Code-Review Mode banner (B13). Tells the model up front that it
+    // is in review-only mode so it doesn't try to call write tools that
+    // the filter below would just strip — saving an iteration where the
+    // model would otherwise discover the missing tool by tool-error.
+    if (settings.codexReviewMode) {
+      systemPrompt += `\n\nCODE-REVIEW MODE (active):
+- You have READ-ONLY access. Do NOT call file_write, shell_execute, code_execute, git_commit, git_push, project_init, gh_pr_create, run_tests, image_generate, or run_workflow.
+- Inspect the codebase using file_read, file_list, file_search, git_status, git_log, git_diff, pr_resume.
+- Deliver your review as inline comments and a final summary. Reference files and line numbers explicitly. Suggest changes in prose — do not apply them.`
     }
 
     // Caveman mode: append as response style modifier after Codex instructions
@@ -324,9 +420,16 @@ export function useCodex() {
           // the tool list for small/3B models. Filter the registry by category
           // BEFORE keyword routing so the model only ever sees filesystem,
           // terminal, system, and web tools.
-          const codexTools = toolRegistry.getAll().filter(
+          const codexToolsAll = toolRegistry.getAll().filter(
             (t) => (CODEX_CATEGORIES as readonly string[]).includes(t.category),
           )
+          // Code-Review Mode (B13): strip mutating tools so the model
+          // physically cannot fire them. Belt-and-braces with the
+          // system-prompt banner above — covers the case where the model
+          // ignores the instruction and tries anyway.
+          const codexTools = settings.codexReviewMode
+            ? codexToolsAll.filter((t) => !REVIEW_MODE_FORBIDDEN_TOOLS.has(t.name))
+            : codexToolsAll
           const relevantDefs = selectRelevantTools(lastUserMsg, codexTools, permissions)
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
@@ -469,10 +572,14 @@ export function useCodex() {
         } else {
           // Hermes-XML fallback — also restrict tools to coding categories
           // so the model doesn't see image_generate / screenshot etc.
+          // Same review-mode filter as the native path (B13).
           const hermesTools = toolRegistry.toHermesToolDefs(permissions).filter(
             (t) => {
               const def = toolRegistry.getToolByName(t.name)
-              return def ? (CODEX_CATEGORIES as readonly string[]).includes(def.category) : true
+              if (!def) return true
+              if (!(CODEX_CATEGORIES as readonly string[]).includes(def.category)) return false
+              if (settings.codexReviewMode && REVIEW_MODE_FORBIDDEN_TOOLS.has(t.name)) return false
+              return true
             },
           )
           const hermesSystem = buildHermesToolPrompt(hermesTools) + `\n\n${systemPrompt}`

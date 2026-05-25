@@ -11,7 +11,7 @@ import { RealtimeCounter } from './RealtimeCounter'
 import { PluginsDropdown } from './PluginsDropdown'
 import { TypingIndicator } from './TypingIndicator'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { User, Code, Brain } from 'lucide-react'
+import { User, Code, Brain, Eye } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
 function stripChannelTags(text: string): string {
@@ -39,6 +39,7 @@ export function CodexView() {
   }, [messages, thread?.events])
 
   const thinkingEnabled = useSettingsStore((s) => s.settings.thinkingEnabled)
+  const codexReviewMode = useSettingsStore((s) => s.settings.codexReviewMode)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
 
   return (
@@ -49,6 +50,19 @@ export function CodexView() {
         <div className="flex items-center gap-1.5 px-2 py-0.5 border-b border-gray-200 dark:border-white/[0.04]">
           <Code size={9} className="text-gray-500" />
           <span className="text-[0.55rem] text-gray-600 dark:text-gray-400 font-medium">Codex</span>
+          {/* Code-Review Mode badge (B13) — makes it impossible to miss
+              that the agent is read-only. The toggle itself lives in
+              Settings → Codex Agent; clicking the badge jumps you there
+              isn't worth a routing change in v2.5.0. */}
+          {codexReviewMode && (
+            <span
+              className="flex items-center gap-1 px-1.5 py-0 rounded border border-amber-500/30 text-amber-500 text-[0.55rem] bg-amber-500/[0.04]"
+              title="Code-Review Mode is active. Codex will inspect the codebase but won't write files or run commands. Disable in Settings → Codex Agent."
+            >
+              <Eye size={9} />
+              <span>Review</span>
+            </span>
+          )}
           <div className="flex-1" />
           <TokenCounter />
           <MemoryDebugToggle />
