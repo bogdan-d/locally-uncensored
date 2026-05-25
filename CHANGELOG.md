@@ -4,6 +4,61 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-05-25
+
+Minor release. 24+ changes backported from the companion repo (`uselu`) into the desktop app. Three reporter-facing bug fixes (B1 — cinemazverev / B2 — vanja-san / B3 — THobbs23) plus the codex / agent sprint (Sprint A / B / C from uselu) ride along. Production hardening (B4 / B5) and the iteration-cap bump (uselu live-test 2026-05-25) lift the autonomy ceiling so a real scaffold→install→fix→verify loop fits inside one turn. Bundles all v2.4.9 contents.
+
+### Fixed — Ollama auto-detection persists across launches (B1)
+
+- **Ollama re-enabled state now pins through restart** (cinemazverev). `AppShell.tsx` boot path previously re-ran auto-detect on every launch and reset a user's manually-enabled Ollama back to disabled when the daemon was momentarily unreachable. v2.5.0 records the user's deliberate re-enable in localStorage and treats it as authoritative — auto-detect can only add backends, never remove ones the user explicitly turned on.
+
+### Fixed — Multi-backend modal persists Ollama choice (B2)
+
+- **`BackendSelector.tsx` modal Ollama choice survives modal re-open** (vanja-san). Pre-v2.5.0 picking Ollama in the multi-backend modal, closing it, and re-opening reset the dropdown to "Auto". v2.5.0 reads the previous selection from settings on mount and re-applies it so the user's chosen backend stays sticky across modal opens.
+
+### Fixed — LM Studio per-model load/unload backend (B3)
+
+- **Three new Tauri commands for LM Studio per-model control** (THobbs23): `lmstudio_list_loaded`, `lmstudio_load_model`, `lmstudio_unload_model`. UI integration lands in the next hotfix — the backend half ships now so the LM Studio panel work can build against a stable surface.
+
+### New — Codex / Agent capabilities (Sprint A / B / C from uselu)
+
+- **Architect / Editor split** (Sprint A #1). A separate "architect" model produces a structured plan with no tool access; the regular Codex model then applies the plan with tool access. Aider-style — empirically ~30 % better edit accuracy on multi-file refactors. Settings: `codexArchitectMode`, `codexArchitectModel`, `codexArchitectAllowCloud` (local-first by default; explicit opt-in to leave the machine).
+- **Repo-Map injection (Aider PageRank)** (Sprint A #2). The bridge ranks repo files by import-graph PageRank and injects the top-N entries into the editor system prompt. Default top-N is 20, clamped to bridge's [1, 200] range. Settings: `codexRepoMapEnabled`, `codexRepoMapLimit`.
+- **Multi-File Stage-and-Approve** (Sprint A #3). When `codexStageMode` is on, every `file_write` queues as a pending change the user reviews and applies (or rejects) per-file instead of touching disk directly.
+- **Test-Driven Loop (`run_tests` tool)** (Sprint B). New typed tool lets the agent invoke the project's test runner, watch failures, and iterate on a fix.
+- **Typed git + gh tools** (Sprint B). Six new typed tools — `git_status`, `git_commit`, `git_push`, `git_log`, `git_diff`, `gh_pr_create` — replace the previous shell-wrapped patterns.
+- **Code-Review mode** (Sprint B). Toggle (`codexReviewMode`) puts the agent into read-only: every `file_write` and `shell_execute`-style call is blocked with a friendly message and the system prompt is switched to "inline comments only". For PR pre-checks where you don't want the agent touching anything.
+- **Long-running background shell tasks** (Sprint B). Four new tools — `shell_execute_background`, `shell_task_status`, `shell_task_kill`, `shell_task_list` — let the agent kick off long jobs (dev servers, multi-minute builds) without blocking its turn.
+- **Multi-Repo Agent** (Sprint C #8). Per-chat workspaces, with the Agent surface able to hold multiple workspaces in parallel and switch between them.
+- **`.lurules` per-repo configuration**. Per-repo rules file lets a project pin its own agent conventions without leaking into other repos.
+- **`pr_resume`**. Resume an in-flight pull-request workflow from where it stopped — agent rehydrates the PR context instead of starting over.
+- **`project_init`** (System-Wide Setup). Scaffolds a new project — directory layout, README stub, language-appropriate gitignore, optional CI starter.
+- **Parallel sub-agents**. Sub-agent spawn now runs branches concurrently instead of sequentially.
+- **Diff rendering for `file_write`**. The agent surface shows a real diff for every `file_write` proposal rather than the previous "wrote N bytes" line.
+- **Per-chat workspace picker for Agent**. Workspace unification: Agent and Codex now share the same workspace concept and the same picker dialog.
+
+### Hardening — Production logging + console-log strip (B4 / B5)
+
+- **Structured logger with key-substring redaction** (B4, `src/lib/logger.ts`). Replaces ad-hoc `console.log` calls in production paths. Any object key containing `token` / `key` / `secret` / `password` / `auth` is redacted before emit so log lines pasted into bug reports never accidentally leak credentials.
+- **`console.log` stripped from production builds** (B5). `vite.config.ts` adds `esbuild.pure: ['console.log', 'console.debug']` so DCE drops the calls in `vite build` output. Errors and warnings remain — only the noisy debug-level calls go.
+
+### Hardening — Iteration cap bump (uselu live-test 2026-05-25)
+
+- **`agentMaxIterations` 25 → 200; `agentMaxToolCalls` 50 → 400.** Real scaffold→install→fix→verify loops on a 35B local model hit the previous 25/50 caps mid-useful-work. The new caps are roomy enough for multi-file refactors yet still bounded enough that a runaway loop surfaces in finite wall-clock. Existing v2.4.9 settings auto-migrate (the persisted store keeps your customised values; only fresh installs see the new defaults).
+
+### Stability
+
+- `vitest`: **2488 tests** green (previously 2312; +176 across the new bg_tasks, repo_map, architect-split, stage-mode, code-review-mode, logger, .lurules, pr_resume, project_init paths).
+- `cargo test --release`: **117 passed** (previously 100; +17 across `bg_tasks` and `repo_map` modules).
+- `tsc --noEmit`: clean. `cargo check`: clean (pre-existing dead-code warnings only).
+- No breaking changes; the new settings fields auto-default and the iteration cap bump is purely upward.
+
+### Heads-up
+
+Windows + Linux only — macOS is not part of this build. `#bug-reports` / `#help-*` / GitHub monitored daily for regression reports.
+
+juliandiggins-stack's queued feature requests are deferred to v2.5.1 since the codex sprint took priority for this release.
+
 ## [2.4.9] - 2026-05-25
 
 Sweep release on top of v2.4.8. Five bug fixes (U — GH #47 levoy1; V — Discord kj103x 2026-05-23 #help-chat, split into V/a RAG-persistence and V/b Ollama-orphan; W — Discord nightmare13740 2026-05-23/24 benchmark followup; X — Discord leonsk29 2026-05-24 #general thinking/agent toggles) plus two leonsk29 feature requests (GH #45 + GH #46).
