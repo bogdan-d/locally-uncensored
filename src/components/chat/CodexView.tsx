@@ -11,6 +11,7 @@ import { RealtimeCounter } from './RealtimeCounter'
 import { PluginsDropdown } from './PluginsDropdown'
 import { TypingIndicator } from './TypingIndicator'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { StagedChangesPanel } from './StagedChangesPanel'
 import { User, Code, Brain, Eye } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 
@@ -69,6 +70,11 @@ export function CodexView() {
           <PluginsDropdown />
         </div>
 
+        {/* Stage-and-Approve queue (B10). Renders nothing when there
+            are no pending changes for the active chat, so non-stage-mode
+            users never see it. */}
+        <StagedChangesPanel chatId={activeConversationId} />
+
         {/* Messages */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin">
           {messages.length === 0 ? (
@@ -107,6 +113,25 @@ export function CodexView() {
                       {/* Thinking */}
                       {msg.role === 'assistant' && msg.thinking && (
                         <ThinkingBlock thinking={msg.thinking} />
+                      )}
+                      {/* Reflection blocks (Architect plan, RepoMap
+                          context, etc.) — rendered above the tool calls
+                          in chronological order so the user can see what
+                          context primed the editor model before it
+                          started fetching tools. */}
+                      {msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0 && (
+                        <div className="space-y-1">
+                          {msg.agentBlocks
+                            .filter((b) => b.phase === 'reflection' && b.content)
+                            .map((block) => (
+                              <div
+                                key={block.id}
+                                className="px-2 py-1.5 rounded border border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] text-[0.7rem] text-gray-700 dark:text-gray-300"
+                              >
+                                <MarkdownRenderer content={block.content} />
+                              </div>
+                            ))}
+                        </div>
                       )}
                       {/* Tool call blocks */}
                       {msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0 && (

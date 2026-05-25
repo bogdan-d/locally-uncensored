@@ -15,6 +15,11 @@ import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { loadLurules, renderRulesSection, type RulesReader } from '../lib/lurules'
 import { backendCall } from '../api/backend'
+import { planWithArchitect, renderArchitectPlanSection } from '../api/agents/architect'
+import { fetchRepoMap, renderRepoMapSection } from '../api/agents/repo-map'
+import { isLocalModelByName } from '../api/agents/model-locality'
+import { useStagedChangesStore } from '../stores/stagedChangesStore'
+import { computeUnifiedDiff } from '../lib/diff'
 import type { CodexEvent } from '../types/codex'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
 import { selectRelevantTools } from '../lib/tool-selection'
@@ -328,6 +333,79 @@ export function useCodex() {
     runningRef.current = true
     setIsRunning(true)
     codexStore.setThreadStatus(convId, 'running')
+
+    // Architect / RepoMap pre-pass (B8 + B9). Both inject into the
+    // system prompt BEFORE the first iteration and surface a visible
+    // reflection block so the user can see what context the editor
+    // model received. Wrapped in try/catch — a failed plan or repo
+    // walk must not block the loop from starting.
+    if (settings.codexArchitectMode) {
+      const archModel = settings.codexArchitectModel?.trim() || activeModel
+      const cloudOk = isLocalModelByName(archModel) || settings.codexArchitectAllowCloud
+      if (!cloudOk) {
+        // Cloud model picked without explicit opt-in → fall back to
+        // editor-only. Surface a one-line reflection so the user knows
+        // why the plan didn't appear.
+        blocks.push({
+          id: uuid(),
+          phase: 'reflection',
+          content:
+            `🏗️ Architect skipped — \`${archModel}\` is a cloud model and "Allow cloud architect" is off. Enable it in Settings → Codex Agent, or pick a local model.`,
+          timestamp: Date.now(),
+        })
+        useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
+      } else {
+        try {
+          const planResult = await planWithArchitect({
+            model: archModel,
+            userInstruction: instruction,
+            workingDirectory: workDir,
+            // Last 4 turns give the planner enough context for follow-ups
+            // without bloating the planning prompt.
+            recentMessages: messages.slice(1).slice(-4),
+            signal: abort.signal,
+          })
+          if (planResult.plan) {
+            systemPrompt += renderArchitectPlanSection(planResult.plan)
+            messages[0] = { role: 'system', content: systemPrompt }
+            blocks.push({
+              id: uuid(),
+              phase: 'reflection',
+              content: `🏗️ **Architect plan** (\`${planResult.modelUsed}\`, ${planResult.tookMs}ms)\n\n${planResult.plan}`,
+              timestamp: Date.now(),
+            })
+            useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
+          }
+        } catch (e) {
+          // Architect is advisory — never blocks the editor loop.
+          console.warn('[codex] architect pass failed:', (e as Error)?.message)
+        }
+      }
+    }
+
+    if (settings.codexRepoMapEnabled && workDir && workDir !== '.') {
+      try {
+        const repoMap = await fetchRepoMap({
+          workingDirectory: workDir,
+          query: instruction,
+          limit: settings.codexRepoMapLimit ?? 20,
+          signal: abort.signal,
+        })
+        if (repoMap.files.length > 0) {
+          systemPrompt += renderRepoMapSection(repoMap)
+          messages[0] = { role: 'system', content: systemPrompt }
+          blocks.push({
+            id: uuid(),
+            phase: 'reflection',
+            content: `🗺️ Repo map: top ${repoMap.files.length} files (of ${repoMap.count}) — ${repoMap.files.slice(0, 5).map((f) => f.path).join(', ')}${repoMap.files.length > 5 ? '…' : ''}`,
+            timestamp: Date.now(),
+          })
+          useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
+        }
+      } catch (e) {
+        console.warn('[codex] repo-map pre-fetch failed:', (e as Error)?.message)
+      }
+    }
 
     let fullContent = ''
 
@@ -742,12 +820,47 @@ export function useCodex() {
             ),
           ])
 
+        // Multi-File Stage-and-Approve (B10). When the user has codex
+        // stage mode on, file_write calls don't hit the disk — they
+        // queue in stagedChangesStore as "pending changes" the user
+        // reviews and applies (or rejects) per-file. The model still
+        // sees a synthetic success message so the loop progresses; the
+        // user is the gatekeeper for the actual disk write.
+        const stageFileWrite = async (args: Record<string, any>): Promise<string> => {
+          const path = String(args.path ?? '')
+          if (!path) return 'file_write: missing path'
+          const newContent = String(args.content ?? '')
+          let oldContent = ''
+          try {
+            const r = await backendCall<{ content?: string }>('file_read', { path })
+            oldContent = r?.content ?? ''
+          } catch {
+            // New file — leave oldContent empty so the diff renders an
+            // all-add hunk and the apply path creates the file.
+          }
+          const diff = computeUnifiedDiff(path, oldContent, newContent)
+          useStagedChangesStore.getState().stage(convId!, {
+            path,
+            oldContent,
+            newContent,
+            diff,
+          })
+          return `Staged for review: ${path}. The user will apply or reject the change before it lands on disk.`
+        }
+
+        const dispatchTool = (name: string, args: Record<string, any>): Promise<string> => {
+          if (name === 'file_write' && settings.codexStageMode) {
+            return stageFileWrite(args)
+          }
+          return withTimeout(name, args)
+        }
+
         const results = await executeParallel(requests, {
           getTool: (name) => {
             const td = toolRegistry.getToolByName(name)
             return td ? { name: td.name, inputSchema: td.inputSchema } : undefined
           },
-          execute: (name: string, args: Record<string, any>) => withTimeout(name, args),
+          execute: (name: string, args: Record<string, any>) => dispatchTool(name, args),
           lookupCache: convId ? makeInTurnCacheLookup({ convId, turnStartMs }) : undefined,
           explainError: (toolName, err) => explainToolError(toolName, err),
           // Codex is auto-approve (coding agent runs unattended). The
