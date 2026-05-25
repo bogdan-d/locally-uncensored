@@ -44,7 +44,14 @@ export function BackendSelector({ open, backends, onClose }: Props) {
     if (!preset) { dismiss(); return }
 
     if (preset.providerId === 'ollama') {
-      // Ollama uses its own provider, already enabled by default
+      // Ollama uses its own provider slot. Default is enabled=true, but pin
+      // the detected baseUrl + (re-)enable so a previously disabled config
+      // reappears in Settings and its models show up in the chat selector.
+      setProviderConfig('ollama', {
+        enabled: true,
+        baseUrl: backend.baseUrl,
+        isLocal: true,
+      })
     } else {
       setProviderConfig('openai', {
         enabled: true,

@@ -498,6 +498,19 @@ export function AppShell() {
         })
       }
 
+      // Also auto-(re)enable Ollama when it's detected. The provider defaults
+      // to enabled=true, but a previous session may have disabled it; here we
+      // pin the detected baseUrl and bring it back so models show up in the
+      // Settings → AI Backends list and the chat selector.
+      const detectedOllama = backends.find((b) => b.id === 'ollama')
+      if (detectedOllama) {
+        useProviderStore.getState().setProviderConfig('ollama', {
+          enabled: true,
+          baseUrl: detectedOllama.baseUrl,
+          isLocal: true,
+        })
+      }
+
       // Single backend → we're done (already enabled above, or was Ollama).
       if (backends.length === 1) return
 
