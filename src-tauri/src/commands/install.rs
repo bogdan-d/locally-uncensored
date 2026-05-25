@@ -1716,6 +1716,85 @@ pub fn lmstudio_server_status() -> Result<serde_json::Value, String> {
     }))
 }
 
+// ── Per-model load / unload ────────────────────────────────────
+//
+// LM Studio's HTTP API has no load/unload endpoints; we drive the `lms`
+// CLI for state changes and read the list of loaded models from the v0
+// REST API (`/api/v0/models` returns each entry with `state: "loaded" |
+// "not-loaded"`). This mirrors the Ollama per-row toggle in the model
+// selector — without it LM-Studio rows have no on/off affordance even
+// though the underlying engine does the same load-into-VRAM dance.
+//
+// Backport from uselu E2E pass (2026-05-19). Body is 1:1; signature
+// adapted from uselu's bridge-daemon convention to Tauri command, and
+// the lms-CLI lookup uses desktop's richer `lmstudio_lms_path()` helper
+// instead of uselu's lighter `os_paths::find_lms_cli()`.
+
+#[tauri::command]
+pub fn lmstudio_list_loaded() -> Result<serde_json::Value, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(1500))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let url = format!("http://localhost:{}/api/v0/models", LMSTUDIO_DEFAULT_PORT);
+    let resp = match client.get(&url).send() {
+        Ok(r) => r,
+        Err(_) => return Ok(serde_json::json!({ "loaded": Vec::<String>::new() })),
+    };
+    if !resp.status().is_success() {
+        return Ok(serde_json::json!({ "loaded": Vec::<String>::new() }));
+    }
+    let body: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+    let loaded: Vec<String> = body
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|m| m.get("state").and_then(|s| s.as_str()) == Some("loaded"))
+                .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(serde_json::json!({ "loaded": loaded }))
+}
+
+#[tauri::command]
+pub fn lmstudio_load_model(model: String) -> Result<serde_json::Value, String> {
+    let lms = lmstudio_lms_path()
+        .ok_or_else(|| "lms CLI not found — install LM Studio first".to_string())?;
+    // `lms load` blocks until the model is in memory. The caller is expected
+    // to render a spinner while the request is in flight (same pattern as
+    // the Ollama per-row toggle).
+    let output = Command::new(&lms)
+        .args(["load", &model])
+        .output()
+        .map_err(|e| format!("spawn lms load: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "lms load failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(serde_json::json!({ "ok": true, "model": model }))
+}
+
+#[tauri::command]
+pub fn lmstudio_unload_model(model: String) -> Result<serde_json::Value, String> {
+    let lms = lmstudio_lms_path()
+        .ok_or_else(|| "lms CLI not found".to_string())?;
+    let output = Command::new(&lms)
+        .args(["unload", &model])
+        .output()
+        .map_err(|e| format!("spawn lms unload: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "lms unload failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(serde_json::json!({ "ok": true, "model": model }))
+}
+
 // ── Python Auto-Install (P14: Plug-and-Play, blocking pre-req for ComfyUI) ──
 //
 // On a fresh Windows box `python.exe` is the Microsoft Store stub at
