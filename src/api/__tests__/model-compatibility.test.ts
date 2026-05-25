@@ -74,6 +74,21 @@ describe('isAgentCompatible', () => {
       expect(isAgentCompatible('LEONW24/Qwen3.5-9B-Uncensored:Q4_K_M')).toBe(true)
     })
 
+    it('Gemma 4 community-uncensored builds keep agent capability (Bug X, leonsk29 2026-05-24)', () => {
+      // The Discord 2026-05-24 report: Agent + Thinking toggles grayed out
+      // for every Gemma 4 community variant the Discover tab pulls (TrevorJS,
+      // nohurry, Stabhappy, LiconStudio, huihui). Their tag shapes use the
+      // dashed-family form `gemma-4-…-it-…-GGUF:Q4_K_M`, which the previous
+      // normalizer left as `gemma-4-…` (no match against `gemma4`).
+      expect(isAgentCompatible('hf.co/TrevorJS/gemma-4-31B-it-uncensored-GGUF:Q4_K_M')).toBe(true)
+      expect(isAgentCompatible('hf.co/nohurry/gemma-4-26B-A4B-it-heretic-GUFF:q4_k_m')).toBe(true)
+      expect(isAgentCompatible('hf.co/Stabhappy/gemma-4-31B-it-heretic-Gguf:Q4_K_M')).toBe(true)
+      expect(isAgentCompatible('hf.co/LiconStudio/Gemma-4-31B-it-abliterated-GGUF:Q4_K_M')).toBe(true)
+      expect(isAgentCompatible('huihui_ai/Qwen3.6-abliterated:35b')).toBe(true)
+      // Two-slash hf.co prefix specifically — previously stopped at first slash
+      expect(isAgentCompatible('hf.co/mradermacher/Huihui-Qwen3.5-35B-A3B-abliterated-i1-GGUF:Q4_K_M')).toBe(true)
+    })
+
     it('uncensored variants of unknown bases are still NOT compatible', () => {
       // dolphin3 is not in AGENT_COMPATIBLE — strip suffix and check, still no.
       expect(isAgentCompatible('dolphin3-uncensored:8b')).toBe(false)

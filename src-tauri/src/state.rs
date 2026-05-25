@@ -120,6 +120,14 @@ pub(crate) fn load_ollama_base() -> String {
 
 pub struct AppState {
     pub comfy_process: Mutex<Option<Child>>,
+    /// Child handle for an Ollama daemon LU spawned itself (kj103x bug, Discord
+    /// 2026-05-23 #help-chat). The Drop impl below kills the tree on shutdown
+    /// so `ollama.exe` doesn't linger eating ~200 MB after the tray quit.
+    /// IMPORTANT: only populated when `start_ollama` / `auto_start_ollama`
+    /// actually spawned — if a user-managed `ollama serve` was already
+    /// running on the box (detected via tasklist before spawn), we leave it
+    /// alone, so closing LU never kills someone else's Ollama.
+    pub ollama_process: Mutex<Option<Child>>,
     pub comfy_path: Mutex<Option<String>>,
     pub comfy_port: Mutex<u16>,
     /// Configurable ComfyUI host. Default "localhost". Setting this to a
@@ -199,6 +207,7 @@ impl AppState {
 
         Self {
             comfy_process: Mutex::new(None),
+            ollama_process: Mutex::new(None),
             comfy_path: Mutex::new(None),
             comfy_port: Mutex::new(initial_port),
             comfy_host: Mutex::new(initial_host),
@@ -230,39 +239,26 @@ impl AppState {
 // to the user. 0x08000000 = CREATE_NO_WINDOW.
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
-impl Drop for AppState {
-    fn drop(&mut self) {
-        // Kill ComfyUI process tree
-        if let Ok(mut proc) = self.comfy_process.lock() {
-            if let Some(ref mut child) = *proc {
-                {
-                    let pid = child.id();
-                    #[cfg(windows)]
-                    {
-                        use std::os::windows::process::CommandExt;
-                        let _ = std::process::Command::new("taskkill")
-                            .args(["/pid", &pid.to_string(), "/T", "/F"])
-                            .creation_flags(CREATE_NO_WINDOW)
-                            .output();
-                    }
-                    #[cfg(not(windows))]
-                    {
-                        let _ = child.kill();
-                        let _ = pid; // silence unused on non-Windows
-                    }
-                }
-                println!("[ComfyUI] Stopped");
-            }
-        }
-
-        // Kill Claude Code process
-        if let Ok(mut proc) = self.claude_code_process.lock() {
+impl AppState {
+    /// Kill every subprocess we spawned (ComfyUI, Ollama, Claude Code, Whisper).
+    ///
+    /// Live testing on 2026-05-25 showed that Tauri v2's `app.exit(0)` returns
+    /// from the run loop on Windows WITHOUT actually dropping the managed
+    /// `AppState` — the process exits before Drop fires, so children spawned
+    /// in `auto_start_*` survived every "graceful" quit path (tray → Quit,
+    /// auto-updater's `exit_app`, etc.). The `Drop` impl below is still
+    /// correct, but we can't rely on it firing. Call this method explicitly
+    /// from every quit path instead so kj103x's Ollama-orphan stays fixed even
+    /// when Tauri's destructor chain skips us.
+    pub fn shutdown_subprocesses(&self) {
+        if let Ok(mut proc) = self.ollama_process.lock() {
             if let Some(ref mut child) = *proc {
                 let pid = child.id();
                 #[cfg(windows)]
                 {
-                    use std::os::windows::process::CommandExt;
                     let _ = std::process::Command::new("taskkill")
                         .args(["/pid", &pid.to_string(), "/T", "/F"])
                         .creation_flags(CREATE_NO_WINDOW)
@@ -273,13 +269,62 @@ impl Drop for AppState {
                     let _ = child.kill();
                     let _ = pid;
                 }
-                println!("[ClaudeCode] Stopped");
+                println!("[Ollama] Stopped (explicit shutdown)");
             }
         }
 
-        // Stop Whisper server
+        if let Ok(mut proc) = self.comfy_process.lock() {
+            if let Some(ref mut child) = *proc {
+                let pid = child.id();
+                #[cfg(windows)]
+                {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/pid", &pid.to_string(), "/T", "/F"])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .output();
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = child.kill();
+                    let _ = pid;
+                }
+                println!("[ComfyUI] Stopped (explicit shutdown)");
+            }
+        }
+
+        if let Ok(mut proc) = self.claude_code_process.lock() {
+            if let Some(ref mut child) = *proc {
+                let pid = child.id();
+                #[cfg(windows)]
+                {
+                    let _ = std::process::Command::new("taskkill")
+                        .args(["/pid", &pid.to_string(), "/T", "/F"])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .output();
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = child.kill();
+                    let _ = pid;
+                }
+                println!("[ClaudeCode] Stopped (explicit shutdown)");
+            }
+        }
+
         if let Ok(mut whisper) = self.whisper.lock() {
             whisper.stop();
         }
+    }
+}
+
+impl Drop for AppState {
+    fn drop(&mut self) {
+        // Belt-and-suspenders. Tauri v2 doesn't reliably drop the managed
+        // state on `app.exit(0)` on Windows, so every quit path explicitly
+        // calls `shutdown_subprocesses` itself (see `commands::system::exit_app`
+        // and the tray "quit" handler in `main.rs`). This Drop covers the
+        // remaining "Tauri-managed shutdown DID happen to run our Drop" case
+        // — idempotent re-kill on already-dead PIDs is a harmless taskkill.
+        self.shutdown_subprocesses();
     }
 }

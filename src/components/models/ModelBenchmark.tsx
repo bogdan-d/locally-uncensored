@@ -1,4 +1,4 @@
-import { useBenchmarkStore, getAverageSpeed, getLeaderboard } from '../../stores/benchmarkStore'
+import { useBenchmarkStore, getLatestSpeed, getLeaderboard } from '../../stores/benchmarkStore'
 import { useBenchmark } from '../../hooks/useBenchmark'
 import { Zap, Play, Square, Trophy } from 'lucide-react'
 
@@ -13,16 +13,16 @@ export function BenchmarkButton({ modelName }: Props) {
   const currentStep = useBenchmarkStore((s) => s.currentStep)
   const totalSteps = useBenchmarkStore((s) => s.totalSteps)
   const results = useBenchmarkStore((s) => s.results)
-  const avgSpeed = getAverageSpeed(results, modelName)
+  const latestSpeed = getLatestSpeed(results, modelName)
 
   const isThisRunning = isRunning && currentModel === modelName
 
   return (
     <div className="flex items-center gap-1.5">
-      {avgSpeed !== null && (
-        <span className="text-[0.55rem] text-gray-400 font-mono flex items-center gap-0.5" title={`Average: ${avgSpeed} tokens/sec`}>
+      {latestSpeed !== null && (
+        <span className="text-[0.55rem] text-gray-400 font-mono flex items-center gap-0.5" title={`Latest run: ${latestSpeed} tokens/sec`}>
           <Zap size={9} />
-          {avgSpeed} t/s
+          {latestSpeed} t/s
         </span>
       )}
       {isThisRunning ? (

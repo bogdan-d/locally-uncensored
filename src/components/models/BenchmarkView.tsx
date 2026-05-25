@@ -1,7 +1,7 @@
 import { ArrowLeft, Trophy, Zap, Play, Square } from 'lucide-react'
 import { useUIStore } from '../../stores/uiStore'
 import { useModelStore } from '../../stores/modelStore'
-import { useBenchmarkStore, getAverageSpeed, getLeaderboard } from '../../stores/benchmarkStore'
+import { useBenchmarkStore, getLatestSpeed, getLeaderboard } from '../../stores/benchmarkStore'
 import { useBenchmark } from '../../hooks/useBenchmark'
 
 export function BenchmarkView() {
@@ -78,7 +78,7 @@ export function BenchmarkView() {
             {textModels.length} Text Models
           </h2>
           {textModels.map((model) => {
-            const avgSpeed = getAverageSpeed(results, model.name)
+            const latestSpeed = getLatestSpeed(results, model.name)
             const isThisRunning = isRunning && currentModel === model.name
 
             return (
@@ -88,10 +88,10 @@ export function BenchmarkView() {
               >
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-[0.7rem] text-gray-800 dark:text-gray-200 truncate">{model.name}</span>
-                  {avgSpeed !== null && (
-                    <span className="text-[0.55rem] text-gray-500 font-mono flex items-center gap-0.5 shrink-0">
+                  {latestSpeed !== null && (
+                    <span className="text-[0.55rem] text-gray-500 font-mono flex items-center gap-0.5 shrink-0" title="Most recent benchmark run">
                       <Zap size={9} className="text-amber-400" />
-                      {avgSpeed} t/s
+                      {latestSpeed} t/s
                     </span>
                   )}
                 </div>

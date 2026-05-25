@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { useBenchmarkStore, getAverageSpeed, getLeaderboard, computeGenerationTps } from '../benchmarkStore'
+import { useBenchmarkStore, getAverageSpeed, getLatestSpeed, getLeaderboard, computeGenerationTps } from '../benchmarkStore'
 import type { BenchmarkResult } from '../../lib/benchmark-prompts'
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -158,6 +158,68 @@ describe('benchmarkStore', () => {
     it('returns null for non-existent model key', () => {
       const results = { 'llama3': [makeResult('llama3', 40)] }
       expect(getAverageSpeed(results, 'nonexistent')).toBeNull()
+    })
+  })
+
+  // ── getLatestSpeed (Bug W — nightmare13740 2026-05-24) ─────
+
+  describe('getLatestSpeed', () => {
+    it('returns null for missing or empty results', () => {
+      expect(getLatestSpeed({}, 'unknown')).toBeNull()
+      expect(getLatestSpeed({ llama3: [] }, 'llama3')).toBeNull()
+    })
+
+    it('returns the only result when there is just one', () => {
+      const r = { llama3: [makeResult('llama3', 42.3, { timestamp: 1_000_000 })] }
+      expect(getLatestSpeed(r, 'llama3')).toBe(42.3)
+    })
+
+    it('averages prompts within ONE benchmark session (close-together timestamps)', () => {
+      // Within-session: BENCHMARK_PROMPTS produces multiple addResult calls,
+      // all within seconds of each other. They should be averaged together.
+      const t0 = 1_000_000
+      const r = {
+        llama3: [
+          makeResult('llama3', 20, { timestamp: t0 }),
+          makeResult('llama3', 30, { timestamp: t0 + 2_000 }),
+          makeResult('llama3', 40, { timestamp: t0 + 4_000 }),
+        ],
+      }
+      // (20 + 30 + 40) / 3 = 30
+      expect(getLatestSpeed(r, 'llama3')).toBe(30)
+    })
+
+    it('IGNORES previous session when a new one starts (>10 s gap)', () => {
+      // nightmare13740 scenario: ten Run Benchmark clicks. Old sessions
+      // should not pollute the displayed number for the most recent click.
+      const t0 = 1_000_000
+      const r = {
+        llama3: [
+          // Session A: avg 15.2
+          makeResult('llama3', 14.0, { timestamp: t0 }),
+          makeResult('llama3', 15.5, { timestamp: t0 + 1_000 }),
+          makeResult('llama3', 16.1, { timestamp: t0 + 2_000 }),
+          // 5-minute gap — new session
+          makeResult('llama3', 17.5, { timestamp: t0 + 300_000 }),
+          makeResult('llama3', 18.2, { timestamp: t0 + 301_000 }),
+          makeResult('llama3', 17.9, { timestamp: t0 + 302_000 }),
+        ],
+      }
+      // Latest session only: (17.5 + 18.2 + 17.9) / 3 = 17.866... → 17.9
+      expect(getLatestSpeed(r, 'llama3')).toBe(17.9)
+    })
+
+    it('still averages ALL runs when they are within session gap of each other', () => {
+      // Edge case: rapid-fire reruns within the 10 s gap stay one session.
+      const t0 = 1_000_000
+      const r = {
+        llama3: [
+          makeResult('llama3', 10, { timestamp: t0 }),
+          makeResult('llama3', 20, { timestamp: t0 + 3_000 }),
+          makeResult('llama3', 30, { timestamp: t0 + 6_000 }),
+        ],
+      }
+      expect(getLatestSpeed(r, 'llama3')).toBe(20)
     })
   })
 

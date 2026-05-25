@@ -106,10 +106,23 @@ pub async fn pick_folder(default_path: Option<String>) -> Result<Option<String>,
     Ok(result.map(|f| f.path().to_string_lossy().to_string()))
 }
 
-/// Exit the app (used by auto-updater to let NSIS installer run)
+/// Exit the app — used by the auto-updater to let the NSIS installer swap
+/// the binary, and by any future "full quit" UI affordance.
+///
+/// Live-tested on 2026-05-25: Tauri v2's `app.exit(0)` returns from the run
+/// loop without dropping the managed `AppState` on Windows, so subprocess
+/// children (Ollama, ComfyUI, Claude Code) survived every "graceful" quit
+/// path. We work around it by explicitly running the shutdown chain BEFORE
+/// asking Tauri to exit. This is what makes kj103x's Ollama-orphan fix
+/// (v2.4.9, Discord 2026-05-23) actually deliver on the tray-Quit + auto-
+/// updater paths in the released binary.
 #[tauri::command]
-pub fn exit_app() {
-    std::process::exit(0);
+pub fn exit_app(app: tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(state) = app.try_state::<crate::state::AppState>() {
+        state.shutdown_subprocesses();
+    }
+    app.exit(0);
 }
 
 /// Get the persistent settings dir (%APPDATA%/Locally Uncensored/) — outside NSIS install dir
@@ -135,6 +148,52 @@ pub fn backup_stores(data: String) -> Result<(), String> {
 #[tauri::command]
 pub fn restore_stores() -> Result<Option<String>, String> {
     let path = persistent_dir()?.join("store_backup.json");
+    if path.exists() {
+        let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        Ok(Some(data))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Backup the IndexedDB RAG chunks (embedding vectors) to %APPDATA%.
+///
+/// The chat-persistence triad (`store_backup.json`) only covers localStorage
+/// stores. RAG embedding chunks live in IndexedDB under
+/// `locally-uncensored-rag → chunks` because the 768-float vectors blow past
+/// localStorage's ~10 MB quota for any non-trivial document. After an NSIS
+/// upgrade or WebView2 data reset, localStorage restores the document
+/// metadata but the IndexedDB chunks were silently lost — every "RAG enabled"
+/// chat would show the document name + remain non-searchable.
+///
+/// kj103x report (Discord 2026-05-23, #help-chat thread 1507756765612216411,
+/// running v2.4.8): "is there a way to keep chats with the plugins and the
+/// attached documents via RAG when i close the app and reopen it?" References
+/// Discussion #26 as "'fixed' but not really fixed" — the v2.3.4 fix was the
+/// chat-message half; this commit is the RAG embeddings half.
+///
+/// The payload is the JSON-serialized snapshot of every objectStore entry
+/// (the frontend uses `getAll()` on the chunks store and `JSON.stringify`s
+/// the map `documentId → TextChunk[]`). Same atomic-temp-rename pattern as
+/// `backup_stores` so a crash mid-write doesn't truncate a previous backup.
+#[tauri::command]
+pub fn backup_rag_chunks(data: String) -> Result<(), String> {
+    let dir = persistent_dir()?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let target = dir.join("rag_chunks_backup.json");
+    let tmp = dir.join("rag_chunks_backup.tmp");
+    std::fs::write(&tmp, &data).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &target).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Restore RAG chunks (counterpart to `backup_rag_chunks`). Returns the JSON
+/// payload (same shape: `Record<documentId, TextChunk[]>`) or `None` when no
+/// backup exists yet. The frontend writes each entry back into IndexedDB on
+/// cold start so RAG retrieval works after WebView2 data is wiped.
+#[tauri::command]
+pub fn restore_rag_chunks() -> Result<Option<String>, String> {
+    let path = persistent_dir()?.join("rag_chunks_backup.json");
     if path.exists() {
         let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         Ok(Some(data))

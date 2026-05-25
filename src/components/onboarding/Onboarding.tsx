@@ -21,8 +21,12 @@ import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provide
 // always". Light mode stays available in Settings → General → Appearance
 // for users who explicitly want it; we just don't push them through the
 // choice on first launch anymore.
-type Step = 'welcome' | 'backends' | 'comfyui' | 'models' | 'done'
-const STEP_ORDER: Step[] = ['welcome', 'backends', 'comfyui', 'models', 'done']
+// Added 'embeddings' step (GH #45, leonsk29 2026-05-23): suggests pulling
+// `nomic-embed-text` (~274 MB) before completing onboarding so Document
+// Chat / RAG works out of the box. The step shows a Skip button and
+// auto-skips entirely when the user already has any embedding model on disk.
+type Step = 'welcome' | 'backends' | 'comfyui' | 'models' | 'embeddings' | 'done'
+const STEP_ORDER: Step[] = ['welcome', 'backends', 'comfyui', 'models', 'embeddings', 'done']
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
 /* ── Local backend info for the "nothing found" state ──────── */
@@ -288,7 +292,7 @@ export function Onboarding() {
     // Tell the rest of the app the model list changed — Model Manager,
     // Chat picker, etc. listen for this and re-fetch.
     window.dispatchEvent(new CustomEvent('lu-models-refresh'))
-    setStep('done')
+    setStep('embeddings')
   }
 
   const finish = () => {
@@ -367,11 +371,82 @@ export function Onboarding() {
   // (P4 LU-Aufgaben: "Nur wenn der User noch gar kein Modell installiert hat.
   // Sonst nirgendwo mehr 'Recommended'-Empfehlungen"). null = still loading,
   // 0 = fresh, >0 = experienced — only the first two should see the picker.
+  // Experienced users still progress to the embedding step (separate skip).
   useEffect(() => {
     if (step === 'models' && existingModelCount !== null && existingModelCount > 0) {
-      setStep('done')
+      setStep('embeddings')
     }
   }, [step, existingModelCount])
+
+  // ── nomic-embed-text install state (GH #45, leonsk29 2026-05-23) ─────
+  // The Document Chat / RAG feature needs an embedding model. We default
+  // to `nomic-embed-text` — small (~274 MB), broadly supported. The step
+  // auto-skips when the user already has any embedding model installed
+  // (covers LM Studio users who came in via that backend with their own
+  // embedding model, and Ollama users who already pulled one).
+  const [embeddingsPulling, setEmbeddingsPulling] = useState(false)
+  const [embeddingsPulled, setEmbeddingsPulled] = useState(false)
+  const [embeddingsError, setEmbeddingsError] = useState<string | null>(null)
+  const [embeddingsProgress, setEmbeddingsProgress] = useState<{ completed: number; total: number }>({ completed: 0, total: 0 })
+  const [embeddingsAlreadyHave, setEmbeddingsAlreadyHave] = useState<boolean | null>(null)
+
+  // Probe whether an embedding model is already present on the box. Ollama
+  // lists pulled models; we look for anything with `embed`/`bge`/`nomic` in
+  // the name (the same heuristic used elsewhere for chat-capability filtering).
+  useEffect(() => {
+    if (step !== 'embeddings') return
+    let cancelled = false
+    import('../../api/ollama').then(({ listModels }) =>
+      listModels()
+        .then(models => {
+          if (cancelled) return
+          const hasEmbedding = models.some(m => {
+            const lower = (m.name || '').toLowerCase()
+            return lower.includes('embed') || lower.includes('bge-') || lower.includes('nomic')
+          })
+          setEmbeddingsAlreadyHave(hasEmbedding)
+        })
+        .catch(() => { if (!cancelled) setEmbeddingsAlreadyHave(false) })
+    )
+    return () => { cancelled = true }
+  }, [step])
+
+  const handlePullEmbeddings = async () => {
+    if (!isTauri) {
+      setEmbeddingsError('Embedding install requires the desktop app — running in a browser preview.')
+      return
+    }
+    setEmbeddingsPulling(true)
+    setEmbeddingsError(null)
+    setEmbeddingsProgress({ completed: 0, total: 0 })
+    try {
+      // Make sure ollama is reachable before kicking off the pull.
+      let ok = await checkOllama()
+      if (!ok) {
+        try { await backendCall('start_ollama') } catch { /* fall through */ }
+        for (let i = 0; i < 20 && !ok; i++) {
+          await new Promise(r => setTimeout(r, 250))
+          ok = await checkOllama()
+        }
+      }
+      if (!ok) {
+        setEmbeddingsError('Cannot reach Ollama (localhost:11434). Start Ollama and retry.')
+        setEmbeddingsPulling(false)
+        return
+      }
+      const { promise } = pullModelTauri('nomic-embed-text', (p) => {
+        setEmbeddingsProgress({ completed: p.completed || 0, total: p.total || 0 })
+      })
+      await promise
+      setEmbeddingsPulled(true)
+      // Same refresh event chat/picker components listen on.
+      window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+    } catch (e) {
+      setEmbeddingsError(`Pull failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setEmbeddingsPulling(false)
+    }
+  }
 
   const showRecommendedBadge = existingModelCount === 0
 
@@ -1445,7 +1520,7 @@ export function Onboarding() {
                 </button>
               ) : !isDownloading ? (
                 <button
-                  onClick={() => setStep('done')}
+                  onClick={() => setStep('embeddings')}
                   className={`flex-1 flex items-center justify-center gap-1.5 ${secondaryBtn}`}
                 >
                   Skip for now <ChevronRight size={14} />
@@ -1455,7 +1530,91 @@ export function Onboarding() {
           </motion.div>
         )}
 
-        {/* Step 5: Done */}
+        {/* Step 5: Embeddings (GH #45 — Document Chat / RAG) */}
+        {step === 'embeddings' && (
+          <motion.div
+            key="embeddings"
+            className="max-w-md w-full space-y-3"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+          >
+            <div className="text-center mb-2">
+              <h2 className="text-base font-semibold mb-1">Document Chat (optional)</h2>
+              <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                Drop a PDF, Word doc, or text file into chat and the model can answer questions about it. Needs a small embedding model.
+              </p>
+            </div>
+
+            {embeddingsAlreadyHave === true && !embeddingsPulled && (
+              <div className={`p-3 rounded-lg border ${isDark ? 'bg-green-500/10 border-green-500/20' : 'bg-green-50 border-green-200'}`}>
+                <div className="flex items-center gap-2 justify-center">
+                  <Check size={14} className="text-green-400" />
+                  <span className="text-[0.7rem] font-medium">Embedding model already installed — Document Chat is ready.</span>
+                </div>
+              </div>
+            )}
+
+            {embeddingsAlreadyHave !== true && (
+              <div className={`p-3 rounded-lg border ${cardClass}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[0.7rem] font-medium">nomic-embed-text</p>
+                    <p className={`text-[0.6rem] mt-0.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                      Standard embedding model from Nomic AI. Used purely on-device to chunk and retrieve your documents — never sent anywhere.
+                    </p>
+                    <p className={`text-[0.55rem] mt-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                      274 MB · runs on any CPU
+                    </p>
+                  </div>
+                </div>
+
+                {embeddingsPulling && (
+                  <div className="mt-2.5 space-y-1">
+                    <ProgressBar progress={embeddingsProgress.total > 0 ? (embeddingsProgress.completed / embeddingsProgress.total) * 100 : 0} />
+                    <p className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
+                      {embeddingsProgress.total > 0
+                        ? `${formatBytes(embeddingsProgress.completed)} / ${formatBytes(embeddingsProgress.total)}`
+                        : 'Starting…'}
+                    </p>
+                  </div>
+                )}
+
+                {embeddingsPulled && (
+                  <div className="mt-2.5 flex items-center gap-2 text-[0.65rem] text-green-400">
+                    <Check size={12} /> Installed. Document Chat is ready.
+                  </div>
+                )}
+
+                {embeddingsError && (
+                  <p className="text-[0.6rem] text-red-400 mt-2">{embeddingsError}</p>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 pt-1">
+              {embeddingsAlreadyHave !== true && !embeddingsPulled && !embeddingsPulling && (
+                <button onClick={handlePullEmbeddings} className={primaryBtn} style={{ flex: 1 }}>
+                  <Download size={14} /> Install nomic-embed-text (274 MB)
+                </button>
+              )}
+              <button
+                onClick={() => setStep('done')}
+                disabled={embeddingsPulling}
+                className={`${secondaryBtn} ${embeddingsPulling ? 'opacity-40 cursor-not-allowed' : ''}`}
+                style={{ flex: embeddingsAlreadyHave === true || embeddingsPulled ? 1 : undefined }}
+              >
+                {embeddingsAlreadyHave === true || embeddingsPulled ? (
+                  <>Continue <ArrowRight size={14} /></>
+                ) : (
+                  <>Skip for now <ChevronRight size={14} /></>
+                )}
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Step 6: Done */}
         {step === 'done' && (
           <motion.div
             key="done"

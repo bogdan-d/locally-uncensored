@@ -429,12 +429,26 @@ export function DiscoverModels({ category }: Props) {
   const uncensoredModels = isText ? getUncensoredTextModels() : []
   const mainstreamModels = isText ? getMainstreamTextModels() : []
 
-  const filteredUncensored = search
-    ? uncensoredModels.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()) || m.description.toLowerCase().includes(search.toLowerCase()))
-    : uncensoredModels
-  const filteredMainstream = search
-    ? mainstreamModels.filter((m) => m.name.toLowerCase().includes(search.toLowerCase()) || m.description.toLowerCase().includes(search.toLowerCase()))
-    : mainstreamModels
+  // Apply the VRAM tier filter to text models too (Feature 46, leonsk29 GH #46).
+  // We use the model's GGUF `sizeGB` as a proxy for VRAM need — Q4 quants run
+  // entirely on the GPU when sizeGB ≤ VRAM, so the same lightweight/mid/highend
+  // bucketing as image/video applies here. Models without a `sizeGB` (cloud
+  // / canPull:false placeholders) bypass the filter and always show.
+  const matchesVramTier = (sizeGB?: number) => {
+    if (vramTier === 'all') return true
+    if (sizeGB === undefined || sizeGB === null) return true
+    if (vramTier === 'lightweight') return sizeGB <= 10
+    if (vramTier === 'mid') return sizeGB > 10 && sizeGB <= 16
+    return sizeGB > 16 // highend
+  }
+
+  const matchesSearch = (m: DiscoverModel) =>
+    !search ||
+    m.name.toLowerCase().includes(search.toLowerCase()) ||
+    m.description.toLowerCase().includes(search.toLowerCase())
+
+  const filteredUncensored = uncensoredModels.filter(m => matchesSearch(m) && matchesVramTier(m.sizeGB))
+  const filteredMainstream = mainstreamModels.filter(m => matchesSearch(m) && matchesVramTier(m.sizeGB))
 
   const title = 'Discover LUncensored'
   const subtitle = isText
@@ -584,14 +598,16 @@ export function DiscoverModels({ category }: Props) {
         </div>
       )}
 
-      {/* VRAM Tier Filter — for image/video bundles */}
-      {(isImage || isVideo) && sortedBundles.length > 0 && (
+      {/* VRAM Tier Filter — image/video bundles AND text models (Feature 46,
+          leonsk29 GH #46). Text models reuse the same tier thresholds, derived
+          from each model's GGUF `sizeGB` (Q4 quant roughly equals VRAM need). */}
+      {(isImage || isVideo || (isText && (uncensoredModels.length > 0 || mainstreamModels.length > 0))) && (
         <div className="flex gap-1.5">
           {([
             { key: 'all', label: 'All', desc: '' },
-            { key: 'lightweight', label: 'Lightweight', desc: '6-10 GB' },
-            { key: 'mid', label: 'Mid-Range', desc: '12-16 GB' },
-            { key: 'highend', label: 'High-End', desc: '20+ GB' },
+            { key: 'lightweight', label: 'Lightweight', desc: '≤10 GB' },
+            { key: 'mid', label: 'Mid-Range', desc: '10-16 GB' },
+            { key: 'highend', label: 'High-End', desc: '>16 GB' },
           ] as const).map(tier => (
             <button
               key={tier.key}

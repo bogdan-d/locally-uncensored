@@ -109,6 +109,8 @@ fn main() {
             commands::system::get_current_time,
             commands::system::backup_stores,
             commands::system::restore_stores,
+            commands::system::backup_rag_chunks,
+            commands::system::restore_rag_chunks,
             commands::system::exit_app,
             // Downloads
             commands::download::download_model,
@@ -190,6 +192,12 @@ fn main() {
                             }
                         }
                         "quit" => {
+                            // Tauri's AppState Drop doesn't fire reliably on
+                            // Windows after `app.exit(0)` — run the explicit
+                            // subprocess shutdown here so tray Quit doesn't
+                            // leak Ollama / ComfyUI (kj103x V/b, v2.4.9).
+                            let state = app.state::<AppState>();
+                            state.shutdown_subprocesses();
                             app.exit(0);
                         }
                         _ => {}

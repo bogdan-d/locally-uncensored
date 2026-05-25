@@ -43,13 +43,14 @@ describe('isPlainTextPlanner', () => {
       expect(isPlainTextPlanner('GEMMA3:27B')).toBe(true)
     })
     it('strips single-segment org prefix', () => {
-      // The algorithm strips exactly ONE leading slash-terminated segment
-      // (`org/model` → `model`). Multi-slash HF paths (`hf.co/org/model`)
-      // leave an intermediate "org" in front so they do NOT match — this
-      // is intentional since we control the identifier format at the
-      // provider layer.
+      // v2.4.9 made the prefix strip greedy (last slash), so multi-segment
+      // HF refs `hf.co/<org>/<repo>:<tag>` also resolve to the family — that
+      // is exactly the shape `pullModel(hf.co/<user>/<repo>:<quant>)` emits,
+      // and the old non-greedy strip silently disabled the bypass for every
+      // community Gemma 4 download (Bug X, leonsk29 Discord 2026-05-24).
       expect(isPlainTextPlanner('library/gemma4:31b')).toBe(true)
       expect(isPlainTextPlanner('ollama/gemma3:27b')).toBe(true)
+      expect(isPlainTextPlanner('hf.co/bartowski/gemma4-27B-it-GGUF:Q4_K_M')).toBe(true)
     })
   })
 
@@ -85,22 +86,21 @@ describe('isPlainTextPlanner', () => {
       expect(isPlainTextPlanner('gemma')).toBe(false)
       expect(isPlainTextPlanner('gemma:latest')).toBe(false)
     })
-    it('a substring match inside a different name → false', () => {
-      // e.g. a hypothetical model named "stuff-gemma3-X". Since our logic
-      // strips the org prefix then checks startsWith, this only triggers
-      // if the base name (after / and before :) starts with gemma3/4.
-      expect(isPlainTextPlanner('stuff-gemma3-mix')).toBe(false)
+    it('a substring with explicit non-alphanumeric boundaries DOES match', () => {
+      // v2.4.9 switched to a word-boundary contains-check (Bug X). A
+      // hypothetical "stuff-gemma3-mix" build is most likely a Gemma 3
+      // derivative — matching is the safe default, and the `think: undefined`
+      // bypass that follows is harmless on a non-thinking model.
+      expect(isPlainTextPlanner('stuff-gemma3-mix')).toBe(true)
+    })
+    it('still does NOT match when the family is wedged into a word (gemma3xyz)', () => {
+      // Boundary check is real: alphanumeric chars immediately after the
+      // family token break the match so `gemma3xyz` stays false.
+      expect(isPlainTextPlanner('gemma3xyz')).toBe(false)
+      expect(isPlainTextPlanner('foogemma3')).toBe(false)
     })
     it('gemma3 inside a single-segment org namespace triggers correctly', () => {
       expect(isPlainTextPlanner('mradermacher/gemma3-27b-it-GGUF')).toBe(true)
-    })
-    it('multi-segment HF path like "hf.co/bart/gemma4-X" → false (by design)', () => {
-      // Known limitation — see the single-segment test above for the
-      // rationale. Documenting so regressions don't accidentally "fix"
-      // this case and shift model-matching semantics.
-      expect(
-        isPlainTextPlanner('hf.co/bartowski/gemma4-27B-it-GGUF:Q4_K_M')
-      ).toBe(false)
     })
   })
 })

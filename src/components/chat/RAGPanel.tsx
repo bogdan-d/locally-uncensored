@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   FileText,
@@ -20,6 +20,7 @@ import {
 import { useShallow } from 'zustand/react/shallow'
 import { useRAG } from '../../hooks/useRAG'
 import { useRAGStore } from '../../stores/ragStore'
+import { formatBytes } from '../../lib/formatters'
 
 interface Props {
   conversationId: string | null
@@ -98,11 +99,44 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
   const removeDocument = rag.removeDocument
   const toggleRAG = rag.toggleRAG
   const clearAll = rag.clearAll
+  const installEmbeddingAndDrainQueue = rag.installEmbeddingAndDrainQueue
+  const cancelEmbeddingInstall = rag.cancelEmbeddingInstall
+  const ensureEmbeddingModel = rag.ensureEmbeddingModel
 
-  const { embeddingModelReactive, lastRetrievedChunksReactive } = useRAGStore(
+  // Proactively probe for nomic-embed-text the first time the user opens the
+  // Document Chat panel. If it's missing we flip embeddingInstallPrompt right
+  // here so the install card shows before any upload attempt — user clicks
+  // the Docs button, sees the offer, can install or cancel. This is the path
+  // the user explicitly asked for over a global top-of-app banner. The probe
+  // runs only when the prompt isn't already up and we aren't mid-pull, so
+  // re-opening the panel doesn't fight an in-flight install.
+  useEffect(() => {
+    let cancelled = false
+    if (embeddingInstallPrompt || pullingEmbeddingModel) return
+    ;(async () => {
+      try {
+        const has = await ensureEmbeddingModel()
+        if (cancelled) return
+        if (!has) {
+          useRAGStore.getState().setEmbeddingInstallPrompt(true)
+        }
+      } catch {
+        /* ollama probe failed — silent; user can still drop a file later */
+      }
+    })()
+    return () => { cancelled = true }
+    // intentionally NOT depending on prompt/pulling flags — we want a single
+    // mount-time probe per panel open, not a re-fire on every flag change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ensureEmbeddingModel])
+
+  const { embeddingModelReactive, lastRetrievedChunksReactive, embeddingPullProgress, embeddingInstallPrompt, embeddingQueuedCount } = useRAGStore(
     useShallow((s) => ({
       embeddingModelReactive: s.embeddingModel,
       lastRetrievedChunksReactive: s.lastRetrievedChunks,
+      embeddingPullProgress: s.embeddingPullProgress,
+      embeddingInstallPrompt: s.embeddingInstallPrompt,
+      embeddingQueuedCount: s.embeddingQueuedFiles.length,
     }))
   )
 
@@ -253,7 +287,61 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
         )}
       </AnimatePresence>
 
-      {/* Embedding model pull progress */}
+      {/* In-app install prompt (Bug F45-followup) — replaces window.confirm()
+          so the user stays in app chrome. Triggered by either:
+            (a) Opening the Document Chat panel while nomic-embed-text is
+                missing — RAGPanelInner's mount-time `ensureEmbeddingModel`
+                check below flips the prompt proactively, so the user sees
+                the install offer the moment they click the Docs button.
+            (b) Dropping a file when the model is missing — uploadDocument
+                queues the file + flips the prompt; queued files replay
+                after the pull succeeds.
+          Neutral white/gray chrome (no blue tint) — matches the v2.4.8 Q-
+          polish pattern. */}
+      <AnimatePresence>
+        {embeddingInstallPrompt && !pullingEmbeddingModel && (
+          <motion.div
+            className="px-3 py-2"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-white/[0.03] border border-gray-200 dark:border-white/10 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <Download size={12} className="text-gray-500 dark:text-gray-300 shrink-0" />
+                <span className="text-[0.65rem] font-medium text-gray-700 dark:text-gray-200">Embedding model needed</span>
+              </div>
+              <p className="text-[0.6rem] text-gray-500 dark:text-gray-400 leading-snug">
+                Document Chat needs <code className="font-mono px-1 rounded bg-gray-200 dark:bg-white/5">{embeddingModelReactive ?? 'nomic-embed-text'}</code> (274 MB). One-time download.
+                {embeddingQueuedCount > 0 && (
+                  <span className="block mt-0.5 text-gray-400 dark:text-gray-500">
+                    {embeddingQueuedCount} file{embeddingQueuedCount === 1 ? '' : 's'} queued — will index after install.
+                  </span>
+                )}
+              </p>
+              <div className="flex gap-1.5 pt-0.5">
+                <button
+                  onClick={() => installEmbeddingAndDrainQueue()}
+                  className="flex-1 px-2 py-1 rounded text-[0.6rem] font-medium bg-gray-200 hover:bg-gray-300 dark:bg-white/10 dark:hover:bg-white/15 text-gray-800 dark:text-gray-100 transition-colors flex items-center justify-center gap-1"
+                >
+                  <Download size={11} /> Download
+                </button>
+                <button
+                  onClick={() => cancelEmbeddingInstall()}
+                  className="px-2 py-1 rounded text-[0.6rem] font-medium text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Embedding model pull progress — real bytes-level progress bar replacing
+          the pre-v2.4.9 bouncing-icon banner. Reads embeddingPullProgress
+          which useRAG.pullEmbeddingModel populates per Ollama stream chunk.
+          Neutral chrome to match the install prompt above. */}
       <AnimatePresence>
         {pullingEmbeddingModel && (
           <motion.div
@@ -262,11 +350,42 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
           >
-            <div className="flex items-center gap-1.5 p-2 rounded-lg bg-blue-500/10 border border-blue-500/20">
-              <Download size={12} className="text-blue-400 animate-bounce" />
-              <span className="text-[0.6rem] text-blue-400 leading-tight">
-                Downloading embedding model (nomic-embed-text)...
-              </span>
+            <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-white/[0.03] border border-gray-200 dark:border-white/10 space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <Loader2 size={12} className="text-gray-500 dark:text-gray-300 animate-spin shrink-0" />
+                <span className="text-[0.6rem] text-gray-600 dark:text-gray-300 leading-tight truncate">
+                  {embeddingPullProgress?.status?.startsWith('downloading')
+                    ? 'Downloading nomic-embed-text…'
+                    : embeddingPullProgress?.status === 'success'
+                      ? 'Almost done…'
+                      : (embeddingPullProgress?.status || 'Preparing pull…')}
+                </span>
+              </div>
+              {embeddingPullProgress && embeddingPullProgress.total > 0 ? (
+                <>
+                  <div className="w-full h-1 bg-gray-200 dark:bg-white/10 rounded-full overflow-hidden">
+                    <motion.div
+                      className="h-full bg-gray-500 dark:bg-gray-300 rounded-full"
+                      initial={{ width: 0 }}
+                      animate={{
+                        width: `${Math.min(100, (embeddingPullProgress.completed / embeddingPullProgress.total) * 100)}%`,
+                      }}
+                      transition={{ duration: 0.2 }}
+                    />
+                  </div>
+                  <p className="text-[0.55rem] text-gray-500 dark:text-gray-400 font-mono">
+                    {formatBytes(embeddingPullProgress.completed)} / {formatBytes(embeddingPullProgress.total)} · {Math.round((embeddingPullProgress.completed / embeddingPullProgress.total) * 100)}%
+                  </p>
+                </>
+              ) : (
+                <div className="w-full h-1 bg-gray-200 dark:bg-white/10 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-gray-500 dark:bg-gray-300 rounded-full w-1/3"
+                    animate={{ x: ['-100%', '300%'] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+                  />
+                </div>
+              )}
             </div>
           </motion.div>
         )}

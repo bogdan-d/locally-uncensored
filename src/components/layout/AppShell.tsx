@@ -52,7 +52,35 @@ export function AppShell() {
     if (!isTauri()) return
     const hasStores = STORE_KEYS.some(k => localStorage.getItem(k))
     const restoreComplete = localStorage.getItem('lu-restore-complete')
-    if (hasStores && restoreComplete) return // localStorage intact, no restore needed
+    if (hasStores && restoreComplete) {
+      // localStorage intact, but IndexedDB might have been wiped (different
+      // storage layer, different lifetime). Quietly restore RAG chunks if a
+      // backup exists and the live store has none for the documents the
+      // localStorage `rag-store` knows about. Best-effort; ignore errors.
+      ;(async () => {
+        try {
+          const data = await backendCall<string | null>('restore_rag_chunks')
+          if (!data) return
+          const parsed = JSON.parse(data)
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            const { exportAllChunks, importAllChunks } = await import('../../lib/ragDB')
+            const live = await exportAllChunks()
+            // Only import entries the live store is missing — never clobber
+            // newer in-app activity with a stale backup.
+            const toImport: Record<string, any> = {}
+            for (const [docId, chunks] of Object.entries(parsed)) {
+              if (!live[docId] && Array.isArray(chunks) && chunks.length > 0) {
+                toImport[docId] = chunks
+              }
+            }
+            if (Object.keys(toImport).length > 0) {
+              await importAllChunks(toImport)
+            }
+          }
+        } catch { /* best-effort */ }
+      })()
+      return
+    }
 
     setRestoring(true)
 
@@ -73,6 +101,20 @@ export function AppShell() {
               }
             }
             if (restored > 0) {
+              // Pull RAG chunks from %APPDATA% before the reload so the new
+              // localStorage references find their embeddings in IndexedDB
+              // (Bug V, kj103x 2026-05-23). Best-effort: missing backup =
+              // chunks need to be re-indexed by re-uploading docs.
+              try {
+                const ragData = await backendCall<string | null>('restore_rag_chunks')
+                if (ragData) {
+                  const parsedRag = JSON.parse(ragData)
+                  if (parsedRag && typeof parsedRag === 'object' && !Array.isArray(parsedRag)) {
+                    const { importAllChunks } = await import('../../lib/ragDB')
+                    await importAllChunks(parsedRag as Record<string, any>)
+                  }
+                }
+              } catch { /* best-effort */ }
               localStorage.setItem('lu-restore-complete', '1')
               window.location.reload()
               return
@@ -119,6 +161,28 @@ export function AppShell() {
         backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
       }
 
+      // Separate, debounced backup for RAG IndexedDB chunks (Bug V, kj103x
+      // 2026-05-23). These are heavy (768-float embedding vectors per chunk,
+      // sometimes thousands per doc) so we don't bundle them into the chat
+      // snapshot — the chat-store backup must stay fast for the 1 s debounce
+      // case. RAG backup runs at most once every 30 s and after IndexedDB
+      // grows, which is the right cadence: chunks change on document upload
+      // / delete, both rare events compared to chat messages.
+      let ragLastRun = 0
+      let ragInflight = false
+      const doRagBackup = async () => {
+        if (ragInflight) return
+        if (Date.now() - ragLastRun < 30_000) return
+        ragInflight = true
+        try {
+          const { exportAllChunks } = await import('../../lib/ragDB')
+          const snapshot = await exportAllChunks()
+          await backendCall('backup_rag_chunks', { data: JSON.stringify(snapshot) }).catch(() => {})
+          ragLastRun = Date.now()
+        } catch { /* best-effort */ }
+        ragInflight = false
+      }
+
       // Migration: write onboarding marker if missing AND user has already
       // onboarded (keeps NSIS-update recovery working). Do NOT rewrite the
       // marker for users who just hit Settings → "Re-run onboarding" — for
@@ -130,7 +194,11 @@ export function AppShell() {
       })
 
       doBackup()  // first immediate backup
+      // Same first-fire convention for RAG chunks so a fresh post-restore
+      // boot writes a complete snapshot back to disk immediately.
+      void doRagBackup()
       const interval = setInterval(doBackup, 5_000)
+      const ragInterval = setInterval(() => { void doRagBackup() }, 30_000)
 
       let debounceTimer: ReturnType<typeof setTimeout> | null = null
       const scheduleBackup = () => {
@@ -139,11 +207,18 @@ export function AppShell() {
       }
       const unsubChat = useChatStore.subscribe(scheduleBackup)
 
-      const onBeforeUnload = () => doBackup()
+      const onBeforeUnload = () => {
+        doBackup()
+        // Best-effort fire-and-forget — the page is going away, we can't
+        // await. The 30 s interval covers the common case; this is the
+        // "last write" insurance for changes since the previous interval.
+        void doRagBackup()
+      }
       window.addEventListener('beforeunload', onBeforeUnload)
 
       cleanup = () => {
         clearInterval(interval)
+        clearInterval(ragInterval)
         if (debounceTimer) clearTimeout(debounceTimer)
         unsubChat()
         window.removeEventListener('beforeunload', onBeforeUnload)

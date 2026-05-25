@@ -35,11 +35,31 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.4.8 — Current Release
+## v2.4.9 — Current Release
 
-**Hotfix: 8 fixes on top of v2.4.6.** All user-reported. v2.4.7 was tagged but not separately released; its six fixes ship together with v2.4.8.
+**Five bug fixes + two leonsk29 feature requests on top of v2.4.8.** All user-reported (GH levoy1 / kj103x Discord / nightmare13740 Discord / leonsk29 Discord + GH).
 
 Auto-update prompts on next launch.
+
+### What's fixed
+- **ComfyUI Desktop App is detected and accepted in onboarding** (Bug U — levoy1 GH #47). The Comfy-Org/desktop app installs to `%LOCALAPPDATA%\Programs\ComfyUI` with `ComfyUI.exe` but no `main.py` — the actual Working Directory with `main.py` / `models/` / `custom_nodes/` is at `~\Documents\ComfyUI` by default. Pre-v2.4.9 both auto-detect and manual path entry rejected the binary folder with "Invalid path — main.py not found". v2.4.9 follows the breadcrumb: when given a folder with `ComfyUI.exe`, it walks a probe list (`~\Documents\ComfyUI` / `%APPDATA%\ComfyUI` / `config.json basePath` / `%LOCALAPPDATA%\ComfyUI` / the app's bundled resources) until it finds `main.py`, and silently re-routes to the Working Directory.
+- **Chats with attached RAG documents persist across NSIS auto-update / WebView2 data reset** (Bug V/a — kj103x Discord 2026-05-23). v2.3.4 closed the chat-message half (3-leg localStorage backup), but RAG embedding chunks live in IndexedDB (768-float vectors per chunk, can't fit in localStorage) and were never backed up. After an auto-update the document metadata restored but the chunks were lost — every RAG chat showed the document and returned no retrievals. v2.4.9 adds a separate 30 s / `beforeunload` IndexedDB backup → `%APPDATA%\Locally Uncensored\rag_chunks_backup.json`, restores on cold start AND on warm starts when IndexedDB is empty while the doc metadata isn't. Backup never clobbers newer in-app activity (only imports entries the live store is missing).
+- **LU-spawned Ollama is killed when you quit LU** (Bug V/b — same kj103x report). Pre-v2.4.9 `ollama serve` lingered as a ~200 MB orphan with no tray icon. v2.4.9 stores the spawned `Child` on `AppState` and kills it on `Drop` using the same taskkill `/T /F` pattern as ComfyUI. The pre-spawn tasklist check stays — a user-managed Ollama that was already running when LU launched is left alone, so quitting LU never kills someone else's daemon. (Hide-to-tray via the `X` button is unaffected; Ollama only dies on a real Quit from the tray menu.)
+- **Benchmark per-model display shows the latest session's tok/s, not a drifting historical average** (Bug W — nightmare13740 Discord 2026-05-23/24, Bug M retest). After the v2.4.8 server-eval-metric fix, ten benchmark runs on gemma4:e4b read 15.2 → 17.9 tok/s. Per-run measurements were stable; the UI was averaging every historical sample. v2.4.9 adds `getLatestSpeed` that groups runs into "sessions" via a 10 s timestamp gap and returns the mean of the most recent session only. Leaderboard keeps the cross-model average since that's the comparison that benefits from averaging out noise.
+- **Thinking + Agent toggles light up for community-uncensored Gemma 4 builds** (Bug X — leonsk29 Discord 2026-05-24). Official `gemma4:e4b` worked but TrevorJS / nohurry / Stabhappy / LiconStudio / huihui-ai community variants pulled via `hf.co/<user>/<repo>:<quant>` had both toggles grayed out. Three stacked issues: the family-name normalizer only stripped one path segment (`hf.co/` but not `trevorjs/`), the dashed-family collapse was anchored to start-of-string (so `gemma-4-…` mid-string never normalized to `gemma4`), and the final match used `.startsWith` which couldn't see past a community prefix like `Huihui-Qwen3.5-…`. v2.4.9 rewrites `normalizeFamily` as a greedy strip + suffix/quant peel + family-dash collapse `/g`, then switches to a word-boundary contains-check so the family token can sit anywhere in the normalized name without false positives.
+
+### What's new
+- **Onboarding suggests `nomic-embed-text` for Document Chat / RAG** (GH #45 — leonsk29). New step between Models and Done that auto-detects existing embedding models (skipped with "✓ already installed" if any are present) or offers a one-click 274 MB pull. Skip button always available.
+- **VRAM filter for text models in Discover** (GH #46 — leonsk29). The Lightweight ≤10 GB / Mid-Range 10–16 GB / High-End >16 GB chips that image and video already had now also filter the text tab, derived from each model's GGUF `sizeGB`. Cloud / `canPull:false` entries bypass the filter.
+
+For previous release notes (v2.4.8 — 9 changes, v2.4.6 — 1 bug, v2.4.5 — 14 bugs), see [CHANGELOG.md](CHANGELOG.md).
+
+---
+
+<details>
+<summary>v2.4.8 — superseded</summary>
+
+**Hotfix: 8 fixes on top of v2.4.6.** All user-reported. v2.4.7 was tagged but not separately released; its six fixes ship together with v2.4.8.
 
 ### What's fixed
 - **Text models in Discover keep their INSTALLED badge after restart** (Bug S — leonsk29 GH #43). Pre-v2.4.8 the badge only lit up if the download finished in the current session, so a model installed yesterday looked uninstalled today. v2.4.8 also matches against the provider model list (Ollama tags directly, plus GGUF downloads via `hf.co/<repo>:<quant>` references), so whatever Ollama / LM Studio actually have on disk is what the Discover grid shows.
@@ -63,7 +83,7 @@ v2.4.8 is a Windows + Linux release; macOS is not part of this build. `#bug-repo
 
 Still investigating: OpenRouter half of 0yagizz's report (needs F12 console output to repro).
 
-For previous release notes (v2.4.6 — 1 bug, v2.4.5 — 14 bugs), see [CHANGELOG.md](CHANGELOG.md).
+</details>
 
 For older releases, see [CHANGELOG.md](CHANGELOG.md).
 

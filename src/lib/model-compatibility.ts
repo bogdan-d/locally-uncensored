@@ -24,11 +24,80 @@ const AGENT_COMPATIBLE = [
 ]
 
 /**
+ * Aggressively normalize a model tag into a comparable "family" key.
+ *
+ * The Ollama / HuggingFace ecosystem ships the same base under wildly
+ * different cosmetic surface forms — `gemma4:e4b`, `gemma-4-it-uncensored`,
+ * `huihui_ai/gemma-4-26b-a4b-heretic`, `mradermacher/Gemma-4-31B-it-abliterated-GGUF`.
+ * leonsk29 (Discord 2026-05-24) reported Thinking + Agent both grayed out on
+ * community uncensored Gemma 4 variants because the previous normalizer only
+ * handled the dash-less family form (`gemma4`) and missed the dashed form
+ * (`gemma-4`) that mradermacher / TrevorJS / Stabhappy / LiconStudio repos
+ * all use. After normalization `gemma-4-it-abliterated-Q4_K_M` and `gemma4`
+ * collapse to the same prefix and inherit the family's capability flags.
+ *
+ * Steps, in order:
+ *   1. lowercase
+ *   2. drop everything before the first slash (`huihui_ai/...` → `...`)
+ *   3. drop GGUF / repo cruft markers (`-GGUF`, `-Imatrix`, `-MAX`)
+ *   4. drop tuning / variant markers anywhere (`-abliterated`, `-uncensored`,
+ *      `-heretic`, `-instruct`, `-it`, `-chat`, `-base`)
+ *   5. drop quant suffixes (`-Q4_K_M`, `.i1-Q4_K_M`, `-IQ2_XXS`, `-UD-Q4_K_XL`)
+ *   6. drop the `:tag` part
+ *   7. squash `gemma-4` → `gemma4`, `qwen-3` → `qwen3`, `llama-3.1` → `llama3.1`
+ *      so the dashed forms match the dash-less family entries
+ */
+function normalizeFamily(modelName: string): string {
+  // Strip the FULL path prefix (greedy up to the last `/`), not just one
+  // segment. `hf.co/trevorjs/gemma-4-31B-it-uncensored-GGUF:Q4_K_M` has two
+  // slashes — the previous non-greedy strip left `trevorjs/...` behind and
+  // the anchored dash-collapse below missed `gemma-4` entirely. Greedy fix
+  // covers `hf.co/<user>/<repo>:<tag>`, `<user>/<repo>:<tag>`, and bare tags.
+  let s = modelName.toLowerCase().replace(/^.*\//, '')
+  // Suffix markers — drop wherever they appear
+  s = s
+    .replace(/-abliterated/g, '')
+    .replace(/-uncensored/g, '')
+    .replace(/-heretic/g, '')
+    .replace(/-instruct/g, '')
+    .replace(/-chat/g, '')
+    .replace(/-base/g, '')
+    .replace(/-it\b/g, '')
+  // Repo cruft (`-gguf`, `-imatrix`, `-max`, `-i1`, `-ud`)
+  s = s.replace(/-(gguf|imatrix|max|i1|ud)\b/g, '')
+  // Quant suffixes (`-q4_k_m`, `-iq2_xxs`, `-mxfp8`, etc.) — kill from the
+  // leftmost `-q\d` / `-iq\d` / `-fp\d` / `-bf\d` to end of string.
+  s = s.replace(/[-.](q\d[a-z_0-9]*|iq\d[a-z_0-9]*|fp\d[a-z_0-9]*|bf\d+|nvfp\d+|mxfp\d+)$/i, '')
+  // Drop the `:tag` part
+  s = s.replace(/:.*$/, '')
+  // Family-name dash collapse: gemma-4 -> gemma4, qwen-3 -> qwen3,
+  // llama-3.1 -> llama3.1, glm-4 -> glm4, phi-4 -> phi4, deepseek-v3 stays.
+  // Apply with /g so the pattern collapses anywhere it appears, not just at
+  // string start — `huihui-gemma-4-…` needs to collapse the inner `gemma-4`.
+  s = s.replace(/(gemma|qwen|llama|glm|phi)-(\d)/g, '$1$2')
+  return s
+}
+
+/**
+ * Check whether a family token appears as a free-standing word inside a
+ * normalized name. We can't use `.startsWith` because community abliterator
+ * repos prepend their own marker (`Huihui-Qwen3.5-…`, `mradermacher/Huihui-…`,
+ * `coder3101_gemma_4_…`); after the slash strip the actual family is buried
+ * mid-string. The match requires a non-alphanumeric boundary on both sides so
+ * `mistral` does not collide with `mistralfork`, and `gemma3` does not match
+ * inside `pre-gemma3xyz`.
+ */
+function containsFamily(family: string, normalized: string): boolean {
+  const escaped = family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?:^|[^a-z0-9])${escaped}(?![a-z0-9])`).test(normalized)
+}
+
+/**
  * Check if a model supports Agent Mode.
  * Cloud providers always support tools. Ollama needs explicit check.
  *
- * Strategy: strip user-prefix, abliterated/uncensored/instruct/chat suffixes
- * and the :tag, then match the remaining base name against AGENT_COMPATIBLE.
+ * Strategy: normalize the input via `normalizeFamily` then match against
+ * the canonical list. See `normalizeFamily` for what the normalizer covers.
  *
  * Earlier versions kept a much shorter `ABLITERATED_NATIVE` allow-list which
  * over-rejected uncensored variants of agent-capable bases (Qwen 3.5 Uncensored,
@@ -45,16 +114,8 @@ export function isAgentCompatible(modelName: string | null): boolean {
   // Cloud providers always support tool calling
   if (providerId === 'openai' || providerId === 'anthropic') return true
 
-  // Ollama: strip everything decorative and check against the canonical list
-  const name = modelName.toLowerCase()
-  const baseName = name
-    .replace(/^[^/]+\//, '')
-    .replace(/-abliterated/g, '')
-    .replace(/-uncensored/g, '')
-    .replace(/-instruct/g, '')
-    .replace(/-chat/g, '')
-    .replace(/:.*$/, '')
-  return AGENT_COMPATIBLE.some((f) => baseName.startsWith(f))
+  const baseName = normalizeFamily(modelName)
+  return AGENT_COMPATIBLE.some((f) => containsFamily(f, baseName))
 }
 
 export const isToolCallingModel = isAgentCompatible
@@ -78,15 +139,17 @@ const THINKING_COMPATIBLE = [
 /**
  * Check if a model supports thinking/chain-of-thought mode.
  * Cloud providers handle it gracefully. Ollama needs explicit support.
+ *
+ * Uses the shared `normalizeFamily` so dashed forms (`gemma-4-31B-it-abliterated`)
+ * and dash-less forms (`gemma4:e4b`) both resolve to the same family key.
  */
 export function isThinkingCompatible(modelName: string | null): boolean {
   if (!modelName) return false
   const providerId = getProviderIdFromModel(modelName)
   if (providerId === 'openai' || providerId === 'anthropic') return true
 
-  const name = modelName.toLowerCase()
-  const baseName = name.replace(/^[^/]+\//, '').replace(/:.*$/, '').replace(/-abliterated/g, '').replace(/-uncensored/g, '')
-  return THINKING_COMPATIBLE.some(f => baseName.startsWith(f))
+  const baseName = normalizeFamily(modelName)
+  return THINKING_COMPATIBLE.some(f => containsFamily(f, baseName))
 }
 
 /**
@@ -106,9 +169,8 @@ export function isThinkingCompatible(modelName: string | null): boolean {
  */
 export function isPlainTextPlanner(modelName: string | null): boolean {
   if (!modelName) return false
-  const name = modelName.toLowerCase()
-  const baseName = name.replace(/^[^/]+\//, '').replace(/:.*$/, '').replace(/-abliterated/g, '').replace(/-uncensored/g, '')
-  return baseName.startsWith('gemma3') || baseName.startsWith('gemma4')
+  const baseName = normalizeFamily(modelName)
+  return containsFamily('gemma3', baseName) || containsFamily('gemma4', baseName)
 }
 
 /**
@@ -131,9 +193,8 @@ const CLAUDE_CODE_COMPATIBLE = [
  */
 export function isClaudeCodeCompatible(modelName: string | null): boolean {
   if (!modelName) return false
-  const name = modelName.toLowerCase()
-  const baseName = name.replace(/^[^/]+\//, '').replace(/:.*$/, '').replace(/-abliterated/g, '').replace(/-uncensored/g, '')
-  return CLAUDE_CODE_COMPATIBLE.some(f => baseName.startsWith(f))
+  const baseName = normalizeFamily(modelName)
+  return CLAUDE_CODE_COMPATIBLE.some(f => containsFamily(f, baseName))
 }
 
 export type ToolCallingStrategy = 'native' | 'template_fix' | 'hermes_xml'

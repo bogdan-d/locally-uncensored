@@ -251,11 +251,66 @@ fn collect_candidate_pythons() -> Vec<String> {
     out
 }
 
+/// Probe order for the ComfyUI Desktop App's Working Directory when the
+/// user-supplied path is the binary install dir (contains `ComfyUI.exe` but
+/// no `main.py`). Comfy-Org/desktop lets the user pick this dir at install
+/// time and defaults to `~\Documents\ComfyUI`. We additionally try the
+/// `%APPDATA%\ComfyUI\config.json` `basePath` hint which the desktop app
+/// writes after the picker, and the legacy `electron-userdata` location.
+fn desktop_app_working_dir_candidates() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    let home = dirs::home_dir().unwrap_or_default();
+    out.push(home.join("Documents").join("ComfyUI"));
+    out.push(home.join("Documents").join("ComfyUI").join("ComfyUI"));
+    if cfg!(target_os = "windows") {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            // 1. config.json basePath hint, if present
+            let cfg = PathBuf::from(&appdata).join("ComfyUI").join("config.json");
+            if let Ok(raw) = std::fs::read_to_string(&cfg) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    if let Some(p) = v.get("basePath").and_then(|x| x.as_str()) {
+                        out.push(PathBuf::from(p));
+                    }
+                }
+            }
+            // 2. %APPDATA%\ComfyUI itself (some installer variants)
+            out.push(PathBuf::from(&appdata).join("ComfyUI"));
+        }
+        if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
+            out.push(PathBuf::from(&localappdata).join("ComfyUI"));
+            // The desktop installer also bundles a ComfyUI tree under the
+            // app's resources for first-launch seeding.
+            out.push(PathBuf::from(&localappdata).join("Programs").join("ComfyUI").join("resources").join("ComfyUI"));
+        }
+    }
+    out
+}
+
+/// Best-effort: turn whatever the user/auto-detector handed us into a
+/// directory that contains `main.py`. Accepts either:
+///   - A directory with `main.py` (classic / portable / from-source install)
+///   - A directory with `ComfyUI.exe` (Comfy-Org desktop app binary dir) —
+///     we then look up the Working Directory via the probe order above.
+fn resolve_comfyui_path(input: &str) -> Option<String> {
+    let p = Path::new(input);
+    if p.join("main.py").exists() {
+        return Some(input.to_string());
+    }
+    if p.join("ComfyUI.exe").exists() {
+        for candidate in desktop_app_working_dir_candidates() {
+            if candidate.join("main.py").exists() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+    None
+}
+
 pub fn find_comfyui_path() -> Option<String> {
     // 1. Check environment variable
     if let Ok(env_path) = std::env::var("COMFYUI_PATH") {
-        if Path::new(&env_path).join("main.py").exists() {
-            return Some(env_path);
+        if let Some(p) = resolve_comfyui_path(&env_path) {
+            return Some(p);
         }
     }
 
@@ -266,8 +321,8 @@ pub fn find_comfyui_path() -> Option<String> {
             if let Ok(content) = fs::read_to_string(&config_file) {
                 if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
                     if let Some(path) = config.get("comfyui_path").and_then(|v| v.as_str()) {
-                        if Path::new(path).join("main.py").exists() {
-                            return Some(path.to_string());
+                        if let Some(resolved) = resolve_comfyui_path(path) {
+                            return Some(resolved);
                         }
                     }
                 }
@@ -297,9 +352,12 @@ pub fn find_comfyui_path() -> Option<String> {
         // Stability Matrix stores ComfyUI in AppData
         if let Ok(appdata) = std::env::var("APPDATA") {
             fixed.push(PathBuf::from(&appdata).join("StabilityMatrix").join("Packages").join("ComfyUI"));
+            // Comfy-Org/desktop app working dir (GH #47, levoy1 2026-05-24)
+            fixed.push(PathBuf::from(&appdata).join("ComfyUI"));
         }
         if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
             fixed.push(PathBuf::from(&localappdata).join("StabilityMatrix").join("Packages").join("ComfyUI"));
+            fixed.push(PathBuf::from(&localappdata).join("ComfyUI"));
         }
         // Common Program Files locations
         fixed.push(PathBuf::from("C:\\Program Files\\ComfyUI"));
@@ -459,13 +517,30 @@ fn detect_all_comfyui_installs_sync() -> Vec<ComfyUIInstall> {
     if cfg!(target_os = "windows") {
         if let Ok(appdata) = std::env::var("APPDATA") {
             fixed.push((PathBuf::from(&appdata).join("StabilityMatrix").join("Packages").join("ComfyUI"), "StabilityMatrix"));
+            // Comfy-Org/desktop default Working Directory hint (GH #47).
+            fixed.push((PathBuf::from(&appdata).join("ComfyUI"), "Desktop App data"));
         }
         if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
             fixed.push((PathBuf::from(&localappdata).join("StabilityMatrix").join("Packages").join("ComfyUI"), "StabilityMatrix"));
+            fixed.push((PathBuf::from(&localappdata).join("ComfyUI"), "Desktop App data"));
         }
         fixed.push((PathBuf::from("C:\\Program Files\\ComfyUI"), "Program Files"));
         fixed.push((PathBuf::from("C:\\AI\\ComfyUI"), "C:\\AI"));
         fixed.push((PathBuf::from("D:\\AI\\ComfyUI"), "D:\\AI"));
+        // ComfyUI Desktop App often pairs its `%LOCALAPPDATA%\Programs\ComfyUI`
+        // binary with a `%APPDATA%\ComfyUI\config.json` whose `basePath` field
+        // points at the Working Directory. Honour the hint so users with a
+        // non-default Working Dir (e.g. on D:\ for space) are still found.
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            let cfg = PathBuf::from(&appdata).join("ComfyUI").join("config.json");
+            if let Ok(raw) = std::fs::read_to_string(&cfg) {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    if let Some(base) = v.get("basePath").and_then(|x| x.as_str()) {
+                        fixed.push((PathBuf::from(base), "Desktop App basePath"));
+                    }
+                }
+            }
+        }
     }
     for (p, source) in fixed {
         push_if_new(p, source, &mut out, &mut seen);
@@ -550,7 +625,7 @@ fn is_comfyui_running_on_port(port: u16) -> bool {
 }
 
 #[tauri::command]
-pub fn start_ollama(_state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+pub fn start_ollama(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     // Check if already running
     {
         let mut cmd = Command::new("tasklist");
@@ -577,7 +652,12 @@ pub fn start_ollama(_state: State<'_, AppState>) -> Result<serde_json::Value, St
     let result = cmd.spawn();
 
     match result {
-        Ok(_) => {
+        Ok(child) => {
+            // Store the Child so AppState::Drop kills our spawned ollama on
+            // shutdown (kj103x — Discord 2026-05-23 #help-chat 1507756765612216411).
+            // Note: tasklist check above means we only get here if WE start it,
+            // so we never kill a user-managed ollama serve.
+            *state.ollama_process.lock().unwrap() = Some(child);
             println!("[Ollama] Started");
             Ok(serde_json::json!({"status": "started"}))
         }
@@ -869,10 +949,28 @@ pub fn find_comfyui() -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 pub fn set_comfyui_path(path: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let main_py = Path::new(&path).join("main.py");
-    if !main_py.exists() {
-        return Err(format!("main.py not found in {}", path));
-    }
+    // Resolve the path the user gave us to a directory that actually contains
+    // `main.py`. Direct hit short-circuits; otherwise we look at the ComfyUI
+    // Desktop App layout (Comfy-Org/desktop, GH #47, levoy1 2026-05-24): the
+    // user typically points at `%LOCALAPPDATA%\Programs\ComfyUI` (the binary
+    // dir with `ComfyUI.exe` next to no `main.py`) because that's what their
+    // shortcut targets, but the actual Working Directory with `main.py` +
+    // `models/` + `custom_nodes/` lives under `~\Documents\ComfyUI` or
+    // `%APPDATA%\ComfyUI` depending on the install picker. We transparently
+    // re-route in that case so the error doesn't look unfixable.
+    let resolved = resolve_comfyui_path(&path)
+        .ok_or_else(|| {
+            if Path::new(&path).join("ComfyUI.exe").exists() {
+                format!(
+                    "Looks like the ComfyUI Desktop App binary folder ({}). LU needs the ComfyUI Working Directory (with main.py, models/, custom_nodes/) — by default `~\\Documents\\ComfyUI` or wherever you picked during install. Open the Desktop App once, check Settings → ComfyUI Working Directory, and paste that path here.",
+                    path
+                )
+            } else {
+                format!("main.py not found in {}", path)
+            }
+        })?;
+
+    let path = resolved;
 
     // Store in memory
     {
@@ -1052,7 +1150,7 @@ pub fn get_ollama_host(state: State<'_, AppState>) -> Result<serde_json::Value, 
 }
 
 /// Auto-start Ollama on app launch (called from setup)
-pub fn auto_start_ollama(_state: &AppState) {
+pub fn auto_start_ollama(state: &AppState) {
     // Check if already running
     {
         let mut cmd = Command::new("tasklist");
@@ -1077,7 +1175,11 @@ pub fn auto_start_ollama(_state: &AppState) {
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     match cmd.spawn() {
-        Ok(_) => println!("[Ollama] Started"),
+        Ok(child) => {
+            // Same orphan-prevention rationale as `start_ollama` above.
+            *state.ollama_process.lock().unwrap() = Some(child);
+            println!("[Ollama] Started");
+        }
         Err(e) => println!("[Ollama] Failed to start: {}", e),
     }
 }

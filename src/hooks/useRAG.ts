@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react"
 import { useShallow } from "zustand/react/shallow"
 import { useRAGStore } from "../stores/ragStore"
 import { indexDocument, retrieveContext } from "../api/rag"
-import { getModelContext, listModels, pullModel, checkConnection } from "../api/ollama"
+import { getModelContext, listModels, pullModelTauri, checkConnection } from "../api/ollama"
 import { useModelStore } from "../stores/modelStore"
 import type { DocumentMeta, RAGContext } from "../types/rag"
 
@@ -71,14 +71,92 @@ export function useRAG(conversationId: string | null) {
     checkContextWindow()
   }, [isEnabled, conversationId, documents.length])
 
+  /**
+   * Verify the embedding model is reachable. Used both as upload pre-flight
+   * (`uploadDocument` queues the file when this returns false) and standalone
+   * from the post-update banner / Install card so the UI can ask once and
+   * not re-probe per file.
+   *
+   * Returns true when nomic-embed-text (or whatever `embeddingModel` is set
+   * to) is in Ollama's model list. False when missing — caller is expected
+   * to surface the in-app Install prompt rather than blocking.
+   */
+  const ensureEmbeddingModel = useCallback(async (): Promise<boolean> => {
+    const { embeddingModel } = useRAGStore.getState()
+    const ollamaUp = await checkConnection()
+    if (!ollamaUp) return false
+    try {
+      const models = await listModels()
+      return models.some(
+        (m) => m.name === embeddingModel || m.name === embeddingModel + ":latest"
+      )
+    } catch {
+      return false
+    }
+  }, [])
+
+  /**
+   * Run `ollama pull <embeddingModel>` with byte-level progress streamed into
+   * `embeddingPullProgress`. Replaces the pre-v2.4.9 fire-and-forget pull whose
+   * console.log progress lines were invisible to the user.
+   *
+   * Uses `pullModelTauri` (event-based) — NOT `pullModel` (Response.body). The
+   * Tauri `localFetchStream` proxy collects all bytes before returning the
+   * Response on Windows release builds, so reading the body stream sees a
+   * single chunk at the very end of the pull (this is the same Bug M issue
+   * v2.4.7 fixed for benchmark TTFT). Onboarding's F45 step already uses
+   * `pullModelTauri` for the same reason — this routine matches it so users
+   * get a smoothly-updating progress bar whether they install via Onboarding,
+   * RAGPanel install card, or any future entry point.
+   */
+  const pullEmbeddingModel = useCallback(async (): Promise<boolean> => {
+    const {
+      embeddingModel,
+      setPullingEmbeddingModel,
+      setEmbeddingPullProgress,
+    } = useRAGStore.getState()
+
+    setPullingEmbeddingModel(true)
+    setEmbeddingPullProgress({ completed: 0, total: 0, status: "starting" })
+
+    try {
+      const { promise } = pullModelTauri(embeddingModel, (p) => {
+        const status = (p.status || "").toLowerCase()
+        const isComplete = status.includes("success") || status === "complete"
+        setEmbeddingPullProgress({
+          completed: p.completed || 0,
+          total: p.total || 0,
+          status: isComplete ? "success" : p.status || "downloading",
+        })
+      })
+      await promise
+      return true
+    } catch (err) {
+      console.error("[EmbeddingPull] failed:", err)
+      return false
+    } finally {
+      setPullingEmbeddingModel(false)
+      // Leave the progress visible briefly so the success state isn't a
+      // flicker — RAGPanel hides it on next render anyway.
+      setTimeout(() => setEmbeddingPullProgress(null), 1500)
+    }
+  }, [])
+
   const uploadDocument = useCallback(
     async (file: File): Promise<DocumentMeta | null> => {
       if (!conversationId) return null
 
-      const { embeddingModel, setIndexing, setIndexingProgress, addDocument, addChunks, setPullingEmbeddingModel } =
-        useRAGStore.getState()
+      const {
+        embeddingModel,
+        setIndexing,
+        setIndexingProgress,
+        addDocument,
+        addChunks,
+        setEmbeddingInstallPrompt,
+        queueEmbeddingFile,
+      } = useRAGStore.getState()
 
-      // Pre-flight: check Ollama is reachable
+      // Pre-flight: Ollama reachable?
       const ollamaUp = await checkConnection()
       if (!ollamaUp) {
         throw new Error(
@@ -86,46 +164,18 @@ export function useRAG(conversationId: string | null) {
         )
       }
 
+      // Embedding model present?  When missing we queue the file + flip the
+      // RAGPanel install-prompt flag rather than blocking via the OS confirm
+      // dialog. The user clicks Download in the in-app card → pullEmbedding
+      // Model fires → on success the queued files replay automatically.
+      const hasEmbedding = await ensureEmbeddingModel()
+      if (!hasEmbedding) {
+        queueEmbeddingFile(file)
+        setEmbeddingInstallPrompt(true)
+        return null
+      }
+
       try {
-        // Check if embedding model exists, auto-pull if missing
-        const models = await listModels()
-        const hasEmbedding = models.some(
-          (m) => m.name === embeddingModel || m.name === embeddingModel + ":latest"
-        )
-
-        if (!hasEmbedding) {
-          const shouldPull = window.confirm(
-            `The embedding model "${embeddingModel}" is not installed. Download it now? (~274MB)`
-          )
-          if (!shouldPull) {
-            throw new Error(
-              `Embedding model "${embeddingModel}" is required but not installed.`
-            )
-          }
-
-          setPullingEmbeddingModel(true)
-          try {
-            const pullRes = await pullModel(embeddingModel)
-            const reader = pullRes.body?.getReader()
-            if (reader) {
-              const decoder = new TextDecoder()
-              while (true) {
-                const { done, value } = await reader.read()
-                if (done) break
-                const text = decoder.decode(value, { stream: true })
-                for (const line of text.split("\n").filter(Boolean)) {
-                  try {
-                    const json = JSON.parse(line)
-                    if (json.status) console.log("[EmbeddingPull]", json.status)
-                  } catch { /* skip non-JSON lines */ }
-                }
-              }
-            }
-          } finally {
-            setPullingEmbeddingModel(false)
-          }
-        }
-
         setIndexing(true)
         setIndexingProgress({ current: 0, total: 1 })
 
@@ -150,8 +200,40 @@ export function useRAG(conversationId: string | null) {
         setIndexingProgress(null)
       }
     },
-    [conversationId]
+    [conversationId, ensureEmbeddingModel]
   )
+
+  /**
+   * Triggered from the in-app Install card or the post-update banner. Pulls
+   * the embedding model, then drains any files the user dropped while we
+   * waited. The drain re-enters `uploadDocument` so any later error handling
+   * (extraction failures, bogus PDFs) reuses the same surface.
+   */
+  const installEmbeddingAndDrainQueue = useCallback(async (): Promise<void> => {
+    const { setEmbeddingInstallPrompt, clearEmbeddingQueue } = useRAGStore.getState()
+    const ok = await pullEmbeddingModel()
+    setEmbeddingInstallPrompt(false)
+    if (!ok) return // error surfaced via console; user sees status in progress card
+    // Drain queue — copy first because uploadDocument doesn't touch the
+    // queue, but a stale snapshot is safer than reading state mid-loop.
+    const queue = [...useRAGStore.getState().embeddingQueuedFiles]
+    clearEmbeddingQueue()
+    for (const queued of queue) {
+      try {
+        await uploadDocument(queued)
+      } catch (err) {
+        // RAGPanel already handles per-file error display via its own
+        // setError when the upload throws — log here for diagnostics only.
+        console.error("[EmbeddingDrain] queued file failed:", queued.name, err)
+      }
+    }
+  }, [pullEmbeddingModel, uploadDocument])
+
+  const cancelEmbeddingInstall = useCallback(() => {
+    const { setEmbeddingInstallPrompt, clearEmbeddingQueue } = useRAGStore.getState()
+    setEmbeddingInstallPrompt(false)
+    clearEmbeddingQueue()
+  }, [])
 
   const removeDoc = useCallback(
     (docId: string) => {
@@ -202,5 +284,9 @@ export function useRAG(conversationId: string | null) {
     toggleRAG,
     clearAll,
     getContextForQuery,
+    ensureEmbeddingModel,
+    pullEmbeddingModel,
+    installEmbeddingAndDrainQueue,
+    cancelEmbeddingInstall,
   }
 }

@@ -13,6 +13,18 @@ interface RAGState {
   lastRetrievedChunks: { chunk: TextChunk; score: number }[]
   contextWarning: string | null
   pullingEmbeddingModel: boolean
+  /** Bytes-level progress for the embedding-model pull (Bug F45-followup,
+   *  upgrade-path UX). Populated by useRAG.pullEmbeddingModel from each
+   *  Ollama /api/pull stream chunk. `null` while idle. */
+  embeddingPullProgress: { completed: number; total: number; status: string } | null
+  /** Files the user dropped while the embedding model was still missing —
+   *  RAGPanel surfaces an Install-card; after the pull succeeds we replay
+   *  these through uploadDocument so the user doesn't have to drag again. */
+  embeddingQueuedFiles: File[]
+  /** Indicates the next document upload needs the user to confirm the
+   *  embedding install first. RAGPanel renders the prompt card; uploads
+   *  resume once `embeddingPullProgress` reaches completion. */
+  embeddingInstallPrompt: boolean
   chunksLoaded: boolean
 
   addDocument: (conversationId: string, meta: DocumentMeta) => void
@@ -28,6 +40,10 @@ interface RAGState {
   setLastRetrievedChunks: (chunks: { chunk: TextChunk; score: number }[]) => void
   setContextWarning: (warning: string | null) => void
   setPullingEmbeddingModel: (pulling: boolean) => void
+  setEmbeddingPullProgress: (p: { completed: number; total: number; status: string } | null) => void
+  setEmbeddingInstallPrompt: (prompt: boolean) => void
+  queueEmbeddingFile: (file: File) => void
+  clearEmbeddingQueue: () => void
 }
 
 export const useRAGStore = create<RAGState>()(
@@ -42,6 +58,9 @@ export const useRAGStore = create<RAGState>()(
       lastRetrievedChunks: [],
       contextWarning: null,
       pullingEmbeddingModel: false,
+      embeddingPullProgress: null,
+      embeddingQueuedFiles: [],
+      embeddingInstallPrompt: false,
       chunksLoaded: false,
 
       addDocument: (conversationId, meta) =>
@@ -158,6 +177,15 @@ export const useRAGStore = create<RAGState>()(
       setContextWarning: (warning) => set({ contextWarning: warning }),
 
       setPullingEmbeddingModel: (pulling) => set({ pullingEmbeddingModel: pulling }),
+
+      setEmbeddingPullProgress: (p) => set({ embeddingPullProgress: p }),
+
+      setEmbeddingInstallPrompt: (prompt) => set({ embeddingInstallPrompt: prompt }),
+
+      queueEmbeddingFile: (file) =>
+        set((state) => ({ embeddingQueuedFiles: [...state.embeddingQueuedFiles, file] })),
+
+      clearEmbeddingQueue: () => set({ embeddingQueuedFiles: [] }),
     }),
     {
       name: "rag-store",
