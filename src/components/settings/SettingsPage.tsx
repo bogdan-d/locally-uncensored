@@ -13,6 +13,7 @@ import { getRecommendedAgentModels } from '../../lib/model-compatibility'
 import { MemorySettings } from './MemorySettings'
 import { RemoteAccessSettings } from './RemoteAccessSettings'
 import { HardwareSettings } from './HardwareSettings'
+import { ChatbotImporter } from '../import/ChatbotImporter'
 import { ProviderSettings } from './ProviderConfig'
 import { PermissionSettings } from './PermissionSettings'
 import { MCPServerSettings } from './MCPServerSettings'
@@ -757,6 +758,14 @@ export function SettingsPage() {
               lspci/wmic). */}
           <Section title="Hardware (GPU picker)">
             <HardwareSettings />
+          </Section>
+
+          {/* Feature CC v2.5.0 — MikeS++ chatbot export importer. Parses
+              ChatGPT / Claude / Gemini export JSON (or .zip), pre-selects
+              every conversation, feeds the chosen ones into the active
+              chat's RAG store. */}
+          <Section title="Import past chatbot conversations">
+            <ChatbotImporter />
           </Section>
 
           <Section title="Image / Video Generation Timeouts">
