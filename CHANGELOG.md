@@ -4,9 +4,9 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [Unreleased]
 
-## [2.5.0] - 2026-05-25
+## [2.5.0] - 2026-05-28
 
-Minor release. 24+ changes backported from the companion repo (`uselu`) into the desktop app. Three reporter-facing bug fixes (B1 — cinemazverev / B2 — vanja-san / B3 — THobbs23) plus the codex / agent sprint (Sprint A / B / C from uselu) ride along. Production hardening (B4 / B5) and the iteration-cap bump (uselu live-test 2026-05-25) lift the autonomy ceiling so a real scaffold→install→fix→verify loop fits inside one turn. Bundles all v2.4.9 contents.
+Minor release. 30+ changes — the headline Codex / Agent sprint (Sprint A / B / C ported from the companion repo `uselu`), eight reporter-facing fixes (B1–B3 + AA + Y + Z), two new pieces of UI (BB — GPU picker, CC — chatbot-export importer), production hardening (B4 / B5), and the autonomy-ceiling bump that turns scaffold→install→fix→verify into a single turn. Bundles all v2.4.9 contents.
 
 ### Fixed — Ollama auto-detection persists across launches (B1)
 
@@ -19,6 +19,28 @@ Minor release. 24+ changes backported from the companion repo (`uselu`) into the
 ### Fixed — LM Studio per-model load/unload backend (B3)
 
 - **Three new Tauri commands for LM Studio per-model control** (THobbs23): `lmstudio_list_loaded`, `lmstudio_load_model`, `lmstudio_unload_model`. UI integration lands in the next hotfix — the backend half ships now so the LM Studio panel work can build against a stable surface.
+
+### Fixed — Ollama actually uses the context window you set (Bug AA)
+
+- **`num_ctx` now travels from Settings → Ollama on every chat + tool call** (kj103x Discord 2026-05-25/27 thread `1507756765612216411`). Pre-v2.5.0 LU passed `temperature`, `top_p`, `top_k`, and `num_predict` through to `/api/chat` but never `num_ctx`, so Ollama silently defaulted to 2048 regardless of what the user set in the UI. RAG payloads and long-turn chats got clipped on every model regardless of what the loaded model actually supported — kj103x's "VRAM caps at ~5 GB no matter the token limit" symptom. v2.5.0 adds `contextWindowOverride` to `Settings`, a `Context window (Ollama)` input under Settings → Generation, and threads the value through `ChatOptions.contextWindow` in `src/api/providers/ollama-provider.ts` (chatStream + chatWithTools) and `src/lib/ollama-stream-tools.ts` (agent tool loop). Forwarded to all four consumers — `useChat`, `useABCompare`, `useAgentChat`, `workflow-engine`. 0 = let Ollama decide (default, matches pre-v2.5.0 behaviour). Cloud providers ignore the field — they manage context themselves.
+
+### Fixed — Downloaded but invisible (Bug Y, two-layer)
+
+- **`handleTextDownload` now routes by the *active chat provider*, not by which backend happens to be enabled** (Aldrich Ironhart Discord 2026-05-25/26, msg `1508875114215899156`). Pre-v2.5.0 the logic was `useOllamaPath = !lmStudioOn && ollamaOn` — whichever was enabled won. A user chatting on LM Studio who clicked Download in Discover got the file pulled into Ollama's store (or vice versa), invisible to the chat side because the chat picker couldn't see the other backend. v2.5.0 derives the target from `getProviderIdFromModel(activeChatModel)` in `src/components/models/DiscoverModels.tsx`, with the old enabled-wins logic as a fallback for first-launch empty-state users. Ollama-only entries (those with `model.ollamaModel`) now refuse with a clear error when the user is on LM Studio ("Switch the chat picker to an Ollama model first") instead of silently pulling somewhere the user can't see.
+- **`isModelFullyInstalled` now also matches LM Studio scanner output** (Y/b). Pre-v2.5.0 the check only looked at `installedModels.filter(m => m.provider === 'ollama')` tags. After a restart, the in-memory `downloads[filename]` flag is gone, so GGUFs that LU itself wrote to LM Studio's scan dir never lit up the INSTALLED badge. v2.5.0 also matches LM Studio entries by filename basename (case-insensitive, with-or-without `.gguf` suffix, with-or-without LM Studio's `<publisher>/<repo>/` prefix), so the badge survives both a restart and a cross-backend download.
+
+### Fixed — Hermes 3 phantom-complete + Hermes 3 repo retarget (Bug Z, leonsk29 GH #48)
+
+- **Pulls that fail without an explicit `{"status":"success"}` no longer flip the badge to "Completed"** (leonsk29 GH #48 2026-05-26). Pre-v2.5.0 `pull_model_stream` in `src-tauri/src/commands/proxy.rs` returned `Ok(())` whenever the byte-stream ended cleanly, even if Ollama never said "success" — and `src/hooks/useModels.ts` swallowed any thrown error from the catch with an empty block. leon's CLI repro on 2026-05-26 confirmed Ollama responds to a broken HF reference (e.g. `bartowski/Hermes-3-Llama-3.1-8B-GGUF` on llama.cpp-incompatible builds) with HTTP 200 + a stream that ends after just `{"status":"pulling manifest"}`. v2.5.0's Rust side now tracks the last status + watches each line for an `error` field, and returns a descriptive `Err` ("pull did not complete: stream ended at \"pulling manifest\". Repo may be incompatible with llama.cpp (try a different GGUF mirror).") when neither success nor explicit error came through. `useModels.ts` now surfaces that string as the card's last status (`Failed: ...`) instead of swallowing it. Cancellation is still distinguished from real errors.
+- **Hermes 3 discover entries switched from `bartowski/Hermes-3-Llama-*-GGUF` to `mradermacher/Hermes-3-Llama-*-GGUF`** (Z/b). bartowski's quants for those specific repos return HTTP 400 on current Ollama. mradermacher's GGUFs are llama.cpp-compatible and ship the same Q4_K_M sizes (2 GB / 5 GB / 42 GB for 3.2 3B / 3.1 8B / 3.1 70B respectively). Filename convention also changed (mradermacher uses `.Q4_K_M.gguf`, bartowski uses `-Q4_K_M.gguf`) and the entries reflect that.
+
+### New — Hardware: GPU picker (Bug BB, BobbyT)
+
+- **Settings → Hardware now lists every detected GPU and lets you pin a vendor + indices** (BobbyT Discord 2026-05-26). BobbyT runs AMD RX 6800XT 16 GB + Intel Arc Pro B60 24 GB and wanted to pin the Arc Pro for inference. Pre-v2.5.0 LU had no picker — Ollama and ComfyUI used whatever the driver picked first. v2.5.0 adds `commands::gpu` with `detect_gpus` (probes nvidia-smi / rocm-smi / lspci on Linux / wmic on Windows / system_profiler on macOS), `set_gpu_selection` / `get_gpu_selection` (AppState-backed), and `apply_gpu_env` which forwards the right env-var family on next `start_ollama` / `start_comfyui` spawn: `CUDA_VISIBLE_DEVICES` for NVIDIA, `HIP_VISIBLE_DEVICES + ROCR_VISIBLE_DEVICES` for AMD, `ONEAPI_DEVICE_SELECTOR` (level_zero) for Intel. "Auto" leaves env-vars unset and matches pre-v2.5.0 behaviour. Frontend lives at `src/components/settings/HardwareSettings.tsx`; settings persisted as `gpuVendor` + `gpuIndices` on the existing Settings store. The boot effect in `App.tsx` pushes the persisted pick into AppState at app start so users don't have to open Settings before the first Ollama / ComfyUI spawn.
+
+### New — Chatbot-export importer (Feature CC, MikeS++)
+
+- **Settings → "Import past chatbot conversations" parses ChatGPT, Claude, and Gemini exports** (MikeS++ Discord 2026-05-27). New file picker accepts the official export JSON or the unmodified .zip (JSZip walks for `conversations.json` with a fallback to the largest .json inside). Per-platform parser in `src/lib/parsers/chatbot-export.ts`: ChatGPT's `mapping` tree gets linearised by walking the first child each turn (matches what the user saw in the UI), Claude's `chat_messages` array gets a 1-to-1 markdown render, Gemini's `messages` array (or single-prompt activity fallback) gets the same treatment. Each conversation becomes a synthetic `.md` File and goes through the existing `useRAG.uploadDocument` pipeline — same chunking + embedding flow as a dragged-in document. Imports attach to the active chat's RAG store (per-conversation by design; memory facts stay in the curated memoryStore). Conversations are pre-selected for convenience; the UI surfaces per-conversation checkboxes + Select all / none for cleanup before import. Stays on the user's machine — no upload, no cloud round-trip.
 
 ### New — Codex / Agent capabilities (Sprint A / B / C from uselu)
 
@@ -48,14 +70,18 @@ Minor release. 24+ changes backported from the companion repo (`uselu`) into the
 
 ### Stability
 
-- `vitest`: **2488 tests** green (previously 2312; +176 across the new bg_tasks, repo_map, architect-split, stage-mode, code-review-mode, logger, .lurules, pr_resume, project_init paths).
-- `cargo test --release`: **117 passed** (previously 100; +17 across `bg_tasks` and `repo_map` modules).
+- `vitest`: **2501 tests** green (previously 2312; +189 across the new bg_tasks, repo_map, architect-split, stage-mode, code-review-mode, logger, .lurules, pr_resume, project_init paths plus AA num_ctx forwarding (+2) and CC parser (+11)).
+- `cargo test`: **122 passed** (previously 100; +22 across `bg_tasks`, `repo_map`, and `gpu` modules).
 - `tsc --noEmit`: clean. `cargo check`: clean (pre-existing dead-code warnings only).
-- No breaking changes; the new settings fields auto-default and the iteration cap bump is purely upward.
+- No breaking changes; the new settings fields (`contextWindowOverride`, `gpuVendor`, `gpuIndices`) auto-default to no-op values and the iteration cap bump is purely upward.
 
 ### Heads-up
 
 Windows + Linux only — macOS is not part of this build. `#bug-reports` / `#help-*` / GitHub monitored daily for regression reports.
+
+If you had a custom HuggingFace download path set, double-check it after first launch — v2.5.0 introduces the GPU picker which adds new env-vars at spawn time, and on some setups Ollama / ComfyUI need a manual restart for the change to take effect.
+
+The chatbot importer attaches to the **active chat's** RAG store. Open or create a conversation before importing if you want a separate bucket per export.
 
 juliandiggins-stack's queued feature requests are deferred to v2.5.1 since the codex sprint took priority for this release.
 

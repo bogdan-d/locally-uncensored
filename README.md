@@ -37,7 +37,7 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ## v2.5.0 — Current Release
 
-**Minor release. 24+ changes backported from the companion repo (`uselu`).** Three reporter-facing bug fixes (B1 cinemazverev / B2 vanja-san / B3 THobbs23) plus the codex / agent sprint (Sprint A / B / C) ride along. Production hardening (B4 / B5) and the iteration-cap bump (200 iters / 400 tool calls, from 25 / 50) lift the autonomy ceiling so a real scaffold→install→fix→verify loop fits inside one turn. Bundles all v2.4.9 contents.
+**Minor release. 30+ changes — headline Codex / Agent sprint (Sprint A / B / C ported from `uselu`), eight reporter-facing fixes, two new pieces of UI (GPU picker, chatbot-export importer), production hardening, iteration-cap bump (200 iters / 400 tool calls, from 25 / 50).** Bundles all v2.4.9 contents.
 
 Auto-update prompts on next launch.
 
@@ -45,6 +45,13 @@ Auto-update prompts on next launch.
 - **Ollama auto-detection persists across launches** (B1 — cinemazverev). User's deliberate re-enable is now authoritative; auto-detect can only add backends, never remove ones the user explicitly turned on.
 - **Multi-backend modal persists Ollama choice** (B2 — vanja-san). Picking Ollama in the modal, closing it, and re-opening now keeps Ollama selected instead of resetting to "Auto".
 - **LM Studio per-model load/unload backend** (B3 — THobbs23). Three new Tauri commands (`lmstudio_list_loaded`, `lmstudio_load_model`, `lmstudio_unload_model`) ship now; the UI integration lands in the next hotfix.
+- **Ollama actually uses the context window you set** (AA — kj103x). New "Context window (Ollama)" input under Settings → Generation. Pre-v2.5.0 LU never passed `num_ctx`, so Ollama silently used its 2048 default and clipped RAG payloads + long-turn chats regardless of the model's real context size. 0 = let Ollama decide (default). Cloud providers ignore the field.
+- **Downloaded but invisible — provider-mismatch + LM Studio installed-badge** (Y — Aldrich Ironhart, two-layer). Discover's download routing now follows the *active chat picker* instead of "whichever backend is enabled" — so a user chatting on LM Studio no longer ends up with the file in Ollama (or vice versa). And the INSTALLED badge now also matches against LM Studio's scanner output, not just Ollama tags — so GGUFs in LM Studio's scan dir light up correctly after a restart.
+- **Hermes 3 phantom-complete fixed + Hermes 3 entries retargeted** (Z — leonsk29 GH #48). Pre-v2.5.0 Ollama streams that ended without an explicit `success` line were treated as success, so the badge flipped to "Completed" even when the pull hit `400: Repository is not GGUF compatible`. v2.5.0 surfaces the real error on the card. Plus all three Hermes 3 GGUF entries (3B / 8B / 70B) switched from `bartowski/...` (broken on current Ollama) to `mradermacher/Hermes-3-Llama-*-GGUF` (llama.cpp-compatible).
+
+### What's new — UI (Settings)
+- **GPU picker** (BB — BobbyT). New Settings → Hardware section lists every detected GPU (via nvidia-smi / rocm-smi / lspci on Linux / wmic on Windows / system_profiler on macOS) and lets you pin a vendor + indices. Forwards the right env-var family on next Ollama / ComfyUI spawn: `CUDA_VISIBLE_DEVICES` (NVIDIA), `HIP_VISIBLE_DEVICES + ROCR_VISIBLE_DEVICES` (AMD), `ONEAPI_DEVICE_SELECTOR` (Intel level_zero). "Auto" leaves env-vars unset — matches pre-v2.5.0 behaviour.
+- **Chatbot-export importer** (CC — MikeS++). New Settings section parses ChatGPT, Claude, and Gemini exports (`.json` or unmodified `.zip`) and feeds each conversation into the active chat's RAG store. Detects platform from the JSON shape, lets you pick conversations via per-entry checkboxes + Select all / none. Stays on your machine.
 
 ### What's new — codex / agent (Sprint A / B / C from uselu)
 - **Architect / Editor split** — separate "architect" model plans (no tools), regular Codex model applies (with tools). Aider-style, ~30 % better edit accuracy on multi-file refactors. Toggle in Settings → Agent → Codex Agent.
@@ -68,14 +75,16 @@ Auto-update prompts on next launch.
 - **Iteration cap bump** — `agentMaxIterations` 25 → 200, `agentMaxToolCalls` 50 → 400. Real scaffold→install→fix→verify loops on a 35B local model hit the old caps mid-useful-work; the new ones are roomy enough for multi-file refactors yet still bounded.
 
 ### Stability
-- `vitest`: **2488 tests** green (previously 2312; +176 across new bg_tasks, repo_map, architect-split, stage-mode, code-review-mode, logger, .lurules, pr_resume, project_init paths).
-- `cargo test --release`: **117 passed** (previously 100; +17 across `bg_tasks` and `repo_map` modules).
+- `vitest`: **2501 tests** green (previously 2312; +189 across new bg_tasks, repo_map, architect-split, stage-mode, code-review-mode, logger, .lurules, pr_resume, project_init paths + AA num_ctx forwarding + CC chatbot-export parser).
+- `cargo test`: **122 passed** (previously 100; +22 across `bg_tasks`, `repo_map`, and `gpu` modules).
 - `tsc --noEmit`: clean. `cargo check`: clean (pre-existing dead-code warnings only).
 - No breaking changes; settings auto-default, cap bump is upward-only.
 
 For previous release notes (v2.4.9 — 5 bugs + 2 features, v2.4.8 — 9 changes, v2.4.6 — 1 bug, v2.4.5 — 14 bugs), see [CHANGELOG.md](CHANGELOG.md).
 
-Contributors with feature requests queued for v2.5.1: cinemazverev, vanja-san, THobbs23, juliandiggins-stack.
+Reporters with code shipping in this release: cinemazverev, vanja-san, THobbs23, Kj103x, Aldrich Ironhart, leonsk29, BobbyT, MikeS++.
+
+Contributors with feature requests still queued for v2.5.1: juliandiggins-stack.
 
 ---
 
