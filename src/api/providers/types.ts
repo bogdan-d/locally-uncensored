@@ -98,6 +98,13 @@ export interface ChatOptions {
   topK?: number         // Ollama/Anthropic support this, OpenAI doesn't
   maxTokens?: number
   thinking?: boolean    // Enable model thinking/reasoning mode
+  // Bug AA v2.5.0 — Kj103x Discord 2026-05-27. Ollama defaults `num_ctx` to
+  // 2048 if you don't pass it in /api/chat options, which silently caps RAG
+  // and long-turn chats even though the loaded model supports way more. When
+  // set, we forward this as `options.num_ctx` to Ollama. Other providers
+  // ignore it (they have their own context handling). 0/undefined = let the
+  // provider use its default.
+  contextWindow?: number
   signal?: AbortSignal
 }
 

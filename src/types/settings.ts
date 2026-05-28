@@ -35,6 +35,14 @@ export interface Settings {
   imageGenTimeoutMinutes: number
   /** Video generation timeout in minutes. Default 60. */
   videoGenTimeoutMinutes: number
+  // Bug AA v2.5.0 — Kj103x Discord 2026-05-27. Ollama defaults `num_ctx` to
+  // 2048, which silently caps RAG payloads and long-turn chats even on
+  // models that support way more. This override is forwarded to Ollama
+  // chat/chatWithTools as `options.num_ctx`. 0 = use Ollama default
+  // (recommended unless you have a specific reason to override). Other
+  // providers ignore this field — they manage context themselves.
+  /** User-side context-window override (forwarded as Ollama's num_ctx). 0 = auto. */
+  contextWindowOverride: number
   // ── v2.5.0 Codex sprint A/B/C settings (ported from uselu) ──────
   /**
    * Codex Architect/Editor split. When on, a separate `codexArchitectModel`

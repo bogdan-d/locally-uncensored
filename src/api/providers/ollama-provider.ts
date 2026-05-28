@@ -97,6 +97,15 @@ export class OllamaProvider implements ProviderClient {
     if (options?.topP !== undefined) ollamaOptions.top_p = options.topP
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens) ollamaOptions.num_predict = options.maxTokens
+    // Bug AA v2.5.0 — forward user's context-window override. Without this
+    // Ollama silently uses num_ctx=2048 (its default), which RAG payloads
+    // and long-turn chats blow through immediately. Kj103x Discord
+    // 2026-05-27: "LU caps VRAM ~5 GB regardless of context window UI
+    // setting" — the UI setting was never wired here. Setting num_ctx
+    // higher than the loaded model's max is harmless (Ollama clamps).
+    if (options?.contextWindow && options.contextWindow > 0) {
+      ollamaOptions.num_ctx = options.contextWindow
+    }
     body.options = ollamaOptions
     // Tri-state: true → explicit think on, false → explicit think off
     // (saves tokens on QwQ / DeepSeek-R1 / Gemma 4 etc.), undefined →
@@ -177,6 +186,10 @@ export class OllamaProvider implements ProviderClient {
     if (options?.topP !== undefined) ollamaOptions.top_p = options.topP
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens) ollamaOptions.num_predict = options.maxTokens
+    // Bug AA v2.5.0 — see chatStream() for the why.
+    if (options?.contextWindow && options.contextWindow > 0) {
+      ollamaOptions.num_ctx = options.contextWindow
+    }
     body.options = ollamaOptions
     // Tri-state think flag — see chatStream() for details.
     if (options?.thinking === true) body.think = true

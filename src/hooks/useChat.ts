@@ -193,6 +193,10 @@ export function useChat() {
         topP: settings.topP,
         topK: settings.topK,
         maxTokens: settings.maxTokens || undefined,
+        // Bug AA v2.5.0 — Kj103x. 0 in settings means "let provider decide";
+        // any positive value gets forwarded as Ollama `num_ctx`. Other
+        // providers ignore the field.
+        contextWindow: settings.contextWindowOverride || undefined,
         thinking: useThinking,
         signal: abort.signal,
       }

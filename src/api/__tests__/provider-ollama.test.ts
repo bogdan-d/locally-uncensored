@@ -451,6 +451,51 @@ describe('OllamaProvider', () => {
       expect(body.options.num_predict).toBe(1024)
     })
 
+    it('Bug AA v2.5.0: forwards contextWindow as num_ctx when > 0', async () => {
+      // Kj103x Discord 2026-05-27: LU never forwarded num_ctx so Ollama
+      // silently used its 2048 default, clipping RAG payloads and long
+      // chats. This test locks in that the override flows through.
+      const provider = new OllamaProvider(makeConfig())
+      mockLocalFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          message: { role: 'assistant', content: 'ok' },
+          done: true,
+        }), { status: 200 })
+      )
+
+      await provider.chatWithTools(
+        'llama3.1:8b',
+        [{ role: 'user', content: 'test' }],
+        [],
+        { temperature: 0.7, contextWindow: 16384 },
+      )
+
+      const body = JSON.parse(mockLocalFetch.mock.calls[0][1]?.body as string)
+      expect(body.options.num_ctx).toBe(16384)
+    })
+
+    it('Bug AA v2.5.0: omits num_ctx when contextWindow is 0 or undefined', async () => {
+      // 0 means "let Ollama decide" — we must NOT pass num_ctx, otherwise
+      // we'd override the Modelfile/server defaults with garbage.
+      const provider = new OllamaProvider(makeConfig())
+      mockLocalFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          message: { role: 'assistant', content: 'ok' },
+          done: true,
+        }), { status: 200 })
+      )
+
+      await provider.chatWithTools(
+        'llama3.1:8b',
+        [{ role: 'user', content: 'test' }],
+        [],
+        { temperature: 0.7, contextWindow: 0 },
+      )
+
+      const body = JSON.parse(mockLocalFetch.mock.calls[0][1]?.body as string)
+      expect(body.options.num_ctx).toBeUndefined()
+    })
+
     it('v2.4.6 Bug L: NEVER sets num_gpu — Ollama decides layer placement itself', async () => {
       // Pre-v2.4.6 this asserted body.options === { num_gpu: 99 }, which
       // forced all model layers onto the GPU and pushed the KV cache into

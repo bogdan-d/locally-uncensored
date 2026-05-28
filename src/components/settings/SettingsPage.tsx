@@ -731,6 +731,24 @@ export function SettingsPage() {
                 className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
               />
             </div>
+            {/* Bug AA v2.5.0 — Ollama num_ctx override. 0 = use the provider
+                default (Ollama default = 2048 on most builds, which silently
+                clips RAG / long chats). Bump up to use the model's full
+                context window. Ignored by Anthropic / OpenAI providers. */}
+            <div className="flex items-center justify-between">
+              <span className="text-[0.7rem] text-gray-700 dark:text-gray-400" title="Forwarded as Ollama num_ctx. 0 = provider default (Ollama defaults to 2048, which clips RAG and long chats). Bump up to use the model's full context. Ignored by cloud providers.">Context window (Ollama)</span>
+              <input
+                type="number"
+                value={settings.contextWindowOverride ?? 0}
+                onChange={(e) => updateSettings({ contextWindowOverride: Math.max(0, parseInt(e.target.value) || 0) })}
+                min={0}
+                placeholder="0"
+                className="w-20 px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-right text-gray-300 font-mono focus:outline-none focus:border-white/20"
+              />
+            </div>
+            <div className="text-[0.6rem] text-gray-500 dark:text-gray-500 leading-relaxed pt-0.5">
+              0 = let Ollama decide (defaults to 2048). Set to e.g. 8192 or 16384 if RAG / long chats get clipped. Cloud providers ignore this.
+            </div>
           </Section>
 
           <Section title="Image / Video Generation Timeouts">

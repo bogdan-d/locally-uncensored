@@ -458,6 +458,8 @@ export function useAgentChat() {
           topP: settings.topP,
           topK: settings.topK,
           maxTokens: settings.maxTokens || undefined,
+          // Bug AA v2.5.0 — Kj103x. Same num_ctx override flow as useChat.
+          contextWindow: settings.contextWindowOverride || undefined,
           thinking: thinkOpt as unknown as boolean,
           signal: abort.signal,
         }
@@ -519,6 +521,8 @@ export function useAgentChat() {
                   temperature: chatOptions.temperature,
                   thinking: chatOptions.thinking,
                   maxTokens: chatOptions.maxTokens,
+                  // Bug AA v2.5.0 — keep num_ctx override across the tool loop.
+                  contextWindow: chatOptions.contextWindow,
                   signal: abort.signal,
                 },
                 (c) => {
@@ -547,6 +551,8 @@ export function useAgentChat() {
                     temperature: chatOptions.temperature,
                     thinking: undefined,
                     maxTokens: chatOptions.maxTokens,
+                    // Bug AA v2.5.0 — keep num_ctx override on the no-think retry too.
+                    contextWindow: chatOptions.contextWindow,
                     signal: abort.signal,
                   },
                   (c) => {

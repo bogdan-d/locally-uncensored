@@ -27,7 +27,7 @@ export async function streamOllamaChatWithTools(
   modelId: string,
   messages: ChatMessage[],
   tools: ToolDefinition[],
-  options: { temperature?: number; thinking?: boolean; maxTokens?: number; signal?: AbortSignal },
+  options: { temperature?: number; thinking?: boolean; maxTokens?: number; contextWindow?: number; signal?: AbortSignal },
   onContent: (content: string) => void,
   onThinking: (thinking: string) => void,
 ): Promise<{ content: string; toolCalls: ToolCall[]; thinking: string }> {
@@ -50,6 +50,10 @@ export async function streamOllamaChatWithTools(
   }
   if (options.temperature !== undefined) body.options.temperature = options.temperature
   if (options.maxTokens) body.options.num_predict = options.maxTokens
+  // Bug AA v2.5.0 — forward num_ctx override (0/undefined = use Ollama default).
+  if (options.contextWindow && options.contextWindow > 0) {
+    body.options.num_ctx = options.contextWindow
+  }
   if (options.thinking === true) body.think = true
   else if (options.thinking === false) body.think = false
 

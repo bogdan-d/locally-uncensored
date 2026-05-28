@@ -35,6 +35,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // Generation timeouts (Bug P v2.4.7)
   imageGenTimeoutMinutes: 20,
   videoGenTimeoutMinutes: 60,
+  // Bug AA v2.5.0 — Ollama num_ctx override. 0 = use Ollama default (2048
+  // on most builds). Users with RAG / long chats can bump this up.
+  contextWindowOverride: 0,
   // ── v2.5.0 Codex sprint A/B/C defaults (ported from uselu) ──────
   codexArchitectMode: false,
   codexArchitectModel: '',

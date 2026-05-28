@@ -47,6 +47,8 @@ export function useABCompare() {
       topP: settings.topP,
       topK: settings.topK,
       maxTokens: settings.maxTokens || undefined,
+      // Bug AA v2.5.0 — forward num_ctx override to both A/B sides.
+      contextWindow: settings.contextWindowOverride || undefined,
     }
 
     // Stream Model A

@@ -216,6 +216,8 @@ export class WorkflowEngine {
       } else {
         const stream = provider.chatStream(modelToUse, messages, {
           temperature: settings.temperature,
+          // Bug AA v2.5.0 — keep num_ctx override for workflow steps too.
+          contextWindow: settings.contextWindowOverride || undefined,
           signal: this.abortController.signal,
         })
         for await (const chunk of stream) {
@@ -233,6 +235,8 @@ export class WorkflowEngine {
       if (strategy === 'native') {
         const turn = await provider.chatWithTools(modelToUse, messages, allowedTools, {
           temperature: settings.temperature,
+          // Bug AA v2.5.0 — same num_ctx override on tool calls.
+          contextWindow: settings.contextWindowOverride || undefined,
           signal: this.abortController.signal,
         })
         output = turn.content || ''
