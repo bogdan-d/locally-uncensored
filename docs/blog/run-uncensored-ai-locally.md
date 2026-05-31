@@ -3,7 +3,7 @@ title: "How to Run Uncensored AI Locally: Chat, Images & Video in One App"
 description: "A practical guide to running uncensored AI on your own hardware. Learn about abliterated models, set up Locally Uncensored with Ollama and ComfyUI, and generate text, images, and video — all offline."
 date: 2025-03-29
 tags: [ai, local-ai, ollama, comfyui, uncensored-ai, llm, stable-diffusion, open-source]
-canonical_url: https://purpledoubled.github.io/locally-uncensored/blog/run-uncensored-ai-locally
+canonical_url: https://locallyuncensored.com/blog/run-uncensored-ai-locally
 cover_image: https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png
 published: true
 ---
@@ -14,7 +14,7 @@ If you've spent any time with ChatGPT, Midjourney, or other cloud AI services, y
 
 There's a better way. You can **run uncensored AI locally** on your own hardware — chat, image generation, and video creation — without sending a single byte to the cloud.
 
-This guide walks through how to do exactly that using [Locally Uncensored](https://purpledoubled.github.io/locally-uncensored/), an open-source desktop app that combines Ollama and ComfyUI into a single interface.
+This guide walks through how to do exactly that using [Locally Uncensored](https://locallyuncensored.com/), an open-source desktop app that combines Ollama and ComfyUI into a single interface.
 
 ## Why Run AI Locally?
 
@@ -190,7 +190,7 @@ cd locally-uncensored
 
 That's it. The setup script handles everything else.
 
-Check out the [landing page](https://purpledoubled.github.io/locally-uncensored/) for screenshots and feature details, or go straight to the [GitHub repo](https://github.com/PurpleDoubleD/locally-uncensored) to browse the source.
+Check out the [landing page](https://locallyuncensored.com/) for screenshots and feature details, or go straight to the [GitHub repo](https://github.com/PurpleDoubleD/locally-uncensored) to browse the source.
 
 If you run into issues or have feature requests, the [GitHub Discussions](https://github.com/PurpleDoubleD/locally-uncensored/discussions) page is the place.
 

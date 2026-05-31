@@ -6,7 +6,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) desktop application that co
 
 ## Key Facts
 - Name: Locally Uncensored
-- Current Version: v2.4.2 (April 26, 2026)
+- Current Version: v2.4.9 (May 25, 2026)
 - Type: Desktop AI Application
 - License: AGPL-3.0 (free and open source)
 - Platforms: Windows 10/11, Linux (deb, rpm, AppImage)
@@ -29,12 +29,18 @@ Locally Uncensored is a free, open-source (AGPL-3.0) desktop application that co
 - Agent Mode with 14 tools, MCP integration, sub-agent delegation, budget caps
 - Mobile remote access via LAN or Cloudflare Tunnel with 6-digit passcode + QR setup
 - A/B Model Compare and Local Benchmark built in
-- Memory system and document RAG
+- Memory system and Document Chat (RAG) — local embeddings, no cloud
 - Voice STT (Whisper) and TTS
 - Auto-update over signed NSIS channel for Windows
 - Single-instance lock (v2.4.0): double-launch focuses existing window
 - In-app Privacy section (v2.4.0): explicit data-handling statement
 - Re-run Onboarding button (v2.4.0): restart the first-launch wizard on demand
+- Document Chat (RAG) with one-click nomic-embed-text install; embedding chunks survive NSIS auto-updates (v2.4.9)
+- VRAM tier filter (Lightweight ≤10 GB / Mid-Range 10–16 GB / High-End >16 GB) across text, image, and video models in Discover (v2.4.9)
+- Detects the ComfyUI Desktop App layout, not just classic main.py installs (v2.4.9)
+- Configurable image/video generation timeouts (1–480 min) for CPU/iGPU users (v2.4.7)
+- Inline "Start LM Studio Server" button when LM Studio is installed but its server is off (v2.4.7)
+- Linux installer auto-detects deb/rpm/AppImage family; ComfyUI CPU mode + Arch venv auto-create (v2.4.5)
 
 ## Supported Chat Models
 - Qwen 3.6: 27B dense + 35B MoE (vision, agentic coding, thinking, 256K context, day-0 support)
