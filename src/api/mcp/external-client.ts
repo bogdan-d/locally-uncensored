@@ -6,6 +6,7 @@
  */
 
 import type { MCPToolDefinition, MCPServerConfig } from './types'
+import { log } from '../../lib/logger'
 
 // JSON-RPC message types
 interface JsonRpcRequest {
@@ -59,7 +60,7 @@ export class MCPExternalClient {
       })
 
       this.process.stderr.on('data', (data: string) => {
-        console.warn(`[MCP:${this.config.name}] stderr:`, data)
+        log.warn(`[MCP:${this.config.name}] stderr`, { data })
       })
 
       this.process.on('close', () => {

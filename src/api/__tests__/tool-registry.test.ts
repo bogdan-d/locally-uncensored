@@ -9,12 +9,14 @@ import {
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
 describe('AGENT_TOOL_DEFS', () => {
-  it('contains exactly 28 tool definitions', () => {
+  it('contains exactly 29 tool definitions', () => {
     // Phase 13 v2.4.0: delegate_task added as a builtin (→ 15 tools).
     // v2.5.0 sprint A/B/C from uselu: +13 codex tools — shell_task_*,
     // shell_execute_background, git_*, gh_pr_create, pr_resume,
     // project_init, run_tests (→ 28 tools).
-    expect(AGENT_TOOL_DEFS).toHaveLength(28)
+    // v2.5.0 Feature EE: video_generate (text-to-video via the VRAM hand-off
+    // orchestrator) added alongside image_generate (→ 29 tools).
+    expect(AGENT_TOOL_DEFS).toHaveLength(29)
   })
 
   const expectedTools = [
@@ -40,6 +42,7 @@ describe('AGENT_TOOL_DEFS', () => {
     'project_init',
     'run_tests',
     'image_generate',
+    'video_generate',
     'run_workflow',
     'screenshot',
     'process_list',
@@ -76,13 +79,14 @@ describe('AGENT_TOOL_DEFS', () => {
     // Phase 13 v2.4.0: delegate_task added under workflow category (confirm default).
     // v2.5.0 sprint A/B/C from uselu: codex tools default to confirm (writes,
     // shell, git, gh, project_init, run_tests — all touch the user's machine).
+    // v2.5.0 Feature EE: video_generate (image category → confirm default).
     expect(confirmNames).toEqual([
       'code_execute', 'delegate_task', 'file_list', 'file_read', 'file_search',
       'file_write', 'gh_pr_create', 'git_commit', 'git_diff', 'git_log',
       'git_push', 'git_status', 'image_generate', 'pr_resume', 'project_init',
       'run_tests', 'run_workflow', 'screenshot', 'shell_execute',
       'shell_execute_background', 'shell_task_kill', 'shell_task_list',
-      'shell_task_status',
+      'shell_task_status', 'video_generate',
     ])
   })
 })

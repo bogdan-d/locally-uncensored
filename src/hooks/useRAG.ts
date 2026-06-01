@@ -5,6 +5,7 @@ import { indexDocument, retrieveContext } from "../api/rag"
 import { getModelContext, listModels, pullModelTauri, checkConnection } from "../api/ollama"
 import { useModelStore } from "../stores/modelStore"
 import type { DocumentMeta, RAGContext } from "../types/rag"
+import { log } from "../lib/logger"
 
 const EMPTY_DOCS: DocumentMeta[] = []
 
@@ -132,7 +133,7 @@ export function useRAG(conversationId: string | null) {
       await promise
       return true
     } catch (err) {
-      console.error("[EmbeddingPull] failed:", err)
+      log.error("[EmbeddingPull] failed", { err })
       return false
     } finally {
       setPullingEmbeddingModel(false)
@@ -193,7 +194,7 @@ export function useRAG(conversationId: string | null) {
 
         return meta
       } catch (err) {
-        console.error("Failed to index document:", err)
+        log.error("Failed to index document", { err })
         throw err
       } finally {
         setIndexing(false)
@@ -224,7 +225,7 @@ export function useRAG(conversationId: string | null) {
       } catch (err) {
         // RAGPanel already handles per-file error display via its own
         // setError when the upload throws — log here for diagnostics only.
-        console.error("[EmbeddingDrain] queued file failed:", queued.name, err)
+        log.error("[EmbeddingDrain] queued file failed", { name: queued.name, err })
       }
     }
   }, [pullEmbeddingModel, uploadDocument])

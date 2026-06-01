@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Brain, Download, Upload, Trash2, Search, Plus, X, Check, Pencil, Zap, FileJson } from 'lucide-react'
+import { Brain, Download, Upload, Trash2, Search, Plus, X, Check, Pencil, Zap, FileJson, Archive, Sparkles } from 'lucide-react'
 import { useMemoryStore, getMemoryBudget } from '../../stores/memoryStore'
 import { useModelStore } from '../../stores/modelStore'
 import { getModelMaxTokens } from '../../lib/context-compaction'
@@ -24,6 +24,9 @@ export function MemorySettings() {
   const [addingNew, setAddingNew] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [contextBudgetLabel, setContextBudgetLabel] = useState('')
+  // Feature FF: reveal outdated (stale/superseded) entries, read-only.
+  const [showOutdated, setShowOutdated] = useState(false)
+  const [reembedState, setReembedState] = useState<'idle' | 'running' | 'done'>('idle')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const jsonInputRef = useRef<HTMLInputElement>(null)
 
@@ -52,7 +55,12 @@ export function MemorySettings() {
     }).catch(() => setContextBudgetLabel(''))
   }, [])
 
+  const isEntryStale = (e: MemoryFile) => e.stale === true || typeof e.supersededBy === 'string'
+  const staleCount = entries.filter(isEntryStale).length
+
   const filtered = entries.filter(e => {
+    // Hide outdated entries unless the user opted to reveal them.
+    if (!showOutdated && isEntryStale(e)) return false
     if (search) {
       const q = search.toLowerCase()
       return e.title.toLowerCase().includes(q) || e.content.toLowerCase().includes(q) || e.tags.some(t => t.toLowerCase().includes(q))
@@ -116,6 +124,21 @@ export function MemorySettings() {
     }
     clearAll()
     setConfirmClear(false)
+  }
+
+  // Feature FF: backfill embeddings for memories that don't have one yet
+  // (created pre-v2.5.0, or while Ollama was down). Best-effort; the store
+  // swallows per-entry failures and the call is idempotent.
+  const handleReembed = async () => {
+    if (reembedState === 'running') return
+    setReembedState('running')
+    try {
+      await useMemoryStore.getState().ensureMemoryEmbeddings()
+      setReembedState('done')
+      setTimeout(() => setReembedState('idle'), 2500)
+    } catch {
+      setReembedState('idle')
+    }
   }
 
   const handleAddMemory = () => {
@@ -208,6 +231,23 @@ export function MemorySettings() {
         />
       </div>
 
+      {/* Show outdated toggle — only surfaces when there ARE outdated entries */}
+      {staleCount > 0 && (
+        <div className="flex items-center justify-between py-0.5">
+          <div className="flex items-center gap-1.5">
+            <Archive size={11} className="text-gray-500" />
+            <span className="text-[0.6rem] text-gray-500">Show outdated ({staleCount})</span>
+          </div>
+          <button
+            onClick={() => setShowOutdated((v) => !v)}
+            className={`relative w-7 h-3.5 rounded-full transition-colors ${showOutdated ? 'bg-gray-500' : 'bg-gray-300 dark:bg-gray-700'}`}
+            aria-label="Toggle outdated memories"
+          >
+            <span className={`absolute top-0.5 left-0.5 w-2.5 h-2.5 rounded-full bg-white transition-transform ${showOutdated ? 'translate-x-3.5' : ''}`} />
+          </button>
+        </div>
+      )}
+
       {/* Add new memory */}
       {addingNew ? (
         <div className="space-y-1.5 p-2.5 rounded-lg border border-white/10 bg-white/[0.02]">
@@ -279,21 +319,32 @@ export function MemorySettings() {
             )
           }
 
+          const stale = isEntryStale(entry)
           return (
-            <div key={entry.id} className="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group">
+            <div key={entry.id} className={`flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-white/[0.03] group ${stale ? 'opacity-50' : ''}`}>
               <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${TYPE_DOT_COLORS[entry.type]}`} />
               <div className="flex-1 min-w-0">
-                <p className="text-[0.65rem] font-medium text-gray-200">{entry.title}</p>
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[0.65rem] font-medium text-gray-200 truncate">{entry.title}</p>
+                  {stale && (
+                    <span className="flex items-center gap-0.5 text-[0.45rem] uppercase tracking-wider text-gray-500 border border-gray-600/40 rounded px-1 py-px shrink-0" title="Outdated — kept for reference, not injected into prompts">
+                      <Archive size={8} /> outdated
+                    </span>
+                  )}
+                </div>
                 <p className="text-[0.6rem] text-gray-500 break-words line-clamp-2">{entry.content}</p>
               </div>
               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                <button
-                  onClick={() => startEdit(entry)}
-                  className="p-0.5 rounded hover:bg-white/10 text-gray-600 hover:text-gray-300"
-                  aria-label="Edit entry"
-                >
-                  <Pencil size={10} />
-                </button>
+                {/* Outdated entries are read-only — no edit affordance. */}
+                {!stale && (
+                  <button
+                    onClick={() => startEdit(entry)}
+                    className="p-0.5 rounded hover:bg-white/10 text-gray-600 hover:text-gray-300"
+                    aria-label="Edit entry"
+                  >
+                    <Pencil size={10} />
+                  </button>
+                )}
                 <button
                   onClick={() => removeMemory(entry.id)}
                   className="p-0.5 rounded hover:bg-red-500/20 text-gray-600 hover:text-red-400"
@@ -306,6 +357,18 @@ export function MemorySettings() {
           )
         })}
       </div>
+
+      {/* Re-embed all — backfills missing memory embeddings (Feature FF) */}
+      {entries.length > 0 && (
+        <GlowButton
+          variant="secondary"
+          onClick={handleReembed}
+          className="w-full text-[0.6rem] flex items-center justify-center gap-1"
+        >
+          <Sparkles size={10} />
+          {reembedState === 'running' ? 'Re-embedding…' : reembedState === 'done' ? 'Embeddings updated' : 'Re-embed all'}
+        </GlowButton>
+      )}
 
       {/* Actions */}
       <div className="flex gap-1.5">

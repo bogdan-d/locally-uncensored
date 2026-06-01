@@ -1,4 +1,5 @@
 import { comfyuiUrl, localFetch } from './backend'
+import { log } from '../lib/logger'
 
 // ─── Types ───
 
@@ -54,7 +55,7 @@ export async function getAllNodeInfo(forceRefresh = false): Promise<Record<strin
 
   nodeInfoCache = data
   cacheTimestamp = Date.now()
-  console.log(`[comfyui-nodes] Loaded ${Object.keys(data).length} node types`)
+  log.info(`[comfyui-nodes] Loaded ${Object.keys(data).length} node types`)
   return data
 }
 

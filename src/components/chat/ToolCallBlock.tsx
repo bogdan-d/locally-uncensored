@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronDown, Search, Globe, FileText, FileEdit, Terminal, Image, Loader2, Check, X, Clock, AlertCircle, FolderOpen, Cpu, Monitor, GitBranch, Database } from 'lucide-react'
+import { ChevronDown, Search, Globe, FileText, FileEdit, Terminal, Image, Film, Loader2, Check, X, Clock, AlertCircle, FolderOpen, Cpu, Monitor, GitBranch, Database } from 'lucide-react'
 import type { AgentToolCall } from '../../types/agent-mode'
 
 // F1 (konata3602 commitment 2026-05-23) — when image_generate / screenshot
@@ -10,7 +10,24 @@ import type { AgentToolCall } from '../../types/agent-mode'
 // result so we can render an <img> below the raw text. Only fires for
 // images we generated ourselves — third-party URLs in a tool result
 // must NOT be auto-loaded (CSP + privacy).
-const INLINE_IMAGE_RE = /(http:\/\/(?:localhost|127\.0\.0\.1):\d+\/view\?[^\s)\]]+)/i
+// Exported for unit testing (see __tests__/ToolCallBlock-image.test.ts).
+export const INLINE_IMAGE_RE = /(http:\/\/(?:localhost|127\.0\.0\.1):\d+\/view\?[^\s)\]]+)/i
+
+// Feature EE (v2.5.0): video_generate can produce .mp4 (VHS_VideoCombine) or
+// .webm outputs. We render those in a <video> element instead of an <img>.
+// Animated .webp (SaveAnimatedWEBP) animates fine inside <img>, so it stays on
+// the image path. The output filename rides in the `filename=` query param of
+// the /view URL, so we inspect THAT, not the URL tail (which ends in `&t=…`).
+// Exported for unit testing.
+export function isInlineVideoUrl(url: string): boolean {
+  try {
+    const m = /[?&]filename=([^&]+)/i.exec(url)
+    const name = m ? decodeURIComponent(m[1]) : url
+    return /\.(mp4|webm)$/i.test(name)
+  } catch {
+    return /\.(mp4|webm)(?=[?&]|$)/i.test(url)
+  }
+}
 
 interface Props {
   toolCall: AgentToolCall
@@ -31,6 +48,7 @@ const TOOL_ICONS: Record<string, typeof Search> = {
   process_list: Cpu,
   screenshot: Monitor,
   image_generate: Image,
+  video_generate: Film,
   run_workflow: GitBranch,
 }
 
@@ -98,26 +116,41 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
                   <pre className="text-[0.55rem] leading-relaxed text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-white/[0.02] rounded px-2 py-1 overflow-auto scrollbar-thin max-h-[300px]">
                     {toolCall.result}
                   </pre>
-                  {/* Inline image preview (F1) — only when the result
-                      contains a ComfyUI view URL. Bounded to localhost
-                      so we never auto-load arbitrary tool output. */}
+                  {/* Inline preview (F1 + Feature EE) — only when the result
+                      contains a ComfyUI view URL. Bounded to localhost so we
+                      never auto-load arbitrary tool output. A .mp4/.webm output
+                      (video_generate via VHS_VideoCombine) renders in a
+                      <video>; everything else — including animated .webp — in
+                      an <img>. */}
                   {(() => {
                     const m = toolCall.result?.match(INLINE_IMAGE_RE)
-                    return m ? (
+                    if (!m) return null
+                    const url = m[1]
+                    if (isInlineVideoUrl(url)) {
+                      return (
+                        <video
+                          src={url}
+                          controls
+                          loop
+                          className="block mt-1 max-w-full max-h-[320px] rounded border border-gray-200 dark:border-white/[0.06]"
+                        />
+                      )
+                    }
+                    return (
                       <a
-                        href={m[1]}
+                        href={url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="block mt-1"
                       >
                         <img
-                          src={m[1]}
+                          src={url}
                           alt="Generated image"
                           className="max-w-full max-h-[320px] rounded border border-gray-200 dark:border-white/[0.06]"
                           loading="lazy"
                         />
                       </a>
-                    ) : null
+                    )
                   })()}
                 </>
               )}

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { buildExtractionPrompt, parseExtractionResponse } from '../memory-extraction'
+import {
+  buildExtractionPrompt,
+  parseExtractionResponse,
+  buildResolutionPrompt,
+  parseResolutionResponse,
+} from '../memory-extraction'
 
 // ── buildExtractionPrompt ──────────────────────────────────────
 
@@ -146,5 +151,112 @@ describe('parseExtractionResponse', () => {
     const result = parseExtractionResponse(response)
     expect(result.memories).toHaveLength(3)
     expect(result.memories.map(m => m.type)).toEqual(['user', 'feedback', 'project'])
+  })
+})
+
+// ── buildResolutionPrompt (Feature FF) ─────────────────────────
+
+describe('buildResolutionPrompt', () => {
+  it('returns system + user message array', () => {
+    const messages = buildResolutionPrompt({ title: 'T', content: 'C' }, [])
+    expect(messages).toHaveLength(2)
+    expect(messages[0].role).toBe('system')
+    expect(messages[1].role).toBe('user')
+  })
+
+  it('system prompt documents ADD / UPDATE / NOOP', () => {
+    const sys = buildResolutionPrompt({ title: 'T', content: 'C' }, [])[0].content
+    expect(sys).toContain('ADD')
+    expect(sys).toContain('UPDATE')
+    expect(sys).toContain('NOOP')
+  })
+
+  it('lists existing similar memories with their ids', () => {
+    const messages = buildResolutionPrompt(
+      { title: 'New', content: 'New content' },
+      [
+        { id: 'id-aaa', title: 'Old A', content: 'content A' },
+        { id: 'id-bbb', title: 'Old B', content: 'content B' },
+      ],
+    )
+    const sys = messages[0].content
+    expect(sys).toContain('id-aaa')
+    expect(sys).toContain('Old A')
+    expect(sys).toContain('id-bbb')
+  })
+
+  it('shows "None." when there are no similar memories', () => {
+    const sys = buildResolutionPrompt({ title: 'T', content: 'C' }, [])[0].content
+    expect(sys).toContain('None.')
+  })
+
+  it('includes the new fact in the user message', () => {
+    const user = buildResolutionPrompt({ title: 'Moved cities', content: 'User moved to Berlin' }, [])[1].content
+    expect(user).toContain('Moved cities')
+    expect(user).toContain('User moved to Berlin')
+  })
+})
+
+// ── parseResolutionResponse (Feature FF) ───────────────────────
+
+describe('parseResolutionResponse', () => {
+  it('parses a plain ADD', () => {
+    expect(parseResolutionResponse('{"action": "ADD"}')).toEqual({ action: 'ADD' })
+  })
+
+  it('parses NOOP', () => {
+    expect(parseResolutionResponse('{"action": "NOOP"}')).toEqual({ action: 'NOOP' })
+  })
+
+  it('parses a valid UPDATE with targetId + mergedContent', () => {
+    const r = parseResolutionResponse('{"action": "UPDATE", "targetId": "id-1", "mergedContent": "merged text"}')
+    expect(r).toEqual({ action: 'UPDATE', targetId: 'id-1', mergedContent: 'merged text' })
+  })
+
+  it('is case-insensitive on the action', () => {
+    expect(parseResolutionResponse('{"action": "noop"}').action).toBe('NOOP')
+    expect(parseResolutionResponse('{"action": "update", "targetId": "x", "mergedContent": "y"}').action).toBe('UPDATE')
+  })
+
+  it('strips markdown code fences', () => {
+    const r = parseResolutionResponse('```json\n{"action": "NOOP"}\n```')
+    expect(r.action).toBe('NOOP')
+  })
+
+  it('handles preamble text before the JSON', () => {
+    const r = parseResolutionResponse('Here is my decision:\n{"action": "ADD"}')
+    expect(r.action).toBe('ADD')
+  })
+
+  it('downgrades UPDATE to ADD when targetId is missing', () => {
+    expect(parseResolutionResponse('{"action": "UPDATE", "mergedContent": "x"}')).toEqual({ action: 'ADD' })
+  })
+
+  it('downgrades UPDATE to ADD when mergedContent is missing/empty', () => {
+    expect(parseResolutionResponse('{"action": "UPDATE", "targetId": "id-1"}')).toEqual({ action: 'ADD' })
+    expect(parseResolutionResponse('{"action": "UPDATE", "targetId": "id-1", "mergedContent": "  "}')).toEqual({ action: 'ADD' })
+  })
+
+  it('rejects an UPDATE targetId not in the validIds allowlist', () => {
+    const r = parseResolutionResponse(
+      '{"action": "UPDATE", "targetId": "rogue", "mergedContent": "x"}',
+      ['id-1', 'id-2'],
+    )
+    expect(r).toEqual({ action: 'ADD' })
+  })
+
+  it('accepts an UPDATE targetId that IS in the allowlist', () => {
+    const r = parseResolutionResponse(
+      '{"action": "UPDATE", "targetId": "id-2", "mergedContent": "merged"}',
+      ['id-1', 'id-2'],
+    )
+    expect(r).toEqual({ action: 'UPDATE', targetId: 'id-2', mergedContent: 'merged' })
+  })
+
+  it('falls back to ADD on garbage / unknown action', () => {
+    expect(parseResolutionResponse('not json')).toEqual({ action: 'ADD' })
+    expect(parseResolutionResponse('')).toEqual({ action: 'ADD' })
+    expect(parseResolutionResponse('{"action": "DELETE"}')).toEqual({ action: 'ADD' })
+    expect(parseResolutionResponse('{"foo": "bar"}')).toEqual({ action: 'ADD' })
   })
 })

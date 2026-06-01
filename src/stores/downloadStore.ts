@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { getDownloadProgress, pauseDownload, cancelDownload, resumeDownload, startModelDownload, startModelDownloadToPath, lookupFileMeta, type DownloadProgress } from '../api/discover'
+import { log } from '../lib/logger'
 
 // Maps filename → bundle name for grouped display
 type BundleMap = Record<string, string>
@@ -140,7 +141,7 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
         meta = { url: found.url, subfolder: found.subfolder }
         get().setMeta(id, found.url, found.subfolder)
       } else {
-        console.warn('[downloadStore] retry: no meta found for', id)
+        log.warn('[downloadStore] retry: no meta found for', { id })
         return
       }
     }

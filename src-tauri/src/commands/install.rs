@@ -10,6 +10,7 @@ use std::time::Instant;
 use std::os::windows::process::CommandExt;
 
 use tauri::State;
+use tracing::{error, info};
 
 use crate::python::venv_python_path;
 use crate::state::{AppState, InstallState};
@@ -462,6 +463,8 @@ pub fn install_comfyui(
     install.logs.push("Starting ComfyUI installation...".to_string());
     drop(install);
 
+    info!("comfyui install start");
+
     // Reset cancel flag (Bug #1) — a previous cancelled install would
     // otherwise short-circuit the new run on first poll.
     state.comfyui_install_cancel.store(false, Ordering::SeqCst);
@@ -503,6 +506,7 @@ pub fn install_comfyui(
              then retry the ComfyUI install."
                 .to_string(),
         );
+        error!("comfyui install aborted: no usable python");
         return Err(
             "no_python: Python must be installed before ComfyUI. Call install_python first."
                 .to_string(),
@@ -855,6 +859,8 @@ pub fn install_ollama(state: State<'_, AppState>) -> Result<serde_json::Value, S
     install.download_speed = 0.0;
     install.logs.push("Downloading Ollama installer...".to_string());
     drop(install);
+
+    info!("ollama install start");
 
     let ollama_state = state.ollama_install.clone();
 
@@ -1765,16 +1771,34 @@ pub fn lmstudio_load_model(model: String) -> Result<serde_json::Value, String> {
     // `lms load` blocks until the model is in memory. The caller is expected
     // to render a spinner while the request is in flight (same pattern as
     // the Ollama per-row toggle).
+    //
+    // `-y` / --yes is REQUIRED here, not optional: per `lms load --help`, when
+    // the model key is ambiguous (multiple quant/variant matches) or the CLI
+    // wants to confirm a device, `lms load` drops into an INTERACTIVE picker
+    // that reads from stdin. We capture output with no stdin attached, so that
+    // picker blocks forever — the command never returns and the model-selector
+    // spinner hangs indefinitely with no error surfaced (observed live on
+    // 2026-06-01 with qwen2.5-0.5b-instruct@q4_k_m). `-y` auto-approves and
+    // loads the first/preferred match, which is exactly the scripted behaviour
+    // we want. Verified: `lms load -y <key>` returns in ~4s and `lms ps` shows
+    // the model loaded.
     let output = Command::new(&lms)
-        .args(["load", &model])
+        .args(["load", &model, "-y"])
         .output()
         .map_err(|e| format!("spawn lms load: {e}"))?;
     if !output.status.success() {
-        return Err(format!(
-            "lms load failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        eprintln!(
+            "[lmstudio_load_model] FAILED model='{}' code={:?}\n  stderr={:?}\n  stdout={:?}",
+            model,
+            output.status.code(),
+            stderr.trim(),
+            stdout.trim()
+        );
+        return Err(format!("lms load failed: {}", stderr.trim()));
     }
+    eprintln!("[lmstudio_load_model] OK model='{}'", model);
     Ok(serde_json::json!({ "ok": true, "model": model }))
 }
 
@@ -1837,6 +1861,8 @@ pub fn install_python(state: State<'_, AppState>) -> Result<serde_json::Value, S
         .logs
         .push("Installing Python 3.12 via winget (~30 MB)…".to_string());
     drop(install);
+
+    info!("python install start");
 
     let py_state = state.python_install.clone();
     let py_bin_slot = state.python_bin.clone();
@@ -2067,6 +2093,139 @@ pub fn python_check(state: State<'_, AppState>) -> Result<serde_json::Value, Str
     }
 }
 
+// ── Whisper (faster-whisper) installer (§24.9 — STT install affordance) ──────
+
+/// The pip args to install faster-whisper. Extracted as a pure helper so the
+/// exact invocation is unit-testable (and so the package name lives in one
+/// place — the STT backend `whisper_server.py` imports `faster_whisper`, so
+/// that's what we install). Mirrors the flags the ComfyUI installer uses:
+/// `--no-input` (never block on a prompt) and `--progress-bar off` (the live
+/// pip bars are noise in our log stream).
+fn build_whisper_pip_args() -> Vec<&'static str> {
+    vec![
+        "-m", "pip", "install",
+        "--progress-bar", "off",
+        "--no-input",
+        "faster-whisper",
+    ]
+}
+
+/// §24.9 — Install faster-whisper so STT works, then start the persistent
+/// whisper server so the Settings STT badge flips ✗ → ✓ without a restart.
+///
+/// Installs into the SAME Python the rest of LU's Python tooling uses: the
+/// ComfyUI venv when one exists (matches `install_custom_node` /
+/// `start_comfyui`), else the resolved system Python. The whisper server is
+/// then started with that exact interpreter — critical, because starting it
+/// with a different Python than we installed into would fail the
+/// `import faster_whisper` check and leave the badge red.
+#[tauri::command]
+pub fn install_whisper(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    {
+        let mut install = state.whisper_install.lock().unwrap();
+        if install.status == "installing" {
+            return Ok(serde_json::json!({"status": "already_installing"}));
+        }
+        install.status = "installing".to_string();
+        install.logs.clear();
+        install.logs.push("Starting faster-whisper installation...".to_string());
+    }
+
+    info!("whisper install start");
+
+    // Resolve the target Python: ComfyUI venv (if present) → system Python.
+    let comfy_dir: Option<PathBuf> = {
+        let p = state.comfy_path.lock().unwrap().clone();
+        p.map(PathBuf::from).or_else(|| {
+            crate::commands::process::find_comfyui_path().map(PathBuf::from)
+        })
+    };
+    let venv_python = comfy_dir
+        .as_deref()
+        .and_then(crate::python::resolve_comfyui_venv_python);
+    let target_python = venv_python.unwrap_or_else(|| state.python_bin.lock().unwrap().clone());
+
+    if target_python.is_empty() || !crate::python::is_real_python(&target_python) {
+        let mut install = state.whisper_install.lock().unwrap();
+        install.status = "error".to_string();
+        install.logs.push(
+            "No Python found. Install Python first (Settings → ComfyUI → Install Python), \
+             then retry the Whisper install."
+                .to_string(),
+        );
+        error!("whisper install aborted: no usable python");
+        return Err("no_python: Python must be installed before faster-whisper.".to_string());
+    }
+
+    let install_state = state.whisper_install.clone();
+    let whisper = state.whisper.clone();
+
+    std::thread::spawn(move || {
+        let update = |status: &str, msg: &str| {
+            if let Ok(mut s) = install_state.lock() {
+                s.status = status.to_string();
+                s.logs.push(msg.to_string());
+            }
+        };
+
+        update("installing", &format!("Installing faster-whisper via {} (this can take a few minutes)…", target_python));
+
+        let args = build_whisper_pip_args();
+        // No cancel flag — this single pip install is short relative to the
+        // ComfyUI PyTorch download, so we run it to completion like install_python.
+        match pip_install_streaming_with_retry_cancellable(&args, &target_python, 3, &install_state, None) {
+            Ok(()) => {
+                update("installing", "faster-whisper installed. Starting the speech-to-text server…");
+                // Start the persistent server with the SAME Python we installed
+                // into, so the import check passes and whisper_status flips to
+                // available without an app restart. auto_start_whisper_sync
+                // re-checks `import faster_whisper` and locates whisper_server.py
+                // from bundled resources (prod) or ./public (dev).
+                {
+                    let already_running = whisper.lock().map(|w| w.ready).unwrap_or(false);
+                    if !already_running {
+                        crate::commands::whisper::auto_start_whisper_sync(&app, &target_python, &whisper);
+                    }
+                }
+                let started = whisper.lock().map(|w| w.ready).unwrap_or(false);
+                if started {
+                    update("complete", "Speech-to-text is ready.");
+                } else {
+                    // Install succeeded but the server didn't come up (e.g. model
+                    // download still pending). Still a success for the install
+                    // itself — the badge re-check / next launch will pick it up.
+                    update("complete", "faster-whisper installed. The STT server will finish loading shortly (or on next launch).");
+                }
+            }
+            Err(diagnosis) => {
+                let err = format!("faster-whisper installation failed.\n\n{}", diagnosis);
+                println!("[Whisper Install] {}", err);
+                update("error", &err);
+            }
+        }
+    });
+
+    Ok(serde_json::json!({"status": "installing"}))
+}
+
+/// §24.9 — Poll the faster-whisper install progress (mirrors the other
+/// `*_status` commands). The frontend re-runs `checkWhisperAvailable` when
+/// this reports `complete`.
+#[tauri::command]
+pub fn install_whisper_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let install = state.whisper_install.lock().unwrap();
+    Ok(serde_json::json!({
+        "status": install.status,
+        "logs": install.logs,
+        "download_progress": install.download_progress,
+        "download_total": install.download_total,
+        "download_speed": install.download_speed,
+    }))
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[allow(non_snake_case)]
@@ -2078,6 +2237,7 @@ pub fn install_custom_node(
 ) -> Result<serde_json::Value, String> {
     let repo_url = repoUrl;
     let node_name = nodeName;
+    info!(node = %node_name, "custom node install start");
     // Find ComfyUI path from state
     let comfy_path = {
         let path = state.comfy_path.lock().unwrap();
@@ -2090,7 +2250,10 @@ pub fn install_custom_node(
             // Try to find it
             match crate::commands::process::find_comfyui_path() {
                 Some(p) => PathBuf::from(p),
-                None => return Err("ComfyUI not found. Install ComfyUI first.".to_string()),
+                None => {
+                    error!(node = %node_name, "custom node install failed: comfyui not found");
+                    return Err("ComfyUI not found. Install ComfyUI first.".to_string());
+                }
             }
         }
     };
@@ -2192,6 +2355,7 @@ pub fn install_custom_node(
                     // Reuse the install_comfyui diagnose path so PEP 668 +
                     // friends produce actionable messages here too.
                     let diagnosis = diagnose_pip_error(&combined);
+                    error!(node = %node_name, "custom node requirements install failed");
                     return Err(format!(
                         "Custom node {} cloned, but requirements install failed.\n\n{}",
                         node_name, diagnosis
@@ -2205,6 +2369,7 @@ pub fn install_custom_node(
             }))
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            error!(node = %node_name, "custom node clone failed");
             Err(format!("Failed to clone {}: {}", node_name, stderr))
         }
     }
@@ -2895,5 +3060,24 @@ mod tests {
             hint
         );
         assert!(lower.contains("git-scm.com/download/win"), "got: {}", hint);
+    }
+
+    // ── §24.9 — Whisper pip args builder ──────────────────────────────────
+
+    #[test]
+    fn whisper_pip_args_install_faster_whisper() {
+        let args = build_whisper_pip_args();
+        // Drives `python -m pip install … faster-whisper` — the package the
+        // STT backend (whisper_server.py) actually imports.
+        assert_eq!(&args[..3], &["-m", "pip", "install"]);
+        assert!(args.contains(&"faster-whisper"), "must install faster-whisper: {:?}", args);
+        // Non-interactive + quiet progress, matching the ComfyUI installer.
+        assert!(args.contains(&"--no-input"), "must pass --no-input: {:?}", args);
+        let pos = args.iter().position(|a| *a == "--progress-bar");
+        assert!(pos.is_some(), "must set --progress-bar: {:?}", args);
+        assert_eq!(args[pos.unwrap() + 1], "off");
+        // The package name is the LAST arg (after all flags) so pip parses it
+        // as the install target, not as a flag value.
+        assert_eq!(*args.last().unwrap(), "faster-whisper");
     }
 }

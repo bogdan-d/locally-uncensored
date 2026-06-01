@@ -234,6 +234,52 @@ function groupByFamily(models: AIModel[]): { family: string; models: AIModel[] }
     .map(([family, models]) => ({ family, models }))
 }
 
+// ── LM Studio selection helpers (§18) ─────────────────────────
+//
+// Extracted as pure module-level functions so the select-time auto-load
+// decision is unit-testable without rendering the whole hook-heavy
+// component (no test harness exists for ModelSelector — it depends on
+// several zustand stores + the Tauri bridge).
+
+/**
+ * The identifier LM Studio's CLI/bridge uses for `model` — its `lmsKey`
+ * when present (the exact key the loaded-list reports), else the model name.
+ * Centralised so the row toggle, the loaded check, and the select-time
+ * auto-load all agree on one id.
+ *
+ * CRITICAL: strip LU's routing prefix. An LM Studio model's `name` carries the
+ * provider-scoped form "openai::qwen2.5-0.5b-instruct@q4_k_m" (getProviderForModel
+ * routes on that `openai::`), but the `lms` CLI and LM Studio's /api/v0/models use
+ * the BARE key "qwen2.5-0.5b-instruct@q4_k_m". Passing the prefixed name to
+ * `lms load` matches nothing — pre-`-y` it dropped into the interactive picker and
+ * the command hung forever (stuck "loading…" spinner, no error); post-`-y` it
+ * exits 1. The loaded-check `loaded.has(lmsIdOf(...))` also silently failed
+ * (bare keys from the API vs. a prefixed id), so rows showed perpetually unloaded
+ * and selecting re-triggered a load every time. Same `/^[^:]+::/` strip as
+ * displayModelName. (Found via live E2E 2026-06-01.)
+ */
+export function lmsIdOf(model: AIModel): string {
+  const raw = ('lmsKey' in model && typeof (model as any).lmsKey === 'string'
+    ? (model as any).lmsKey
+    : model.name) as string
+  return raw.replace(/^[^:]+::/, '')
+}
+
+/**
+ * True when selecting `model` must auto-load it into LM Studio first: it's
+ * an LM Studio model AND it isn't already in the loaded set. Non-LM-Studio
+ * models (Ollama, cloud) always return false — they activate immediately.
+ */
+export function shouldAutoLoadForSelect(
+  model: AIModel,
+  loaded: Set<string>,
+): boolean {
+  const isLms = isLmStudioProvider(
+    ('providerName' in model && model.providerName) as string | undefined,
+  )
+  return isLms && !loaded.has(lmsIdOf(model))
+}
+
 // ── Component ─────────────────────────────────────────────────
 
 export function ModelSelector() {
@@ -250,6 +296,11 @@ export function ModelSelector() {
   // bridge's `lmstudio_load_model` / `lmstudio_unload_model` commands.
   const [lmsLoaded, setLmsLoaded] = useState<Set<string>>(new Set())
   const [togglingLms, setTogglingLms] = useState<string | null>(null)
+  // B3/§18 — the LM Studio model we're auto-loading as part of *selecting* it
+  // (distinct from `togglingLms`, the explicit power-button flow). Drives the
+  // inline "loading…" state on the row and blocks a second click.
+  const [selectingLms, setSelectingLms] = useState<string | null>(null)
+  const [selectError, setSelectError] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
   // Refresh LM Studio loaded-models snapshot whenever the dropdown
@@ -258,6 +309,7 @@ export function ModelSelector() {
   // staleness is at most a few seconds.
   useEffect(() => {
     if (!open) return
+    setSelectError(null) // fresh open — drop any stale auto-load error
     let cancelled = false
     void listLoadedLmStudioModels().then((list) => {
       if (cancelled) return
@@ -293,6 +345,51 @@ export function ModelSelector() {
     } finally {
       setTogglingLms(null)
     }
+  }
+
+  /**
+   * §18 — Select a model, auto-loading it into LM Studio first when needed.
+   *
+   * Routing (getProviderForModel) keys only on the `openai::` prefix, so an
+   * LM Studio model's HTTP requests go out regardless of whether the model
+   * is actually loaded in the server — picking an UNloaded one used to fail
+   * silently at the HTTP layer (404 from LM Studio). So: if the picked row is
+   * an LM Studio model that isn't loaded, load it (await) BEFORE activating,
+   * showing an inline "loading…" state; only then setActiveModel + close. On
+   * load failure we keep the dropdown open and surface the error instead of
+   * activating a model that can't answer. Non-LM-Studio rows are unaffected —
+   * they activate immediately exactly as before.
+   */
+  const handleSelectModel = async (model: AIModel) => {
+    const id = lmsIdOf(model)
+
+    if (shouldAutoLoadForSelect(model, lmsLoaded)) {
+      if (selectingLms || togglingLms) return // a load is already in flight
+      setSelectError(null)
+      setSelectingLms(id)
+      try {
+        await loadLmStudioModel(id)
+        // Confirm it actually loaded before we route chat at it.
+        const list = await listLoadedLmStudioModels()
+        const loaded = new Set(list)
+        setLmsLoaded(loaded)
+        if (!loaded.has(id)) {
+          setSelectError(`Couldn't load "${displayModelName(model.name)}" into LM Studio. Try the power button, or load it in LM Studio directly.`)
+          return // keep dropdown open; don't activate an unloaded model
+        }
+        setActiveModel(model.name)
+        setOpen(false)
+      } catch {
+        setSelectError(`Couldn't load "${displayModelName(model.name)}" into LM Studio. Is the LM Studio server running?`)
+      } finally {
+        setSelectingLms(null)
+      }
+      return
+    }
+
+    // Non-LM-Studio, or an already-loaded LM Studio model: activate now.
+    setActiveModel(model.name)
+    setOpen(false)
   }
 
   useEffect(() => { fetchModels() }, [fetchModels])
@@ -368,7 +465,7 @@ export function ModelSelector() {
       <AnimatePresence>
         {open && (
           <motion.div
-            className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 w-72 rounded-lg overflow-hidden z-50 bg-[#0f0f0f] border border-white/[0.06] shadow-2xl shadow-black/50"
+            className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 w-72 rounded-lg overflow-hidden z-50 bg-[#2a2a2a] border border-white/[0.08] shadow-2xl shadow-black/50"
             initial={{ opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}
@@ -378,6 +475,14 @@ export function ModelSelector() {
                 LM Studio is on disk but its server is off. wakeywakeynow's
                 "can't choose any models i have installed" symptom. */}
             <LmStudioServerHint onStarted={fetchModels} />
+
+            {/* §18 — surfaced when an LM Studio auto-load (on select) failed,
+                so the user isn't left wondering why the model didn't switch. */}
+            {selectError && (
+              <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 text-[0.6rem] text-red-300/90 leading-snug">
+                {selectError}
+              </div>
+            )}
 
             {/* Scrollable model list */}
             <div className="py-1 max-h-[280px] overflow-y-auto scrollbar-thin">
@@ -402,16 +507,36 @@ export function ModelSelector() {
                     const providerBadge = getProviderBadge(model)
                     const isActive = model.name === activeModel
 
+                    const isLmsRow = isLmStudioProvider(('providerName' in model && model.providerName) as string | undefined)
+                    const rowId = lmsIdOf(model)
+                    const isSelectingThis = selectingLms === rowId
+                    // The row carries the per-LM-Studio-model power toggle, itself
+                    // a <button>. A <button> can't nest a <button> (invalid HTML →
+                    // React hydration error + flaky clicks), so the row is a
+                    // role="button" <div> with explicit keyboard activation.
+                    const rowDisabled = selectingLms !== null || togglingLms !== null
+
                     return (
-                      <button
+                      <div
                         key={model.name}
-                        onClick={() => { setActiveModel(model.name); setOpen(false) }}
+                        role="button"
+                        tabIndex={rowDisabled ? -1 : 0}
+                        aria-disabled={rowDisabled}
+                        onClick={() => { if (!rowDisabled) void handleSelectModel(model) }}
+                        onKeyDown={(e) => {
+                          if (rowDisabled) return
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            void handleSelectModel(model)
+                          }
+                        }}
                         className={`
                           w-full flex items-center gap-2 px-2.5 py-[5px] mx-1 rounded text-left transition-colors
                           ${isActive
                             ? 'bg-white/[0.06] text-white'
                             : 'text-gray-400 hover:bg-white/[0.03] hover:text-gray-200'
                           }
+                          ${rowDisabled ? 'cursor-default' : 'cursor-pointer'}
                         `}
                         style={{ width: 'calc(100% - 8px)' }}
                       >
@@ -437,6 +562,14 @@ export function ModelSelector() {
                               {providerBadge.label}
                             </span>
                           )}
+                          {/* §18 — inline load state while we auto-load this
+                              LM Studio model on the way to selecting it. */}
+                          {isSelectingThis && (
+                            <span className="inline-flex items-center gap-0.5 text-[8px] text-blue-400">
+                              <Loader2 size={8} className="animate-spin" />
+                              loading…
+                            </span>
+                          )}
                         </div>
 
                         {/* Details on right */}
@@ -446,38 +579,32 @@ export function ModelSelector() {
                               {(model as any).details.parameter_size}
                             </span>
                           )}
-                          {/* B3 — LM Studio per-row power toggle. Click stops
-                              propagation so the row's setActiveModel doesn't
-                              fire. Ollama rows already get the inline-load
-                              treatment automatically when chat fires (no
-                              equivalent button needed); LM Studio needs an
-                              explicit load because the `lms` CLI is the only
-                              way in. */}
-                          {isLmStudioProvider(('providerName' in model && model.providerName) as string | undefined) && (
+                          {/* B3/§18 — LM Studio per-row power toggle. Selecting
+                              an LM Studio row now AUTO-LOADS it first (see
+                              handleSelectModel), so this button is the explicit
+                              control: load without selecting, or UNLOAD to free
+                              VRAM. Click stops propagation so the row's
+                              select-handler doesn't also fire. Ollama rows load
+                              implicitly when chat fires, so they get no button. */}
+                          {isLmsRow && (
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
                                 void toggleLmStudioLoad(model)
                               }}
-                              disabled={togglingLms !== null}
+                              disabled={togglingLms !== null || selectingLms !== null}
                               title={
-                                lmsLoaded.has((('lmsKey' in model && typeof (model as any).lmsKey === 'string'
-                                  ? (model as any).lmsKey
-                                  : model.name) as string))
-                                  ? 'Loaded — click to unload from LM Studio'
-                                  : 'Click to load into LM Studio'
+                                lmsLoaded.has(rowId)
+                                  ? 'Loaded — click to unload from LM Studio (frees VRAM)'
+                                  : 'Load into LM Studio without selecting (selecting also loads automatically)'
                               }
                               className={`p-0.5 rounded transition-colors ${
-                                lmsLoaded.has((('lmsKey' in model && typeof (model as any).lmsKey === 'string'
-                                  ? (model as any).lmsKey
-                                  : model.name) as string))
+                                lmsLoaded.has(rowId)
                                   ? 'text-emerald-500 hover:bg-emerald-500/10'
                                   : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'
                               } disabled:opacity-40`}
                             >
-                              {togglingLms === (('lmsKey' in model && typeof (model as any).lmsKey === 'string'
-                                ? (model as any).lmsKey
-                                : model.name) as string) ? (
+                              {togglingLms === rowId ? (
                                 <Loader2 size={10} className="animate-spin" />
                               ) : (
                                 <Power size={10} />
@@ -486,7 +613,7 @@ export function ModelSelector() {
                           )}
                           {isActive && <Check size={11} className="text-blue-400" />}
                         </div>
-                      </button>
+                      </div>
                     )
                   })}
                 </div>

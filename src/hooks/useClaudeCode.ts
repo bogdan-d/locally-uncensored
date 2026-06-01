@@ -7,6 +7,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useProviderStore } from '../stores/providerStore'
 import type { ClaudeCodeEvent } from '../stores/claudeCodeStore'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
+import { log } from '../lib/logger'
 
 /**
  * Hook for running Claude Code sessions.
@@ -240,7 +241,7 @@ export function useClaudeCode() {
     try {
       await backendCall('stop_claude_code')
     } catch (err) {
-      console.warn('[ClaudeCode] Stop failed:', err)
+      log.warn('[ClaudeCode] Stop failed', { err })
     }
     setIsRunning(false)
 
@@ -266,7 +267,7 @@ export function useClaudeCode() {
         useClaudeCodeStore.getState().setSessionStatus(convId, 'running')
       }
     } catch (err) {
-      console.warn('[ClaudeCode] Approve failed:', err)
+      log.warn('[ClaudeCode] Approve failed', { err })
     }
   }, [])
 
@@ -278,7 +279,7 @@ export function useClaudeCode() {
         useClaudeCodeStore.getState().setSessionStatus(convId, 'running')
       }
     } catch (err) {
-      console.warn('[ClaudeCode] Deny failed:', err)
+      log.warn('[ClaudeCode] Deny failed', { err })
     }
   }, [])
 

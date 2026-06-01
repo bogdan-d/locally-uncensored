@@ -143,6 +143,18 @@ export interface MemoryFile {
   createdAt: number
   updatedAt: number
   source: string      // conversationId | 'manual' | 'auto:extraction'
+  // ── Staleness / supersession (Feature FF, v2.5.0) ─────────────
+  // All OPTIONAL so pre-v2.5 persisted memories rehydrate unchanged; the
+  // store's migrate() leaves them undefined and the retrieval layer treats
+  // undefined as "not stale".
+  /** Id of the newer entry that replaced this one (UPDATE write-decision). */
+  supersededBy?: string
+  /** Id of the entry this one replaced — back-pointer for audit / UI. */
+  supersedesId?: string
+  /** Explicitly flagged outdated → excluded from live retrieval, kept on disk. */
+  stale?: boolean
+  /** Epoch ms from which this fact is considered valid (set on UPDATE). */
+  validFrom?: number
 }
 
 export interface MemorySettings {

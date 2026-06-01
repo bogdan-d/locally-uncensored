@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tauri::{Manager, State};
+use tracing::{error, info};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -666,10 +667,12 @@ pub fn start_ollama(state: State<'_, AppState>) -> Result<serde_json::Value, Str
             // so we never kill a user-managed ollama serve.
             *state.ollama_process.lock().unwrap() = Some(child);
             println!("[Ollama] Started");
+            info!("ollama spawned");
             Ok(serde_json::json!({"status": "started"}))
         }
         Err(e) => {
             println!("[Ollama] Failed to start: {}", e);
+            error!(error = %e, "ollama spawn failed");
             Ok(serde_json::json!({"status": "error", "error": e.to_string()}))
         }
     }
@@ -760,6 +763,7 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
         println!("[ComfyUI] Using system Python: {}", python);
     }
     println!("[ComfyUI] Starting from: {} on port {}", comfy_path, port);
+    info!(port = port, "comfyui start");
 
     // Bug J (discovered during 2026-05-17 Arch live test): on systems without
     // an NVIDIA driver (most Linux non-NVIDIA setups: AMD, Intel, CPU-only;
@@ -800,7 +804,10 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     let mut child = cmd.spawn()
-        .map_err(|e| format!("Failed to start ComfyUI (python={}): {}", python, e))?;
+        .map_err(|e| {
+            error!(error = %e, python = %python, "comfyui start failed");
+            format!("Failed to start ComfyUI (python={}): {}", python, e)
+        })?;
 
     // Assign to Job Object so child dies when parent dies (even via Task Manager)
     #[cfg(target_os = "windows")]
@@ -838,6 +845,7 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
     }
 
     println!("[ComfyUI] Started");
+    info!("comfyui started");
     Ok(serde_json::json!({"status": "started", "path": comfy_path}))
 }
 
@@ -857,6 +865,7 @@ pub fn stop_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, Str
         }
         *proc = None;
         println!("[ComfyUI] Stopped");
+        info!(pid = pid, "comfyui stopped");
         Ok(serde_json::json!({"status": "stopped"}))
     } else {
         Ok(serde_json::json!({"status": "not_running"}))

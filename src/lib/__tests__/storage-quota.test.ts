@@ -303,5 +303,139 @@ describe('storage-quota', () => {
       // Should not throw, but also should not prune (under 100)
       expect(() => storage.setItem('overflow', 'data')).not.toThrow()
     })
+
+    // ─── §20: memory-prune fallback + quota-exceeded UI event ───
+
+    it('prunes lowest-value memories and retries when conversations are not over cap', () => {
+      // No conversations to prune (so the conv path is a no-op), but a fat
+      // memory store with >500 entries. The retry should succeed after the
+      // memory prune writes a trimmed list.
+      const entries = Array.from({ length: 600 }, (_, i) => ({
+        id: `m-${i}`,
+        type: 'fact',
+        title: `t${i}`,
+        description: '',
+        content: 'x',
+        tags: [],
+        createdAt: i * 1000,
+        updatedAt: i * 1000,
+        source: 'manual',
+      }))
+      const memData = JSON.stringify({ state: { entries, settings: {}, lastSynced: 0 }, version: 3 })
+
+      let firstWriteFailed = false
+      const store: Record<string, string> = { 'locally-uncensored-memory': memData }
+      const mock: Storage = {
+        getItem: vi.fn((key: string) => store[key] ?? null),
+        setItem: vi.fn((key: string, value: string) => {
+          // First write of the *target* key fails (quota); everything after
+          // the memory prune succeeds.
+          if (!firstWriteFailed && key === 'new-data') {
+            firstWriteFailed = true
+            throw new DOMException('full', 'QuotaExceededError')
+          }
+          store[key] = value
+        }),
+        removeItem: vi.fn(),
+        clear: vi.fn(),
+        get length() { return Object.keys(store).length },
+        key: vi.fn((i: number) => Object.keys(store)[i] ?? null),
+      }
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: mock, writable: true, configurable: true,
+      })
+
+      const storage = createSafeStorage()
+      expect(() => storage.setItem('new-data', 'payload')).not.toThrow()
+
+      // Memory store was rewritten with <= 500 entries…
+      const memWrites = (mock.setItem as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([k]) => k === 'locally-uncensored-memory')
+      expect(memWrites.length).toBeGreaterThan(0)
+      const pruned = JSON.parse(memWrites[memWrites.length - 1][1])
+      expect(pruned.state.entries.length).toBeLessThanOrEqual(500)
+      // …keeping the newest entries (highest updatedAt) and dropping the oldest.
+      const ids: string[] = pruned.state.entries.map((e: any) => e.id)
+      expect(ids).toContain('m-599')
+      expect(ids).not.toContain('m-0')
+      // The target write eventually landed.
+      expect(store['new-data']).toBe('payload')
+    })
+
+    it('evicts stale / superseded memories before live ones', () => {
+      // 501 entries: index 0 is the NEWEST but is stale; the prune should
+      // drop it (stale ranks worst) even though its updatedAt is highest.
+      const entries = Array.from({ length: 501 }, (_, i) => ({
+        id: `m-${i}`,
+        type: 'fact', title: `t${i}`, description: '', content: 'x', tags: [],
+        createdAt: i, updatedAt: 100000 - i, source: 'manual',
+        ...(i === 0 ? { stale: true } : {}),
+      }))
+      const memData = JSON.stringify({ state: { entries, settings: {}, lastSynced: 0 }, version: 3 })
+      const store: Record<string, string> = { 'locally-uncensored-memory': memData }
+      let failed = false
+      const mock: Storage = {
+        getItem: vi.fn((key: string) => store[key] ?? null),
+        setItem: vi.fn((key: string, value: string) => {
+          if (!failed && key === 'x') { failed = true; throw new DOMException('full', 'QuotaExceededError') }
+          store[key] = value
+        }),
+        removeItem: vi.fn(), clear: vi.fn(),
+        get length() { return Object.keys(store).length },
+        key: vi.fn((i: number) => Object.keys(store)[i] ?? null),
+      }
+      Object.defineProperty(globalThis, 'localStorage', { value: mock, writable: true, configurable: true })
+
+      createSafeStorage().setItem('x', 'y')
+
+      const memWrites = (mock.setItem as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([k]) => k === 'locally-uncensored-memory')
+      const pruned = JSON.parse(memWrites[memWrites.length - 1][1])
+      const ids: string[] = pruned.state.entries.map((e: any) => e.id)
+      // The stale newest entry is the one dropped to get to 500.
+      expect(pruned.state.entries.length).toBe(500)
+      expect(ids).not.toContain('m-0')
+    })
+
+    it('dispatches lu:storage-quota-exceeded once when pruning cannot free space', () => {
+      // Nothing prunable (no chat-conversations, no memory store), so both
+      // prune tiers no-op and the write is genuinely lost — must signal UI.
+      // The vitest env is `node`, so there's no real `window`; install a
+      // minimal stub that records dispatched events. The production guard
+      // (`typeof window !== 'undefined'`) then takes the dispatch path.
+      const dispatched: any[] = []
+      const fakeWindow = {
+        dispatchEvent: vi.fn((e: any) => { dispatched.push(e); return true }),
+      }
+      const hadWindow = 'window' in globalThis
+      const prevWindow = (globalThis as any).window
+      ;(globalThis as any).window = fakeWindow
+
+      const quotaErr = new DOMException('full', 'QuotaExceededError')
+      const store: Record<string, string> = {}
+      const mock: Storage = {
+        getItem: vi.fn((key: string) => store[key] ?? null),
+        setItem: vi.fn(() => { throw quotaErr }),
+        removeItem: vi.fn(), clear: vi.fn(),
+        get length() { return Object.keys(store).length },
+        key: vi.fn((i: number) => Object.keys(store)[i] ?? null),
+      }
+      Object.defineProperty(globalThis, 'localStorage', { value: mock, writable: true, configurable: true })
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        const storage = createSafeStorage()
+        expect(() => storage.setItem('doomed', 'data')).not.toThrow()
+        // Exactly one quota event, carrying the failed key.
+        expect(fakeWindow.dispatchEvent).toHaveBeenCalledTimes(1)
+        expect(dispatched).toHaveLength(1)
+        expect(dispatched[0].type).toBe('lu:storage-quota-exceeded')
+        expect(dispatched[0].detail).toEqual({ key: 'doomed' })
+      } finally {
+        warnSpy.mockRestore()
+        if (hadWindow) (globalThis as any).window = prevWindow
+        else delete (globalThis as any).window
+      }
+    })
   })
 })

@@ -14,6 +14,7 @@ import type {
   ToolCall,
   ToolName,
 } from "../types/agents";
+import { log } from "../lib/logger";
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -301,7 +302,7 @@ export function useAgent() {
 
       // Run the loop (not awaited to avoid blocking)
       runReActLoop(runId, model).catch((err) => {
-        console.error("Agent loop crashed:", err);
+        log.error("Agent loop crashed", { err });
         store.updateRun(runId, { status: "failed" });
       });
     },
@@ -390,7 +391,7 @@ export function useAgent() {
       abortRef.current = new AbortController();
       loopRef.current = true;
       runReActLoop(runId, run.model).catch((err) => {
-        console.error("Agent loop crashed after approval:", err);
+        log.error("Agent loop crashed after approval", { err });
         store.updateRun(runId, { status: "failed" });
       });
     },
@@ -415,7 +416,7 @@ export function useAgent() {
       abortRef.current = new AbortController();
       loopRef.current = true;
       runReActLoop(runId, run.model).catch((err) => {
-        console.error("Agent loop crashed after rejection:", err);
+        log.error("Agent loop crashed after rejection", { err });
         store.updateRun(runId, { status: "failed" });
       });
     },

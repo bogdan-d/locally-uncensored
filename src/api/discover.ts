@@ -1,6 +1,7 @@
 import { backendCall, fetchExternal } from "./backend"
 import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels } from "./comfyui"
 import type { ProviderId } from "./providers/types"
+import { log } from "../lib/logger"
 
 export interface DiscoverModel {
   name: string
@@ -161,14 +162,14 @@ export async function installCustomNodes(nodeKeys: string[]): Promise<void> {
   for (const key of nodeKeys) {
     const entry = CUSTOM_NODE_REGISTRY[key]
     if (!entry) {
-      console.warn(`[discover] Unknown custom node key: ${key}`)
+      log.warn(`[discover] Unknown custom node key: ${key}`)
       continue
     }
     try {
       await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
-      console.log(`[discover] Installed custom node: ${entry.name}`)
+      log.info(`[discover] Installed custom node: ${entry.name}`)
     } catch (err) {
-      console.error(`[discover] Failed to install ${entry.name}:`, err)
+      log.error(`[discover] Failed to install ${entry.name}`, { err })
       throw new Error(`Failed to install ${entry.name}: ${err}`)
     }
   }
@@ -196,7 +197,7 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
   for (const file of bundle.files) {
     if (!file.downloadUrl || !file.filename || !file.subfolder) continue
     if (installedFiles.has(file.filename)) {
-      console.log(`[discover] Skipping ${file.filename} — already installed`)
+      log.info(`[discover] Skipping ${file.filename} — already installed`)
       window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
       continue
     }
@@ -208,7 +209,7 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
         window.dispatchEvent(new CustomEvent('comfyui-download-exists', { detail: { filename: file.filename } }))
       }
     } catch (err) {
-      console.error(`[discover] Download failed for ${file.filename}:`, err)
+      log.error(`[discover] Download failed for ${file.filename}`, { err })
       errors.push(`${file.filename}: ${err}`)
     }
   }
@@ -223,9 +224,9 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
           const entry = CUSTOM_NODE_REGISTRY[key]
           if (!entry) continue
           await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
-          console.log(`[discover] Installed custom node: ${entry.name}`)
+          log.info(`[discover] Installed custom node: ${entry.name}`)
         } catch (err) {
-          console.warn('[discover] Custom node install failed:', err)
+          log.warn('[discover] Custom node install failed', { err })
         }
       }
       // Restart ComfyUI after custom nodes are done (needed for node registration)
@@ -233,9 +234,9 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
         await backendCall('stop_comfyui')
         await new Promise(resolve => setTimeout(resolve, 2000))
         await backendCall('start_comfyui')
-        console.log('[discover] ComfyUI restarted after custom node install')
+        log.info('[discover] ComfyUI restarted after custom node install')
       } catch (err) {
-        console.warn('[discover] ComfyUI restart after custom node install failed:', err)
+        log.warn('[discover] ComfyUI restart after custom node install failed', { err })
       }
     })()
   }
@@ -280,7 +281,7 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
   sdxl: { loader: 'CheckpointLoaderSimple', needsSeparateVAE: false, needsSeparateCLIP: false },
   flux: {
     loader: 'UNETLoader',
-    vae: { patterns: ['ae', 'flux'], downloadName: 'flux2-vae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/vae/flux2-vae.safetensors', subfolder: 'vae' },
+    vae: { patterns: ['ae', 'flux'], downloadName: 'ae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors', subfolder: 'vae' },
     clip: { patterns: ['t5xxl', 't5-xxl', 't5_xxl'], downloadName: 't5xxl_fp8_e4m3fn.safetensors', downloadUrl: 'https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors', subfolder: 'text_encoders' },
     clipSecondary: { patterns: ['clip_l'], downloadName: 'clip_l.safetensors', downloadUrl: 'https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors', subfolder: 'text_encoders' },
     needsSeparateVAE: true, needsSeparateCLIP: true,
@@ -636,7 +637,7 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
     }
     return models
   } catch (err) {
-    console.warn('[discover] HF search failed:', err)
+    log.warn('[discover] HF search failed', { err })
     return []
   }
 }
@@ -737,10 +738,10 @@ export function getImageBundles(): ModelBundle[] {
         },
         {
           name: 'FLUX VAE',
-          description: 'Required autoencoder for FLUX.',
+          description: 'Required autoencoder for FLUX.1 (16-channel ae).',
           pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/vae/flux2-vae.safetensors',
-          filename: 'flux2-vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
+          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors',
+          filename: 'ae.safetensors', subfolder: 'vae', sizeGB: 0.3,
         },
         {
           name: 'T5-XXL Text Encoder (FP8)',
@@ -777,10 +778,10 @@ export function getImageBundles(): ModelBundle[] {
         },
         {
           name: 'FLUX VAE',
-          description: 'Required autoencoder for FLUX.',
+          description: 'Required autoencoder for FLUX.1 (16-channel ae).',
           pulls: '', tags: ['VAE', '335 MB'], updated: '',
-          downloadUrl: 'https://huggingface.co/Comfy-Org/vae-text-encorder-for-flux-klein-4b/resolve/main/split_files/vae/flux2-vae.safetensors',
-          filename: 'flux2-vae.safetensors', subfolder: 'vae', sizeGB: 0.3,
+          downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors',
+          filename: 'ae.safetensors', subfolder: 'vae', sizeGB: 0.3,
         },
         {
           name: 'T5-XXL Text Encoder (FP8)',
@@ -1592,7 +1593,7 @@ export async function searchCivitaiModels(
       }
     })
   } catch (err) {
-    console.warn('[discover] CivitAI model search failed:', err)
+    log.warn('[discover] CivitAI model search failed', { err })
     return []
   }
 }

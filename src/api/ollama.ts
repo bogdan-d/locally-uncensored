@@ -1,5 +1,6 @@
 import type { OllamaModel, PullProgress } from "../types/models"
 import { ollamaUrl, localFetch, localFetchStream, isTauri } from "./backend"
+import { log } from "../lib/logger"
 
 export async function listModels(): Promise<OllamaModel[]> {
   const res = await localFetch(ollamaUrl("/tags"))
@@ -288,7 +289,7 @@ export async function loadModel(name: string): Promise<void> {
     // Pass the active name in as fallbackModel — Bug C missing-blob errors
     // only carry the on-disk blob hash, not the model name.
     const parsed = await parseOllamaError(res, `HTTP ${res.status}`, name)
-    console.warn(`[ollama] failed to load model "${name}":`, res.status, parsed.message)
+    log.warn(`[ollama] failed to load model "${name}"`, { status: res.status, message: parsed.message })
     throw new ModelLoadError(parsed, name)
   }
   // Consume response to ensure model is fully loaded
@@ -303,7 +304,7 @@ export async function unloadModel(name: string): Promise<void> {
   if (!res.ok) {
     const { parseOllamaError, ModelLoadError } = await import("../lib/ollama-errors")
     const parsed = await parseOllamaError(res, `HTTP ${res.status}`)
-    console.warn(`[ollama] failed to unload model "${name}":`, res.status, parsed.message)
+    log.warn(`[ollama] failed to unload model "${name}"`, { status: res.status, message: parsed.message })
     throw new ModelLoadError(parsed, name)
   }
 }
@@ -311,7 +312,7 @@ export async function unloadModel(name: string): Promise<void> {
 export async function unloadAllModels(): Promise<number> {
   const running = await listRunningModels()
   for (const name of running) {
-    try { await unloadModel(name) } catch (e) { console.warn(`[ollama] unloadAll: failed for "${name}":`, e) }
+    try { await unloadModel(name) } catch (e) { log.warn(`[ollama] unloadAll: failed for "${name}"`, { err: e }) }
   }
   return running.length
 }

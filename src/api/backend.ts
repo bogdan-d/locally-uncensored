@@ -8,6 +8,8 @@
  * All Ollama/ComfyUI calls must go through invoke('proxy_localhost').
  */
 
+import { log } from "../lib/logger";
+
 let _invoke: ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) | null = null;
 
 /** True when running inside a Tauri WebView (.exe), false in browser dev mode */
@@ -95,7 +97,7 @@ export async function localFetch(
     return new Response(text, { status: 200, headers: { "Content-Type": "application/json" } });
   } catch (proxyErr) {
     const proxyErrMsg = String(proxyErr)
-    console.warn('[localFetch] Proxy failed, trying direct fetch:', proxyErrMsg)
+    log.warn('[localFetch] Proxy failed, trying direct fetch', { err: proxyErrMsg })
 
     // Fallback: try direct fetch (works when ComfyUI has --enable-cors-header *)
     // Apply the same timeout to the fallback so a hanging probe doesn't sit
@@ -161,7 +163,7 @@ export async function localFetchStream(
     }
   } catch (directErr) {
     if (options?.signal?.aborted) throw directErr;
-    console.warn('[localFetchStream] Direct fetch failed, trying Rust proxy:', String(directErr));
+    log.warn('[localFetchStream] Direct fetch failed, trying Rust proxy', { err: String(directErr) });
   }
 
   // Fallback in Tauri: Rust proxy collects all bytes (loses streaming).
@@ -216,6 +218,8 @@ export async function backendCall<T = any>(
     get_ollama_host: { path: "/local-api/get-ollama-host" },
     install_custom_node: { path: "/local-api/install-custom-node", method: "POST" },
     whisper_status: { path: "/local-api/transcribe-status" },
+    install_whisper: { path: "/local-api/install-whisper", method: "POST" },
+    install_whisper_status: { path: "/local-api/install-whisper" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
     execute_code: { path: "/local-api/execute-code", method: "POST" },
     file_read: { path: "/local-api/file-read", method: "POST" },
@@ -422,7 +426,7 @@ export async function downloadComfyFile(filename: string, subfolder: string = ''
     document.body.removeChild(a)
     URL.revokeObjectURL(blobUrl)
   } catch (err) {
-    console.error('[downloadComfyFile] Failed:', err)
+    log.error('[downloadComfyFile] Failed', { err })
     // Fallback: try direct link
     const a = document.createElement('a')
     a.href = url

@@ -12,6 +12,7 @@ import { FEATURE_FLAGS } from '../../lib/constants'
 import { getRecommendedAgentModels } from '../../lib/model-compatibility'
 import { MemorySettings } from './MemorySettings'
 import { RemoteAccessSettings } from './RemoteAccessSettings'
+import { RemoteAccessDocs } from './RemoteAccessDocs'
 import { HardwareSettings } from './HardwareSettings'
 import { ChatbotImporter } from '../import/ChatbotImporter'
 import { ProviderSettings } from './ProviderConfig'
@@ -53,6 +54,41 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
             <div className="pb-3 space-y-2">
               {children}
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+// ── Disclosure ──────────────────────────────────────────────────
+// Lightweight nested collapsible for use *inside* a Section (e.g. the
+// Remote Access "How it works" docs). Unlike Section it uses sentence-case
+// and a smaller chevron so it reads as a sub-item, not a top-level heading.
+
+function Disclosure({ label, children, defaultOpen = false }: { label: string; children: ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+  return (
+    <div className="mt-2 pt-2 border-t border-gray-100 dark:border-white/[0.04]">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-1.5 group"
+      >
+        <ChevronRight size={11} className={`text-gray-400 transition-transform duration-200 ${open ? 'rotate-90' : ''}`} />
+        <span className="text-[0.65rem] font-medium text-gray-600 dark:text-gray-400 group-hover:text-gray-800 dark:group-hover:text-gray-200 transition-colors">
+          {label}
+        </span>
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="overflow-hidden"
+          >
+            <div className="pt-2">{children}</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -627,6 +663,10 @@ export function SettingsPage() {
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
   const [whisperStatus, setWhisperStatus] = useState<{ available: boolean; backend: string | null; error?: string } | null>(null)
   const [whisperLoading, setWhisperLoading] = useState(true)
+  // §24.9 — in-app faster-whisper install. `installing` drives the spinner;
+  // `whisperInstallError` shows the last failure under the badge.
+  const [whisperInstalling, setWhisperInstalling] = useState(false)
+  const [whisperInstallError, setWhisperInstallError] = useState<string | null>(null)
   const [tab, setTab] = useState<SettingsTab>(() => {
     if (typeof window === 'undefined') return 'general'
     const stored = window.localStorage.getItem(SETTINGS_TAB_KEY)
@@ -653,12 +693,52 @@ export function SettingsPage() {
     return () => speechSynthesis.removeEventListener('voiceschanged', loadVoices)
   }, [ttsSupported])
 
-  useEffect(() => {
+  const refreshWhisper = () => {
     setWhisperLoading(true)
-    checkWhisperAvailable()
+    return checkWhisperAvailable()
       .then(setWhisperStatus)
       .finally(() => setWhisperLoading(false))
+  }
+
+  useEffect(() => {
+    void refreshWhisper()
   }, [])
+
+  // §24.9 — kick off the faster-whisper install, poll its status, then
+  // re-check availability so the badge flips ✗ → ✓ without a restart.
+  const handleInstallWhisper = async () => {
+    if (whisperInstalling) return
+    setWhisperInstallError(null)
+    setWhisperInstalling(true)
+    try {
+      await backendCall('install_whisper')
+      // Poll install status until it leaves "installing" (cap ~10 min — a
+      // model download on a slow link can be lengthy; pip itself is quick).
+      const start = Date.now()
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        await new Promise((r) => setTimeout(r, 2000))
+        let s: { status?: string; error?: string } = {}
+        try {
+          s = await backendCall<{ status?: string; error?: string }>('install_whisper_status')
+        } catch { /* transient — keep polling */ }
+        if (s.status === 'complete') break
+        if (s.status === 'error') {
+          setWhisperInstallError(s.error || 'Install failed.')
+          break
+        }
+        if (Date.now() - start > 600_000) {
+          setWhisperInstallError('Install is taking unusually long — check the logs / try again.')
+          break
+        }
+      }
+    } catch (e) {
+      setWhisperInstallError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setWhisperInstalling(false)
+      await refreshWhisper()
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin">
@@ -673,7 +753,7 @@ export function SettingsPage() {
 
         {/* P5: top-level tabs. Sticky so the user can switch tabs from
             anywhere in a long Section without scrolling back up. */}
-        <div className="sticky top-0 z-10 -mx-4 px-4 pb-2 mb-2 bg-white/80 dark:bg-[#0a0a0a]/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-[#0a0a0a]/60 border-b border-gray-100 dark:border-white/[0.04]">
+        <div className="sticky top-0 z-10 -mx-4 px-4 pb-2 mb-2 bg-white/80 dark:bg-[#141414]/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-[#141414]/60 border-b border-gray-100 dark:border-white/[0.06]">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
             {SETTINGS_TABS.map(t => (
               <button
@@ -964,7 +1044,29 @@ export function SettingsPage() {
                 {ttsSupported ? <Check size={10} className="text-green-500" /> : <X size={10} className="text-red-500" />}
                 <span className="text-gray-500">TTS</span>
               </span>
+              {/* §24.9 — Install affordance: the STT badge used to just show ✗
+                  with no fix. This installs faster-whisper into LU's Python
+                  and starts the STT server, then re-checks the badge. */}
+              {!whisperLoading && whisperStatus && !whisperStatus.available && (
+                <button
+                  onClick={() => void handleInstallWhisper()}
+                  disabled={whisperInstalling}
+                  className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.6rem] font-medium bg-blue-500/15 text-blue-400 border border-blue-500/30 hover:bg-blue-500/25 transition-colors disabled:opacity-50"
+                  title="Install faster-whisper so speech-to-text works"
+                >
+                  {whisperInstalling ? <Loader2 size={9} className="animate-spin" /> : null}
+                  {whisperInstalling ? 'Installing…' : 'Install'}
+                </button>
+              )}
             </div>
+            {whisperInstallError && (
+              <p className="text-[0.55rem] text-red-400/90 leading-snug">{whisperInstallError}</p>
+            )}
+            {!whisperLoading && whisperStatus && !whisperStatus.available && !whisperInstalling && !whisperInstallError && (
+              <p className="text-[0.55rem] text-gray-500 leading-snug">
+                Speech-to-text needs faster-whisper. Click Install to set it up locally (uses LU's Python; first run also downloads a small model).
+              </p>
+            )}
             <InlineToggle label="TTS Enabled" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
             <div className="flex items-center justify-between">
               <span className="text-[0.7rem] text-gray-500">Voice</span>
@@ -984,6 +1086,11 @@ export function SettingsPage() {
 
           <Section title="Remote Access">
             <RemoteAccessSettings />
+            {/* §16 — real step-by-step docs (F5/X2 shipped only a 1-line
+                blurb). Collapsed by default so the settings stay compact. */}
+            <Disclosure label="How it works">
+              <RemoteAccessDocs />
+            </Disclosure>
           </Section>
         </>)}
 
@@ -1097,6 +1204,10 @@ interface SystemHealthReport {
     cpu_count: number
     ram_gb: number
     disk_free_gb: number
+    // §17: VRAM of the biggest NVIDIA GPU. null on non-NVIDIA boxes / when
+    // the nvidia-smi probe fails — rendered as "—".
+    vram_total_gb: number | null
+    vram_free_gb: number | null
   }
   ollama: BackendProbe
   comfyui: BackendProbe
@@ -1205,6 +1316,16 @@ function TroubleshootSection() {
               <span className="text-gray-500">Disk free (home)</span>
               <span className={`font-mono ${report.host.disk_free_gb < 10 ? 'text-amber-400' : 'text-gray-300'}`}>
                 {report.host.disk_free_gb} GB
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-[0.65rem]">
+              <span className="text-gray-500">VRAM (GPU)</span>
+              <span className="text-gray-300 font-mono">
+                {report.host.vram_total_gb != null
+                  ? (report.host.vram_free_gb != null
+                      ? `${report.host.vram_free_gb} / ${report.host.vram_total_gb} GB free`
+                      : `${report.host.vram_total_gb} GB`)
+                  : '—'}
               </span>
             </div>
           </div>

@@ -119,6 +119,8 @@ fn main() {
             commands::install::install_python_status,
             commands::install::python_check,
             commands::install::install_custom_node,
+            commands::install::install_whisper,
+            commands::install::install_whisper_status,
             // Whisper STT
             commands::whisper::whisper_status,
             commands::whisper::transcribe,

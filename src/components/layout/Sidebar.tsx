@@ -210,7 +210,7 @@ export function Sidebar() {
     <AnimatePresence>
       {sidebarOpen && (
         <motion.aside
-          className="w-56 h-full border-r border-gray-200 dark:border-white/[0.04] bg-gray-50 dark:bg-[#0a0a0a] flex flex-col z-20 overflow-hidden"
+          className="w-56 h-full border-r border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-[#1a1a1a] flex flex-col z-20 overflow-hidden"
           initial={{ width: 0, opacity: 0 }}
           animate={{ width: 224, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
@@ -589,7 +589,7 @@ export function Sidebar() {
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.92, opacity: 0 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="bg-[#0e0e0e] border border-white/10 rounded-xl p-5 max-w-[360px] w-full flex flex-col items-center gap-3 shadow-2xl"
+            className="bg-[#2a2a2a] border border-white/10 rounded-xl p-5 max-w-[360px] w-full flex flex-col items-center gap-3 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between w-full">

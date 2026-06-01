@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Brain, ChevronDown, X } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Brain, ChevronDown, X, Archive } from 'lucide-react'
 import { useMemoryStore } from '../../stores/memoryStore'
 import { useModelStore } from '../../stores/modelStore'
 import { getModelMaxTokens } from '../../lib/context-compaction'
@@ -42,15 +42,18 @@ function MemoryDebugPopover({ onClose }: { onClose: () => void }) {
   const activeModel = useModelStore((s) => s.activeModel)
   const [injectedPreview, setInjectedPreview] = useState<string>('')
 
-  // Load injected preview on mount
-  useState(() => {
-    if (activeModel) {
-      getModelMaxTokens(activeModel).then((tokens) => {
-        const preview = useMemoryStore.getState().getMemoriesForPrompt('', tokens)
-        setInjectedPreview(preview)
-      }).catch(() => {})
-    }
-  })
+  // Load injected preview on mount — use the SAME embedding-first path the
+  // chat hooks use so the preview matches what actually gets injected (it
+  // falls back to keyword scoring offline).
+  useEffect(() => {
+    if (!activeModel) return
+    let cancelled = false
+    getModelMaxTokens(activeModel)
+      .then((tokens) => useMemoryStore.getState().getMemoriesForPromptAsync('', tokens))
+      .then((preview) => { if (!cancelled) setInjectedPreview(preview) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [activeModel])
 
   const typeColors: Record<string, string> = {
     user: 'text-blue-400',
@@ -87,17 +90,25 @@ function MemoryDebugPopover({ onClose }: { onClose: () => void }) {
           {entries.length === 0 ? (
             <p className="text-[0.6rem] text-gray-600 px-3 py-4 text-center">No memories stored yet.</p>
           ) : (
-            entries.slice(0, 30).map((entry) => (
-              <div key={entry.id} className="px-3 py-1.5 border-b border-white/[0.03] hover:bg-white/[0.02]">
-                <div className="flex items-center gap-1.5">
-                  <span className={`text-[0.5rem] uppercase font-bold tracking-wider ${typeColors[entry.type] || 'text-gray-500'}`}>
-                    {entry.type}
-                  </span>
-                  <span className="text-[0.6rem] text-gray-300 font-medium truncate">{entry.title}</span>
+            entries.slice(0, 30).map((entry) => {
+              const stale = entry.stale === true || typeof entry.supersededBy === 'string'
+              return (
+                <div key={entry.id} className={`px-3 py-1.5 border-b border-white/[0.03] hover:bg-white/[0.02] ${stale ? 'opacity-50' : ''}`}>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[0.5rem] uppercase font-bold tracking-wider ${typeColors[entry.type] || 'text-gray-500'}`}>
+                      {entry.type}
+                    </span>
+                    <span className="text-[0.6rem] text-gray-300 font-medium truncate">{entry.title}</span>
+                    {stale && (
+                      <span className="flex items-center gap-0.5 text-[0.45rem] uppercase tracking-wider text-gray-500 shrink-0" title="Outdated — not injected into prompts">
+                        <Archive size={8} /> outdated
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[0.55rem] text-gray-600 truncate mt-0.5">{entry.content.substring(0, 120)}</p>
                 </div>
-                <p className="text-[0.55rem] text-gray-600 truncate mt-0.5">{entry.content.substring(0, 120)}</p>
-              </div>
-            ))
+              )
+            })
           )}
         </div>
 

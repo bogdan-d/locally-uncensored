@@ -15,6 +15,7 @@ use tower_http::cors::CorsLayer;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex as TokioMutex;
 use tauri::{AppHandle, Emitter};
+use tracing::{error, info, warn};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -1460,9 +1461,10 @@ button{-webkit-appearance:none;appearance:none}
      parameters:[]},
     {name:'screenshot', description:'Capture the primary display as a base64 PNG. Zero arguments. USE for visual verification when the user asks "what\'s on my screen" or "look at X". Returns a short summary string (size + filename); the actual image is forwarded to the model via message content. NEVER call in a tight loop — screenshots are expensive and privacy-sensitive.',
      parameters:[]},
-    {name:'image_generate', description:'Generate an image from a text prompt via the local ComfyUI pipeline. Blocks up to 5 minutes. USE for "draw me", "make an image of", "generate a picture". NOT for photo editing — this is text-to-image only; no inpainting via this tool. First installed image model is auto-selected. Rate-limit yourself to 1 call per turn — ComfyUI serializes generations internally so parallel calls will queue, not speed up.',
+    {name:'image_generate', description:'Generate an image from a text prompt via the local ComfyUI pipeline. Blocks up to 5 minutes. USE for "draw me", "make an image of", "generate a picture". NOT for photo editing — this is text-to-image only; no inpainting via this tool. First installed image model is auto-selected (or pass `model`). EXPECT A PAUSE: on a single-GPU machine LU may briefly unload the chat model from VRAM to fit the image model, then reload it after — typically a 30-90s swap (longer on a cold ComfyUI start). This avoids out-of-memory errors; your conversation is fully preserved across the swap. Rate-limit yourself to 1 call per turn — ComfyUI serializes generations internally so parallel calls will queue, not speed up.',
      parameters:[{name:'prompt',type:'string',description:'Positive text description of the desired image',required:true},
-                 {name:'negativePrompt',type:'string',description:'Things to avoid (blurry, deformed, etc.)',required:false}]},
+                 {name:'negativePrompt',type:'string',description:'Things to avoid (blurry, deformed, etc.)',required:false},
+                 {name:'model',type:'string',description:'Optional image model filename to use. Omit to auto-select the first installed image model.',required:false}]},
     {name:'get_current_time', description:'Return the user\'s current local date, time, and timezone. Zero arguments. USE FIRST for any \'what day / time / date is it\' question — do NOT web_search or shell_execute `date`. The Rust backend probes the OS timezone on every call, so this is always authoritative.',
      parameters:[]}
   ];
@@ -3825,8 +3827,12 @@ pub async fn start_remote_server(
     // and every new Dispatch fails with "Server stopped".
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("[Remote] Server starting on {}", addr);
+    info!(port = port, "remote server connect");
     let listener = build_reusable_listener(addr)
-        .map_err(|e| format!("Could not bind {}: {}. Another instance may be running — try Stop first.", addr, e))?;
+        .map_err(|e| {
+            error!(error = %e, port = port, "remote server bind failed");
+            format!("Could not bind {}: {}. Another instance may be running — try Stop first.", addr, e)
+        })?;
 
     let handle = tokio::spawn(async move {
         let app = build_router(server_state);
@@ -3838,6 +3844,7 @@ pub async fn start_remote_server(
             app.into_make_service_with_connect_info::<SocketAddr>(),
         ).await {
             eprintln!("[Remote] axum::serve exited with error: {}", e);
+            error!(error = %e, "remote axum serve exited with error");
         }
     });
 
@@ -3851,6 +3858,7 @@ pub async fn start_remote_server(
         .map(|ip| ip.to_string())
         .unwrap_or_else(|_| "127.0.0.1".to_string());
 
+    info!(port = port, "remote server started");
     Ok(serde_json::json!({
         "port": port,
         "passcode": passcode,
@@ -3913,6 +3921,7 @@ pub async fn stop_remote_server(
     if let Some(handle) = handle {
         handle.abort();
         println!("[Remote] Server stopped");
+        info!("remote server disconnected");
     }
     Ok(())
 }
@@ -4150,9 +4159,13 @@ pub async fn start_tunnel(
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     let child = cmd.spawn()
-        .map_err(|e| format!("Failed to start cloudflared: {}", e))?;
+        .map_err(|e| {
+            error!(error = %e, "cloudflared tunnel spawn failed");
+            format!("Failed to start cloudflared: {}", e)
+        })?;
 
     let pid = child.id();
+    info!(pid = pid, port = port, "tunnel started");
     let stderr = match child.stderr {
         Some(s) => s,
         None => return Err("cloudflared had no stderr handle".into()),
@@ -4214,6 +4227,7 @@ pub async fn start_tunnel(
         // sentence instead of a URL. Return Err so `startTunnel()` in the
         // store keeps `tunnelActive=false`, the QR falls back to the LAN
         // URL, and the user sees a real reason in the error chip.
+        warn!(pid = pid, "tunnel URL did not appear within 15s");
         Err(format!(
             "Cloudflare tunnel started but no public URL appeared within 15 s (cloudflared PID {}). \
              This usually means cloudflared can't reach Cloudflare's edge — check firewall / VPN, \

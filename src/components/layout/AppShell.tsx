@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { Header } from './Header'
 import { StaleModelsBanner } from './StaleModelsBanner'
+import { StorageQuotaToast } from './StorageQuotaToast'
 import { Sidebar } from './Sidebar'
 import { ChatView } from '../chat/ChatView'
 import { ModelManager } from '../models/ModelManager'
@@ -47,6 +48,25 @@ export function AppShell() {
   ]
   const STORE_KEYS_SET = new Set(STORE_KEYS)
 
+  // Feature FF: reserved key under which memory embeddings ride inside the RAG
+  // chunk backup file. Never collides with a real documentId (those are UUIDs).
+  const MEMORY_VECTORS_BACKUP_KEY = '__memory_vectors__'
+
+  // Split memory vectors out of a parsed RAG backup payload and import them
+  // into the memory-embedding IndexedDB store. Best-effort. Returns the RAG-
+  // only portion (memory key stripped) so the caller can import chunks cleanly.
+  const restoreMemoryVectorsFrom = async (parsed: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const mem = parsed[MEMORY_VECTORS_BACKUP_KEY]
+    if (mem && typeof mem === 'object' && !Array.isArray(mem)) {
+      try {
+        const { importAll: importMemoryVectors } = await import('../../lib/memoryEmbedDB')
+        await importMemoryVectors(mem as Record<string, never>)
+      } catch { /* best-effort */ }
+    }
+    const { [MEMORY_VECTORS_BACKUP_KEY]: _omit, ...ragOnly } = parsed
+    return ragOnly
+  }
+
   // On startup: if localStorage was wiped, restore from %APPDATA% backup
   useEffect(() => {
     if (!isTauri()) return
@@ -61,8 +81,12 @@ export function AppShell() {
         try {
           const data = await backendCall<string | null>('restore_rag_chunks')
           if (!data) return
-          const parsed = JSON.parse(data)
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const rawParsed = JSON.parse(data)
+          if (rawParsed && typeof rawParsed === 'object' && !Array.isArray(rawParsed)) {
+            // Feature FF: split memory embeddings out first, then restore the
+            // RAG-only chunk portion. memoryEmbedDB.importAll is last-writer-
+            // wins; safe to run on an intact-localStorage cold start.
+            const parsed = await restoreMemoryVectorsFrom(rawParsed)
             const { exportAllChunks, importAllChunks } = await import('../../lib/ragDB')
             const live = await exportAllChunks()
             // Only import entries the live store is missing — never clobber
@@ -110,8 +134,10 @@ export function AppShell() {
                 if (ragData) {
                   const parsedRag = JSON.parse(ragData)
                   if (parsedRag && typeof parsedRag === 'object' && !Array.isArray(parsedRag)) {
+                    // Feature FF: restore memory embeddings, then RAG chunks.
+                    const ragOnly = await restoreMemoryVectorsFrom(parsedRag as Record<string, unknown>)
                     const { importAllChunks } = await import('../../lib/ragDB')
-                    await importAllChunks(parsedRag as Record<string, any>)
+                    await importAllChunks(ragOnly as Record<string, any>)
                   }
                 }
               } catch { /* best-effort */ }
@@ -176,7 +202,17 @@ export function AppShell() {
         ragInflight = true
         try {
           const { exportAllChunks } = await import('../../lib/ragDB')
+          const { exportAll: exportMemoryVectors } = await import('../../lib/memoryEmbedDB')
           const snapshot = await exportAllChunks()
+          // Feature FF: piggyback memory embeddings on the SAME backup file so
+          // they survive an NSIS upgrade / WebView2 wipe alongside RAG chunks.
+          // Stored under a reserved key (never a real documentId UUID); the
+          // restore path splits it back out. importAllChunks ignores it anyway
+          // because the value is an object, not a TextChunk[] array.
+          const memVectors = await exportMemoryVectors()
+          if (Object.keys(memVectors).length > 0) {
+            ;(snapshot as Record<string, unknown>)[MEMORY_VECTORS_BACKUP_KEY] = memVectors
+          }
           await backendCall('backup_rag_chunks', { data: JSON.stringify(snapshot) }).catch(() => {})
           ragLastRun = Date.now()
         } catch { /* best-effort */ }
@@ -535,11 +571,12 @@ export function AppShell() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-white dark:bg-[#0a0a0a] text-gray-900 dark:text-gray-100">
+    <div className="h-screen w-screen overflow-hidden bg-white dark:bg-[#141414] text-gray-900 dark:text-gray-100">
       <div className="h-full flex flex-col">
         <Titlebar />
         <Header />
         <StaleModelsBanner />
+        <StorageQuotaToast />
         <div className="flex-1 flex overflow-hidden">
           <Sidebar />
           <main className="flex-1 overflow-hidden">

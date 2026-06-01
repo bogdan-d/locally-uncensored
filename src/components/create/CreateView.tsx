@@ -11,6 +11,7 @@ import { PromptInput } from './PromptInput'
 import { ParamPanel } from './ParamPanel'
 import { OutputDisplay } from './OutputDisplay'
 import { Gallery } from './Gallery'
+import { log } from '../../lib/logger'
 
 /**
  * Bug A (v2.4.5): one-click install of VHS_VideoCombine so video generation
@@ -345,7 +346,7 @@ export function CreateView() {
       const filename = await uploadImage(file)
       setI2vImage(filename)
     } catch (err) {
-      console.error('[CreateView] I2V image upload failed:', err)
+      log.error('[CreateView] I2V image upload failed', { err })
     }
     setI2vUploading(false)
   }
@@ -364,7 +365,7 @@ export function CreateView() {
       const filename = await uploadImage(file)
       setI2iImage(filename)
     } catch (err) {
-      console.error('[CreateView] I2I image upload failed:', err)
+      log.error('[CreateView] I2I image upload failed', { err })
     }
     setI2iUploading(false)
   }

@@ -26,14 +26,17 @@ export function MessageList({ isGenerating, isLoadingModel, onRegenerate, onEdit
 
   if (!conversation) return null
 
+  const visibleMessages = conversation.messages.filter((m) => m.role !== 'system' && !m.hidden)
+  const lastVisibleId = visibleMessages[visibleMessages.length - 1]?.id
+
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin py-4">
-      {conversation.messages
-        .filter((m) => m.role !== 'system' && !m.hidden)
+      {visibleMessages
         .map((message) => (
           <MessageBubble
             key={message.id}
             message={message}
+            isLast={message.id === lastVisibleId}
             onRegenerate={message.role === 'assistant' && onRegenerate && !isGenerating
               ? () => onRegenerate(conversation.id, message.id)
               : undefined}

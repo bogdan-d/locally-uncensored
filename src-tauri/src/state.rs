@@ -154,6 +154,10 @@ pub struct AppState {
     pub ollama_install: Arc<Mutex<InstallState>>,
     pub lmstudio_install: Arc<Mutex<InstallState>>,
     pub python_install: Arc<Mutex<InstallState>>,
+    /// §24.9 — progress/log state for the in-app faster-whisper installer
+    /// (the STT badge had no way to fix a ✗). Mirrors the other per-installer
+    /// states; `install_whisper` writes it, `install_whisper_status` reads it.
+    pub whisper_install: Arc<Mutex<InstallState>>,
     pub searxng_install: Mutex<InstallState>,
     pub searxng_available: AtomicBool,
     /// Resolved Python binary path. Empty string means "no real Python on
@@ -228,6 +232,7 @@ impl AppState {
             ollama_install: Arc::new(Mutex::new(InstallState::default())),
             lmstudio_install: Arc::new(Mutex::new(InstallState::default())),
             python_install: Arc::new(Mutex::new(InstallState::default())),
+            whisper_install: Arc::new(Mutex::new(InstallState::default())),
             searxng_install: Mutex::new(InstallState::default()),
             searxng_available: AtomicBool::new(false),
             python_bin: Arc::new(Mutex::new(python_bin)),

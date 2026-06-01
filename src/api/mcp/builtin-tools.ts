@@ -472,13 +472,37 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       'Generate an image from a text prompt via the local ComfyUI pipeline. Blocks up to 5 minutes. '
       + 'USE for "draw me", "make an image of", "generate a picture". '
       + 'NOT for photo editing — this is text-to-image only; no inpainting via this tool. '
-      + 'First installed image model is auto-selected. '
+      + 'First installed image model is auto-selected (or pass `model`). '
+      + 'EXPECT A PAUSE: on a single-GPU machine LU may briefly unload the chat model from VRAM to fit the image model, then reload it after — typically a 30-90s swap (longer on a cold ComfyUI start). This avoids out-of-memory errors; your conversation is fully preserved across the swap. '
       + 'Rate-limit yourself to 1 call per turn — ComfyUI serializes generations internally so parallel calls will queue, not speed up.',
     inputSchema: {
       type: 'object',
       properties: {
         prompt: { type: 'string', description: 'Positive text description of the desired image' },
         negativePrompt: { type: 'string', description: 'Things to avoid (blurry, deformed, etc.)' },
+        model: { type: 'string', description: 'Optional image model filename to use. Omit to auto-select the first installed image model.' },
+      },
+      required: ['prompt'],
+    },
+    category: 'image',
+    source: 'builtin',
+  },
+  {
+    name: 'video_generate',
+    description:
+      'Generate a short video clip from a text prompt via the local ComfyUI pipeline (Wan / Hunyuan / AnimateDiff backend, auto-detected). Blocks up to 10 minutes. '
+      + 'USE for "make a video of", "animate", "generate a clip". '
+      + 'Text-to-video only — no image input via this tool. First installed video model is auto-selected (or pass `model`). '
+      + 'Write ONE clear prompt and call this ONCE per turn — video generation is slow and ComfyUI queues parallel calls rather than speeding up. '
+      + 'EXPECT A PAUSE: LU will briefly unload the chat model from VRAM to fit the (large) video model, then reload it after — typically a 30-90s swap, longer on a cold ComfyUI start. This prevents out-of-memory errors; your conversation is preserved across the swap.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Positive text description of the desired video / motion' },
+        negativePrompt: { type: 'string', description: 'Things to avoid (static, blurry, deformed, etc.)' },
+        model: { type: 'string', description: 'Optional video model filename to use. Omit to auto-select the first installed video model.' },
+        frames: { type: 'number', description: 'Number of frames to generate (clamped per model defaults; e.g. ~81 for Wan). Omit for the model default.' },
+        fps: { type: 'number', description: 'Frames per second of the output clip (e.g. 16). Omit for the model default.' },
       },
       required: ['prompt'],
     },
@@ -905,46 +929,31 @@ async function executeScreenshot(): Promise<string> {
 }
 
 async function executeImageGenerate(args: Record<string, any>): Promise<string> {
+  // Feature EE (v2.5.0): the whole generation flow now goes through the VRAM
+  // hand-off orchestrator. It resolves the image model (args.model or first
+  // installed), decides whether the resident local text model has to be evicted
+  // from VRAM to make room (single-GPU OOM avoidance), runs the ComfyUI
+  // workflow exactly as before (buildDynamicWorkflow), then reloads the text
+  // model afterwards. The returned string keeps the EXACT F1 contract —
+  // `Image generated: <file> (prompt: "...")\n<comfyui /view URL>` — so
+  // ToolCallBlock renders it inline and useAgentChat feeds it back unchanged.
   const prompt = args.prompt || args.description || ''
   if (!prompt) return 'Error: No prompt provided for image generation.'
-  try {
-    const { buildDynamicWorkflow } = await import('../dynamic-workflow')
-    const { submitWorkflow, getHistory, classifyModel, getImageModels, getImageUrl } = await import('../comfyui')
-    const models = await getImageModels()
-    if (models.length === 0) return 'Error: No image models available in ComfyUI.'
-    const model = models[0]
-    const workflow = await buildDynamicWorkflow({
-      prompt, negativePrompt: '', model: model.name,
-      sampler: 'euler', scheduler: 'normal', steps: 20, cfgScale: 7,
-      width: 1024, height: 1024, seed: -1, batchSize: 1,
-    }, classifyModel(model.name))
-    const promptId = await submitWorkflow(workflow)
-    for (let i = 0; i < 300; i++) {
-      await new Promise(r => setTimeout(r, 1000))
-      const history = await getHistory(promptId)
-      if (history?.status?.completed) {
-        const outputs = history.outputs ?? {}
-        for (const nodeId of Object.keys(outputs)) {
-          const files = [...(outputs[nodeId].images ?? []), ...(outputs[nodeId].gifs ?? [])]
-          if (files.length > 0) {
-            // F1 (konata3602 commitment 2026-05-23) — embed the
-            // ComfyUI view URL in the result string so the chat UI
-            // (ToolCallBlock) can render an inline <img>. The agent
-            // sees BOTH a human-readable summary AND the URL — that
-            // way the model has the filename if it needs to reference
-            // the output later, and the user gets the picture inline.
-            const url = getImageUrl(files[0].filename, files[0].subfolder ?? '', 'output')
-            return `Image generated: ${files[0].filename} (prompt: "${prompt}")\n${url}`
-          }
-        }
-        return 'Generation completed but no output produced.'
-      }
-      if (history?.status?.status_str === 'error') return `Generation failed: ${history.status.messages?.[0]?.[1]?.message || 'Unknown error'}`
-    }
-    return 'Generation timed out after 5 minutes.'
-  } catch (err) {
-    return `Generation failed: ${err instanceof Error ? err.message : String(err)}`
-  }
+  const { vramHandoffGenerate } = await import('../vram-handoff')
+  return vramHandoffGenerate('image', args)
+}
+
+async function executeVideoGenerate(args: Record<string, any>): Promise<string> {
+  // Feature EE (v2.5.0): text-to-video via the same hand-off orchestrator.
+  // Picks the first installed video model (or args.model), detects the video
+  // backend (Wan / AnimateDiff), evicts the local text model from VRAM if it
+  // won't co-exist, runs buildTxt2VidWorkflow, then reloads the text model.
+  // Same inline-render contract as image_generate (the URL may end .webp/.mp4 —
+  // ToolCallBlock renders a <video> for those).
+  const prompt = args.prompt || args.description || ''
+  if (!prompt) return 'Error: No prompt provided for video generation.'
+  const { vramHandoffGenerate } = await import('../vram-handoff')
+  return vramHandoffGenerate('video', args)
 }
 
 async function executeGetCurrentTime(_args: Record<string, any>): Promise<string> {
@@ -1069,6 +1078,7 @@ const EXECUTOR_MAP: Record<string, (args: Record<string, any>) => Promise<string
   process_list: executeProcessList,
   screenshot: executeScreenshot,
   image_generate: executeImageGenerate,
+  video_generate: executeVideoGenerate,
   run_workflow: executeRunWorkflow,
   get_current_time: executeGetCurrentTime,
   delegate_task: buildDelegateExecutor(),

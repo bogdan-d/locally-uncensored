@@ -42,6 +42,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // runtime picks default. User sets these via Settings → Hardware.
   gpuVendor: 'auto',
   gpuIndices: [],
+  // Feature EE v2.5.0 — VRAM hand-off policy for image/video generation.
+  // 'auto' = evict the local text model only when it wouldn't co-exist with the
+  // ComfyUI model in VRAM. Safest default (no eviction on unknown sizes).
+  exclusiveVramMode: 'auto',
   // ── v2.5.0 Codex sprint A/B/C defaults (ported from uselu) ──────
   codexArchitectMode: false,
   codexArchitectModel: '',

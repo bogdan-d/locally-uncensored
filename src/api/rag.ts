@@ -100,7 +100,7 @@ export async function generateEmbeddings(
   return data.embeddings
 }
 
-function cosineSimilarity(a: number[], b: number[]): number {
+export function cosineSimilarity(a: number[], b: number[]): number {
   let dot = 0,
     magA = 0,
     magB = 0
@@ -112,7 +112,7 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(magA) * Math.sqrt(magB) || 1)
 }
 
-function bm25Score(query: string, document: string, allDocs: string[]): number {
+export function bm25Score(query: string, document: string, allDocs: string[]): number {
   const queryTerms = query.toLowerCase().split(/\s+/)
   const docTerms = document.toLowerCase().split(/\s+/)
   const docLen = docTerms.length

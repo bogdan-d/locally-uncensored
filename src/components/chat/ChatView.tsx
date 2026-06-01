@@ -10,6 +10,7 @@ import { ChatInput } from './ChatInput'
 import { RAGPanel } from './RAGPanel'
 import { AgentModeToggle } from './AgentModeToggle'
 import { AgentWorkspaceBadge } from './AgentWorkspaceBadge'
+import { LuLogo } from '../layout/LuLogo'
 import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
@@ -144,8 +145,7 @@ export function ChatView() {
             exit={{ opacity: 0, y: -20 }}
             transition={{ duration: 0.2 }}
           >
-            <img src="/LU-monogram-bw.png" alt="" width={46} height={46} className="dark:invert-0 invert opacity-20 mb-3" />
-            <h1 className="text-[0.95rem] font-semibold text-gray-400 mb-0.5 tracking-wide">LUncensored</h1>
+            <LuLogo size={76} className="mb-4 opacity-95" />
             <p className="text-[0.72rem] text-gray-600">Generate anything. Locally. Uncensored.</p>
 
             {models.length > 0 && !activeModel && (

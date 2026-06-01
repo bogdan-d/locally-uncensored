@@ -1,4 +1,4 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, parseAst, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { spawn, execSync, type ChildProcess } from 'child_process'
@@ -14,6 +14,124 @@ import os from 'os'
 // Load .env file from project root
 const __dirname = dirname(fileURLToPath(import.meta.url))
 config({ path: resolve(__dirname, '.env') })
+
+// §1.6 — Strip console.log/info/debug from PRODUCTION builds, keep warn/error.
+//
+// Why a hand-rolled plugin instead of a minify option: Vite 8 here is
+// rolldown-based and uses the oxc minifier (the build literally logs
+// "Both esbuild and oxc options were set. oxc options will be used and
+// esbuild options will be ignored" — so the old `esbuild: { drop, pure }`
+// block was DEAD and console.* shipped). rolldown@1.0.2's oxc
+// `CompressOptions` exposes only an all-or-nothing `dropConsole: boolean`
+// (no Terser-style `pure_funcs`), which would also strip warn/error — and
+// rolldown-vite doesn't reliably plumb it through anyway (vitejs/rolldown-vite#302).
+// So we AST-remove the three noisy methods ourselves and leave warn/error
+// intact so genuine problems still surface in a power user's devtools.
+//
+// Uses Vite's built-in `parseAst` (oxc parser, ESTree output with byte
+// offsets) — no new dependency. Production sourcemaps are off here
+// (`build.sourcemap` unset → default false), so returning transformed code
+// without a map is safe; the guard below also bails when a map is requested.
+function stripConsolePlugin(): Plugin {
+  const TARGETS = new Set(['log', 'info', 'debug'])
+  const STRIPPABLE = /\.[cm]?[jt]sx?$/
+
+  // True iff `node` is a `console.log(...)` / `.info` / `.debug` CallExpression.
+  // Matches the bare `console.<m>(…)` member call only — `foo.console.log`,
+  // `myLogger.log`, and re-assigned `const x = console.log` are left alone.
+  const isStrippableConsoleCall = (node: any): boolean => {
+    if (!node || node.type !== 'CallExpression') return false
+    const callee = node.callee
+    if (!callee || callee.type !== 'MemberExpression' || callee.computed) return false
+    const obj = callee.object
+    const prop = callee.property
+    return (
+      obj?.type === 'Identifier' &&
+      obj.name === 'console' &&
+      prop?.type === 'Identifier' &&
+      TARGETS.has(prop.name)
+    )
+  }
+
+  return {
+    name: 'lu-strip-console',
+    apply: 'build',
+    transform(code, id) {
+      if (id.includes('\0')) return null // virtual module
+      if (id.includes('node_modules')) return null
+      const clean = id.split('?')[0]
+      if (!STRIPPABLE.test(clean)) return null
+      if (!code.includes('console.')) return null
+
+      let ast: any
+      try {
+        ast = parseAst(code, { sourceType: 'module' })
+      } catch {
+        return null // let the real parse step report syntax errors
+      }
+
+      // Containers where an ExpressionStatement can simply be deleted with
+      // no syntactic fallout (its siblings or the empty block remain valid).
+      const BLOCK_LIKE = new Set(['BlockStatement', 'Program', 'StaticBlock'])
+
+      // Collect [start,end) byte ranges of every strippable call.
+      //   • Whole-statement call inside a block  → delete the statement.
+      //   • Whole-statement call that is the *single* (brace-less) body of an
+      //     if/else/for/while/do/with/label arm → replace the CALL with
+      //     `void 0` so the arm keeps a statement (`else void 0;`). Deleting
+      //     it would orphan the `else`/`for(...)` and break parsing — this
+      //     was the logger.ts `if (…) console.error(x)\nelse console.log(y)`
+      //     case that the naive version corrupted.
+      //   • Call used as a sub-expression (`a && console.log(b)`, a ternary
+      //     arm, an arg) → replace the CALL with `void 0`.
+      const removals: Array<{ start: number; end: number; replacement: string }> = []
+
+      const visit = (node: any, parent: any, grandparent: any, parentKey: string | null): void => {
+        if (!node || typeof node.type !== 'string') return
+        if (isStrippableConsoleCall(node)) {
+          const stmt = parent && parent.type === 'ExpressionStatement' && parent.expression === node
+            ? parent
+            : null
+          if (stmt && grandparent && BLOCK_LIKE.has(grandparent.type)) {
+            // Safe to drop the whole statement (incl. its trailing `;`).
+            removals.push({ start: stmt.start, end: stmt.end, replacement: '' })
+          } else if (stmt && grandparent && grandparent.type === 'SwitchCase' && parentKey === 'consequent') {
+            removals.push({ start: stmt.start, end: stmt.end, replacement: '' })
+          } else {
+            // Brace-less control-flow arm OR a sub-expression: neutralise the
+            // call but keep a valid expression in its place.
+            removals.push({ start: node.start, end: node.end, replacement: 'void 0' })
+          }
+          return // don't descend into the args of a call we're deleting
+        }
+        for (const key in node) {
+          if (key === 'start' || key === 'end' || key === 'parent') continue
+          const child = (node as any)[key]
+          if (Array.isArray(child)) {
+            for (const c of child) {
+              if (c && typeof c.type === 'string') visit(c, node, parent, key)
+            }
+          } else if (child && typeof child.type === 'string') {
+            visit(child, node, parent, key)
+          }
+        }
+      }
+      visit(ast, null, null, null)
+
+      if (removals.length === 0) return null
+
+      // Apply back-to-front so earlier offsets stay valid.
+      removals.sort((a, b) => b.start - a.start)
+      let out = code
+      for (const r of removals) {
+        out = out.slice(0, r.start) + r.replacement + out.slice(r.end)
+      }
+      // Sourcemaps are off for prod here; null map signals "I rewrote the
+      // text, don't trust a passthrough map" without fabricating one.
+      return { code: out, map: null }
+    },
+  }
+}
 
 function findComfyUI(): string | null {
   // 1. Check .env / environment variable
@@ -1844,6 +1962,59 @@ function comfyLauncher(): Plugin {
         }
       })
 
+      // API: Install faster-whisper (§24.9 — dev-mode parity with the Tauri
+      // install_whisper command). Pip-installs into the dev Python. The
+      // persistent whisper server is spawned once at dev-server start, so a
+      // restart of `npm run dev` is needed to load the model after install
+      // (the Tauri build starts the server in-process post-install).
+      const whisperInstallLogs: string[] = []
+      let whisperInstallStatus: 'idle' | 'installing' | 'complete' | 'error' = 'idle'
+      let whisperInstallError = ''
+      server.middlewares.use('/local-api/install-whisper', (req, res) => {
+        if (req.method === 'GET') {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ status: whisperInstallStatus, error: whisperInstallError, logs: whisperInstallLogs.slice(-30) }))
+          return
+        }
+        if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
+        if (whisperInstallStatus === 'installing') {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ status: 'already_installing' }))
+          return
+        }
+        whisperInstallStatus = 'installing'
+        whisperInstallError = ''
+        whisperInstallLogs.length = 0
+        const wlog = (msg: string) => {
+          whisperInstallLogs.push(msg)
+          if (whisperInstallLogs.length > 200) whisperInstallLogs.shift()
+          console.log(`[Whisper Install] ${msg}`)
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ status: 'started' }))
+        wlog(`Installing faster-whisper via ${pythonBin}…`)
+        const pip = spawn(pythonBin, ['-m', 'pip', 'install', '--progress-bar', 'off', '--no-input', 'faster-whisper'], {
+          stdio: ['ignore', 'pipe', 'pipe'], shell: false, windowsHide: true,
+        })
+        pip.stdout?.on('data', (d) => d.toString().split('\n').forEach((l: string) => l.trim() && wlog(l.trim())))
+        pip.stderr?.on('data', (d) => d.toString().split('\n').forEach((l: string) => l.trim() && wlog(l.trim())))
+        pip.on('exit', (code) => {
+          if (code === 0) {
+            whisperInstallStatus = 'complete'
+            wlog('faster-whisper installed. Restart `npm run dev` to load the STT model.')
+          } else {
+            whisperInstallStatus = 'error'
+            whisperInstallError = `pip install failed (exit ${code})`
+            wlog(whisperInstallError)
+          }
+        })
+        pip.on('error', (err) => {
+          whisperInstallStatus = 'error'
+          whisperInstallError = String(err)
+          wlog(`ERROR: ${whisperInstallError}`)
+        })
+      })
+
       // API: Transcribe audio via persistent Whisper server
       server.middlewares.use('/local-api/transcribe', (req, res) => {
         if (req.method !== 'POST') { res.writeHead(405); res.end(); return }
@@ -1912,18 +2083,13 @@ function comfyLauncher(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), comfyLauncher()],
-  // v2.5.0 (uselu Phase 8 backport): strip console.log/info/debug from
-  // production builds via esbuild — keeps warn/error so genuine issues
-  // still surface in browser devtools when a power user opens them.
-  // Mirrors uselu's Next.js `compiler.removeConsole` config; vite's
-  // build pipeline gets the same effect through its esbuild step.
-  esbuild: {
-    drop: process.env.NODE_ENV === 'production' ? ['debugger'] : [],
-    pure: process.env.NODE_ENV === 'production'
-      ? ['console.log', 'console.info', 'console.debug']
-      : [],
-  },
+  // §1.6: `stripConsolePlugin` (apply:'build') removes console.log/info/debug
+  // from production output while keeping warn/error. It replaces the old
+  // `esbuild: { drop, pure }` block, which was silently ignored under
+  // Vite 8's oxc minifier (the build warned about exactly that) — so
+  // console.* used to ship. See the plugin definition above for why oxc's
+  // own dropConsole can't be used (all-or-nothing, no warn/error carve-out).
+  plugins: [react(), tailwindcss(), stripConsolePlugin(), comfyLauncher()],
   server: {
     port: 5173,
     cors: true,

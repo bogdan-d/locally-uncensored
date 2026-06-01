@@ -2,6 +2,7 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 import type { DocumentMeta, TextChunk } from "../types/rag"
 import { saveChunks, loadChunks, deleteChunks } from "../lib/ragDB"
+import { log } from "../lib/logger"
 
 interface RAGState {
   documents: Record<string, DocumentMeta[]>
@@ -74,7 +75,7 @@ export const useRAGStore = create<RAGState>()(
       removeDocument: (conversationId, docId) => {
         // Delete from IndexedDB (fire-and-forget, non-blocking)
         deleteChunks(docId).catch((err) =>
-          console.error("Failed to delete chunks from IndexedDB:", err)
+          log.error("Failed to delete chunks from IndexedDB", { err })
         )
         set((state) => ({
           documents: {
@@ -97,7 +98,7 @@ export const useRAGStore = create<RAGState>()(
         }
         for (const [docId, chunks] of byDoc) {
           saveChunks(docId, chunks).catch((err) =>
-            console.error("Failed to save chunks to IndexedDB:", err)
+            log.error("Failed to save chunks to IndexedDB", { err })
           )
         }
 
@@ -139,7 +140,7 @@ export const useRAGStore = create<RAGState>()(
             set({ chunksLoaded: true })
           }
         } catch (err) {
-          console.error("Failed to load chunks from IndexedDB:", err)
+          log.error("Failed to load chunks from IndexedDB", { err })
           if (!alreadyLoaded) set({ chunksLoaded: true })
         }
       },
@@ -160,7 +161,7 @@ export const useRAGStore = create<RAGState>()(
         // Delete all from IndexedDB
         for (const docId of docIds) {
           deleteChunks(docId).catch((err) =>
-            console.error("Failed to delete chunks from IndexedDB:", err)
+            log.error("Failed to delete chunks from IndexedDB", { err })
           )
         }
         set((state) => ({

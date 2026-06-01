@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { AIModel, PullProgress, ModelCategory } from '../types/models'
 import { unloadModel } from '../api/ollama'
 import { isTauri } from '../api/backend'
+import { log } from '../lib/logger'
 
 export interface PullState {
   progress: PullProgress
@@ -60,7 +61,7 @@ export const useModelStore = create<ModelState>()(
         const prev = get().activeModel
         set({ activeModel: name })
         if (prev && prev !== name && !prev.includes('::')) {
-          unloadModel(prev).catch((e) => console.warn('[modelStore] failed to unload previous model:', prev, e))
+          unloadModel(prev).catch((e) => log.warn('[modelStore] failed to unload previous model', { model: prev, err: e }))
         }
       },
 

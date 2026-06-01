@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Minus, Square, Copy, X } from 'lucide-react'
+import { LuLogo } from './LuLogo'
 
 const isTauri = typeof window !== 'undefined' && !!(window as any).__TAURI_INTERNALS__
 
@@ -47,18 +48,11 @@ export function Titlebar() {
   return (
     <div
       data-tauri-drag-region
-      className="h-8 flex items-center justify-between bg-white dark:bg-[#0a0a0a] border-b border-gray-200 dark:border-white/[0.04] select-none"
+      className="h-8 flex items-center justify-between bg-white dark:bg-[#141414] border-b border-gray-200 dark:border-white/[0.06] select-none"
     >
       {/* Left: App icon + title */}
       <div data-tauri-drag-region className="flex items-center gap-1.5 pl-3">
-        <img
-          src="/LU-monogram-bw.png"
-          alt=""
-          width={12}
-          height={12}
-          className="dark:invert-0 invert opacity-60 pointer-events-none"
-          draggable={false}
-        />
+        <LuLogo size={14} className="pointer-events-none" />
         <span
           data-tauri-drag-region
           className="text-[0.6rem] tracking-widest font-medium text-gray-400 dark:text-gray-500 uppercase pointer-events-none"

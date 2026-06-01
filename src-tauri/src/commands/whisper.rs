@@ -8,6 +8,7 @@ use std::os::windows::process::CommandExt;
 
 use base64::Engine;
 use tauri::{Manager, State};
+use tracing::{error, info};
 
 use crate::state::AppState;
 
@@ -203,10 +204,14 @@ pub fn transcribe(audio_base64: String, content_type: String, state: State<'_, A
                 println!("[Whisper] Transcribed: \"{}\" (lang: {})",
                     &transcript[..transcript.len().min(80)],
                     response.get("language").and_then(|l| l.as_str()).unwrap_or("?"));
+                info!("transcribe ok");
             }
             Ok(response)
         }
-        Err(e) => Err(e),
+        Err(e) => {
+            error!(error = %e, "transcribe failed");
+            Err(e)
+        }
     }
 }
 

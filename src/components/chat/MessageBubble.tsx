@@ -5,6 +5,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ReflectionBlock } from './ReflectionBlock'
+import { VramSwitchCard } from './VramSwitchCard'
 import { SpeakerButton } from './SpeakerButton'
 import type { Message } from '../../types/chat'
 import { useAgentModeStore } from '../../stores/agentModeStore'
@@ -23,9 +24,12 @@ interface Props {
   pendingApprovalId?: string | null
   onApprove?: () => void
   onReject?: () => void
+  /** True for the last visible message — gates the VRAM hand-off card so it
+   *  only renders in the active assistant turn, not in every historical one. */
+  isLast?: boolean
 }
 
-export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject }: Props) {
+export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject, isLast }: Props) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
@@ -141,6 +145,11 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
               })}
           </>
         )}
+
+        {/* Feature EE (v2.5.0) — VRAM hand-off status card. Self-hides unless
+            an actual model swap is in flight; gated to the last assistant
+            message so a swap shows only in the active turn. */}
+        {!isUser && isLast && <VramSwitchCard />}
 
         {/* Image attachments */}
         {message.images && message.images.length > 0 && (

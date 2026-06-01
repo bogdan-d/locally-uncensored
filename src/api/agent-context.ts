@@ -24,6 +24,28 @@ import type { AgentWorkspace } from '../types/agent-workspace'
 let activeChatId: string | null = null
 let activeWorkspace: AgentWorkspace | null = null
 
+/**
+ * The text model driving the current agent loop. Pinned by useAgentChat right
+ * after setActiveWorkspace, read by the VRAM hand-off orchestrator (Feature EE)
+ * to know which model to evict-then-reload around a ComfyUI generation.
+ *
+ *   - `name`       — the resolved model id actually sent to the provider (the
+ *                    `-agent` variant when one exists), so a reload hits the
+ *                    same runner the chat was using.
+ *   - `providerId` — 'ollama' | 'openai' | 'anthropic' | … Cloud providers hold
+ *                    no local VRAM, so the orchestrator skips all juggling.
+ *   - `remote`     — true when the Ollama base points at a non-local host (LAN /
+ *                    Docker / cluster). A remote Ollama also holds no LOCAL VRAM,
+ *                    so likewise skip.
+ */
+export interface ActiveAgentModel {
+  name: string
+  providerId: string
+  remote: boolean
+}
+
+let activeAgentModel: ActiveAgentModel | null = null
+
 export function setActiveChatId(id: string | null | undefined): void {
   activeChatId = id ? String(id) : null
 }
@@ -32,9 +54,18 @@ export function getActiveChatId(): string | null {
   return activeChatId
 }
 
+export function setActiveAgentModel(model: ActiveAgentModel | null | undefined): void {
+  activeAgentModel = model && model.name ? { name: model.name, providerId: model.providerId, remote: !!model.remote } : null
+}
+
+export function getActiveAgentModel(): ActiveAgentModel | null {
+  return activeAgentModel
+}
+
 export function clearActiveChatId(): void {
   activeChatId = null
   activeWorkspace = null
+  activeAgentModel = null
 }
 
 // ── Multi-Repo Agent (Sprint C #8 from uselu) ──────────────────

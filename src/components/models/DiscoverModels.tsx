@@ -27,6 +27,7 @@ import { ProgressBar } from '../ui/ProgressBar'
 import { formatBytes } from '../../lib/formatters'
 import type { ModelCategory } from '../../types/models'
 import { proxyImageUrl } from '../../lib/privacy'
+import { log } from '../../lib/logger'
 
 interface Props {
   category: ModelCategory
@@ -373,7 +374,7 @@ export function DiscoverModels({ category }: Props) {
     try {
       await installBundleComplete(bundle)
     } catch (err) {
-      console.error('[DiscoverModels] Bundle install failed:', err)
+      log.error('[DiscoverModels] Bundle install failed', { err })
       setInstallError(`${bundle.name}: ${err instanceof Error ? err.message : String(err)}`)
     }
     // Wait for polling to pick up at least one active download before clearing spinner
@@ -539,7 +540,7 @@ export function DiscoverModels({ category }: Props) {
       try {
         await pullModel(model.ollamaModel)
       } catch (e) {
-        console.error('Ollama pull failed:', e)
+        log.error('Ollama pull failed', { err: e })
         setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
       }
       return
@@ -565,7 +566,7 @@ export function DiscoverModels({ category }: Props) {
       try {
         await pullModel(ref)
       } catch (e) {
-        console.error('Ollama HF pull failed:', e)
+        log.error('Ollama HF pull failed', { err: e })
         setInstallError(`Ollama pull failed: ${e instanceof Error ? e.message : String(e)}. Is Ollama running?`)
       }
       return
@@ -586,7 +587,7 @@ export function DiscoverModels({ category }: Props) {
       await startModelDownloadToPath(model.downloadUrl, targetDir, model.filename, expectedBytes)
       dlStore.getState().startPolling()
     } catch (e) {
-      console.error('GGUF download failed:', e)
+      log.error('GGUF download failed', { err: e })
       setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
     }
   }

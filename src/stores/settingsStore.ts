@@ -3,7 +3,12 @@ import { persist } from 'zustand/middleware'
 import type { Settings, Persona } from '../types/settings'
 import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 
-const STORE_VERSION = 4
+// v5 (Feature EE v2.5.0): added settings.exclusiveVramMode. The migrate below
+// already merges { ...DEFAULT_SETTINGS, ...persisted.settings }, so bumping the
+// version is all that's needed — the new default fills in while every existing
+// user value is preserved. Rehydration is NOT broken: a persisted v4 blob runs
+// the same merge path that has handled every prior additive field.
+const STORE_VERSION = 5
 
 interface SettingsState {
   settings: Settings

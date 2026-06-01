@@ -33,6 +33,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { injectParameters } from '../api/workflows'
 import { preflightCheck } from '../api/preflight'
+import { log } from '../lib/logger'
 
 export function useCreate() {
   const [connected, setConnected] = useState<boolean | null>(null)
@@ -126,7 +127,7 @@ export function useCreate() {
         zeroModelRetries.current++
         if (zeroModelRetries.current <= 12) {
           // Still retrying — ComfyUI might not be done scanning yet
-          console.log(`[useCreate] 0 models found, retry ${zeroModelRetries.current}/12...`)
+          log.info(`[useCreate] 0 models found, retry ${zeroModelRetries.current}/12...`)
           setModelLoadError('ComfyUI is loading models... This can take a moment after startup.')
           // Don't set modelsLoaded — auto-retry will keep running
         } else {
@@ -135,11 +136,11 @@ export function useCreate() {
           // generate against a model that no longer exists.
           const state = useCreateStore.getState()
           if (state.imageModel) {
-            console.warn(`[useCreate] Clearing stale persisted imageModel "${state.imageModel}" (0 models installed).`)
+            log.warn(`[useCreate] Clearing stale persisted imageModel "${state.imageModel}" (0 models installed).`)
             state.setImageModel('', 'unknown')
           }
           if (state.videoModel) {
-            console.warn(`[useCreate] Clearing stale persisted videoModel "${state.videoModel}" (0 models installed).`)
+            log.warn(`[useCreate] Clearing stale persisted videoModel "${state.videoModel}" (0 models installed).`)
             state.setVideoModel('')
           }
           setModelsLoaded(true)
@@ -160,17 +161,17 @@ export function useCreate() {
         }
       } else if (state.imageModel) {
         // Image models absent but videos found — clear stale image model
-        console.warn(`[useCreate] No image models installed, clearing stale imageModel "${state.imageModel}".`)
+        log.warn(`[useCreate] No image models installed, clearing stale imageModel "${state.imageModel}".`)
         state.setImageModel('', 'unknown')
       }
       if (vidModels.length > 0) {
         if (!state.videoModel || !vidModels.find(m => m.name === state.videoModel)) {
-          if (state.videoModel) console.warn(`[useCreate] Persisted videoModel "${state.videoModel}" not found, resetting to ${vidModels[0].name}`)
+          if (state.videoModel) log.warn(`[useCreate] Persisted videoModel "${state.videoModel}" not found, resetting to ${vidModels[0].name}`)
           state.setVideoModel(vidModels[0].name)
         }
       } else if (state.videoModel) {
         // Video models absent but images found — clear stale video model
-        console.warn(`[useCreate] No video models installed, clearing stale videoModel "${state.videoModel}".`)
+        log.warn(`[useCreate] No video models installed, clearing stale videoModel "${state.videoModel}".`)
         state.setVideoModel('')
       }
       // Always re-sync model type for currently selected model (fixes stale type after restart)
@@ -178,19 +179,19 @@ export function useCreate() {
         const current = imgModels.find(m => m.name === state.imageModel)
         if (current) {
           if (current.type !== state.imageModelType) {
-            console.log(`[useCreate] Fixing model type: ${state.imageModelType} -> ${current.type}`)
+            log.info(`[useCreate] Fixing model type: ${state.imageModelType} -> ${current.type}`)
             state.setImageModel(state.imageModel, current.type)
           }
         } else {
           // Persisted model no longer exists in ComfyUI — reset to first available
-          console.warn(`[useCreate] Persisted imageModel "${state.imageModel}" not found in ComfyUI, resetting to ${imgModels[0].name}`)
+          log.warn(`[useCreate] Persisted imageModel "${state.imageModel}" not found in ComfyUI, resetting to ${imgModels[0].name}`)
           state.setImageModel(imgModels[0].name, imgModels[0].type)
         }
       }
       // Run preflight check after models are loaded
       setTimeout(() => runPreflight(), 100)
     } catch (err) {
-      console.error('[useCreate] Failed to fetch models:', err)
+      log.error('[useCreate] Failed to fetch models', { err })
       setModelLoadError(`Failed to load models: ${err instanceof Error ? err.message : 'ComfyUI API error'}`)
     }
   }, [runPreflight])
@@ -205,7 +206,7 @@ export function useCreate() {
     let cancelled = false
     const timeouts: ReturnType<typeof setTimeout>[] = []
     const handler = () => {
-      console.log('[useCreate] Model download completed, refreshing model list...')
+      log.info('[useCreate] Model download completed, refreshing model list...')
       fetchModels()
       // Belt-and-braces: re-fetch at +2s and +6s in case ComfyUI's scan is slow.
       // fetchModels() is idempotent and cheap (object_info hits cache server-side),
@@ -228,7 +229,7 @@ export function useCreate() {
     const retryInterval = setInterval(async () => {
       const ok = await checkComfyConnection()
       if (ok) {
-        console.log('[useCreate] Retrying model fetch...')
+        log.info('[useCreate] Retrying model fetch...')
         fetchModels()
       }
     }, 3000)
@@ -302,14 +303,14 @@ export function useCreate() {
         const hasUnet = wfNodes.includes('UNETLoader')
         const hasCheckpoint = wfNodes.includes('CheckpointLoaderSimple')
         if (needsUnet && !hasUnet && hasCheckpoint) {
-          console.warn('[useCreate] Custom workflow incompatible: model needs UNETLoader but workflow has CheckpointLoaderSimple. Using auto.')
+          log.warn('[useCreate] Custom workflow incompatible: model needs UNETLoader but workflow has CheckpointLoaderSimple. Using auto.')
           customWf = null
         } else if (!needsUnet && hasUnet && !hasCheckpoint) {
-          console.warn('[useCreate] Custom workflow incompatible: model needs CheckpointLoaderSimple but workflow has UNETLoader. Using auto.')
+          log.warn('[useCreate] Custom workflow incompatible: model needs CheckpointLoaderSimple but workflow has UNETLoader. Using auto.')
           customWf = null
         }
       }
-      console.log('[useCreate] Custom workflow check:', { activeModel, imageModelType, found: customWf?.name ?? 'NONE (auto)' })
+      log.info('[useCreate] Custom workflow check', { activeModel, imageModelType, found: customWf?.name ?? 'NONE (auto)' })
 
       if (customWf) {
         builderUsed = 'custom'
@@ -340,7 +341,7 @@ export function useCreate() {
           }
           // Other dynamic-builder failures: legacy is a reasonable fallback
           // (mostly happens for classic SDXL/SD15 image paths).
-          console.warn('[useCreate] Dynamic builder failed, using legacy:', dynErr)
+          log.warn('[useCreate] Dynamic builder failed, using legacy', { err: dynErr })
           builderUsed = 'legacy'
           setProgress(5, 'Using legacy builder...')
           if (mode === 'video') {
@@ -447,7 +448,7 @@ export function useCreate() {
         await comfyWS.connect(3000)
         useWS = true
       } catch {
-        console.warn('[useCreate] WebSocket unavailable, using polling fallback')
+        log.warn('[useCreate] WebSocket unavailable, using polling fallback')
       }
 
       if (useWS) {
@@ -476,7 +477,7 @@ export function useCreate() {
               const statusStr = history.status?.status_str
               if (statusStr === 'success') {
                 completionHandled = true
-                console.log('[useCreate] Completion detected via polling (WS event missed)')
+                log.info('[useCreate] Completion detected via polling (WS event missed)')
                 cleanup()
                 useCreateStore.getState().setProgressPhase('complete')
                 setProgress(95, 'Fetching results...')
@@ -713,7 +714,7 @@ export function useCreate() {
                 reject(new Error(errMsg.trim() + nodeType))
               }
             } catch (err) {
-              console.warn('[useCreate] Poll error:', err)
+              log.warn('[useCreate] Poll error', { err })
             }
           }, 1000)
         })
@@ -724,7 +725,7 @@ export function useCreate() {
       } else {
         const msg = err instanceof Error ? err.message : String(err)
         useCreateStore.getState().setError(`Generation failed: ${msg}`)
-        console.error('[useCreate] Generation error:', err)
+        log.error('[useCreate] Generation error', { err })
       }
     } finally {
       useCreateStore.getState().setIsGenerating(false)

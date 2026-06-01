@@ -150,6 +150,13 @@ describe('tool-description-parity — extraction sanity', () => {
 //   developer machine, not the mobile remote-control surface:
 //     run_tests, git_*, gh_pr_create, pr_resume, project_init,
 //     shell_execute_background, shell_task_*
+//   v2.5.0 Feature EE:
+//     video_generate → desktop-only. Its executor goes through the VRAM
+//     hand-off orchestrator (src/api/vram-handoff.ts), pure TS that drives
+//     local Ollama unload/reload + ComfyUI on the desktop GPU. The mobile
+//     remote-control surface has no Rust dispatcher for it (same situation
+//     image_generate is in — it's listed on mobile but its executor returns
+//     a "desktop only" observation; video_generate isn't listed there yet).
 const MOBILE_SKIP: ReadonlySet<string> = new Set<string>([
   'run_workflow', 'delegate_task',
   'run_tests',
@@ -159,6 +166,7 @@ const MOBILE_SKIP: ReadonlySet<string> = new Set<string>([
   'project_init',
   'shell_execute_background',
   'shell_task_status', 'shell_task_kill', 'shell_task_list',
+  'video_generate',
 ])
 
 describe('tool-description-parity — name sets', () => {

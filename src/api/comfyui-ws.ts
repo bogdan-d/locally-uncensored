@@ -8,6 +8,7 @@
  */
 
 import { v4 as uuid } from 'uuid'
+import { log } from '../lib/logger'
 import { comfyuiWsUrl } from './backend'
 
 export type ComfyWSEvent =
@@ -74,7 +75,7 @@ class ComfyWSClient {
           this._connected = true
           this.reconnectDelay = 1000
           this.connectPromise = null
-          console.log('[ComfyWS] Connected')
+          log.info('[ComfyWS] Connected')
           resolve()
         }
 

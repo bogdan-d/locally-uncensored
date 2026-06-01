@@ -4,6 +4,61 @@ import { v4 as uuid } from 'uuid'
 import type { MemoryEntry, MemoryCategory, MemoryFile, MemoryType, MemorySettings } from '../types/agent-mode'
 import { MEMORY_MIGRATION_MAP, MEMORY_BUDGET_TIERS } from '../types/agent-mode'
 import { createSafeStorage } from '../lib/storage-quota'
+import { generateEmbeddings } from '../api/rag'
+import { saveVector, loadVectors, deleteVector, clearAll as clearAllVectors, type MemoryVectorRecord } from '../lib/memoryEmbedDB'
+import { scoreMemoriesBlended, isStale, type BlendCandidate } from '../lib/memory-retrieval'
+import type { ResolutionDecision } from '../lib/memory-extraction'
+import { log } from '../lib/logger'
+
+// ── Embedding model + dim (mirrors rag.ts default) ────────────────
+const MEMORY_EMBED_MODEL = 'nomic-embed-text'
+
+// ── Embedding fn (dependency-injected so tests stub without Ollama) ──
+// Defaults to the real RAG embedder. Tests call __setMemoryEmbedFn to inject
+// a fake (or a thrower, to exercise the offline fallback).
+type MemoryEmbedFn = (texts: string[]) => Promise<number[][]>
+let _embedFn: MemoryEmbedFn = (texts) => generateEmbeddings(texts, MEMORY_EMBED_MODEL)
+/** Test hook — override the embedding function. Pass nothing to reset. */
+export function __setMemoryEmbedFn(fn?: MemoryEmbedFn): void {
+  _embedFn = fn ?? ((texts) => generateEmbeddings(texts, MEMORY_EMBED_MODEL))
+}
+
+// ── Content hashing (djb2 — same trick as embedding-router) ───────
+// The text we embed is title + content; re-embed only when this hash changes.
+function embedText(m: Pick<MemoryFile, 'title' | 'content'>): string {
+  return `${m.title}\n${m.content}`
+}
+function hashContent(s: string): string {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = (h * 33) ^ s.charCodeAt(i)
+  return (h >>> 0).toString(16)
+}
+
+/**
+ * Best-effort: embed a single memory and persist its vector to IndexedDB.
+ * Fire-and-forget — never throws (Ollama down, IDB missing in tests, etc.).
+ * Skips when the existing stored vector already matches the content hash.
+ */
+async function enqueueEmbedding(entry: Pick<MemoryFile, 'id' | 'title' | 'content'>): Promise<void> {
+  try {
+    const text = embedText(entry)
+    const contentHash = hashContent(text)
+    const existing = await loadVectors([entry.id])
+    const prior = existing.get(entry.id)
+    if (prior && prior.contentHash === contentHash && prior.model === MEMORY_EMBED_MODEL) return
+    const [vector] = await _embedFn([text])
+    if (!vector || vector.length === 0) return
+    const record: MemoryVectorRecord = {
+      model: MEMORY_EMBED_MODEL,
+      dim: vector.length,
+      vector,
+      contentHash,
+    }
+    await saveVector(entry.id, record)
+  } catch {
+    // Embedding is best-effort — retrieval falls back to keyword scoring.
+  }
+}
 
 // ── Memory Budget Helper ──────────────────────────────────────
 
@@ -79,6 +134,48 @@ const TYPE_SECTION_HEADERS: Record<MemoryType, string> = {
   reference: 'References',
 }
 
+const TYPE_ORDER: MemoryType[] = ['user', 'feedback', 'project', 'reference']
+
+/**
+ * Render an ALREADY-ORDERED, ALREADY-FILTERED list of memories into the
+ * grouped <remembered_context> block, respecting the tier's char budget and
+ * sanitizing every injected line. Shared by the sync (keyword) and async
+ * (embedding-blended) retrieval paths — ONLY the candidate ordering differs
+ * between them, so the output formatting lives here once.
+ */
+function renderRememberedContext(ordered: MemoryFile[], budgetTokens: number): string {
+  if (ordered.length === 0) return ''
+
+  // Group by type for structured output (preserve incoming order within type).
+  const grouped: Record<MemoryType, MemoryFile[]> = {
+    user: [], feedback: [], project: [], reference: [],
+  }
+  for (const entry of ordered) grouped[entry.type].push(entry)
+
+  const maxChars = budgetTokens * 4
+  let result = ''
+
+  for (const type of TYPE_ORDER) {
+    const items = grouped[type]
+    if (items.length === 0) continue
+
+    const header = `### ${TYPE_SECTION_HEADERS[type]}\n`
+    if (result.length + header.length > maxChars) break
+    result += header
+
+    for (const item of items) {
+      const sanitized = sanitizeForInjection(item.content).replace(/\n/g, ' ')
+      const line = `- ${item.title}: ${sanitized}\n`
+      if (result.length + line.length > maxChars) break
+      result += line
+    }
+    result += '\n'
+  }
+
+  if (!result.trim()) return ''
+  return `<remembered_context>\n${result.trim()}\n</remembered_context>`
+}
+
 // ── Store Interface ───────────────────────────────────────────
 
 interface MemoryState {
@@ -95,6 +192,12 @@ interface MemoryState {
   // Search & Inject
   searchMemories: (query: string, options?: { type?: MemoryType; limit?: number }) => MemoryFile[]
   getMemoriesForPrompt: (query: string, contextTokens: number) => string
+  /** Embedding-first retrieval; falls back to getMemoriesForPrompt on any error. */
+  getMemoriesForPromptAsync: (query: string, contextTokens: number) => Promise<string>
+
+  // Write-decision + embedding maintenance (Feature FF)
+  applyWriteDecision: (decision: ResolutionDecision, ctx?: { newId?: string }) => void
+  ensureMemoryEmbeddings: (batchSize?: number) => Promise<number>
 
   // Settings
   updateMemorySettings: (updates: Partial<MemorySettings>) => void
@@ -145,6 +248,23 @@ function migrateV1toV2(oldState: any): any {
   }
 }
 
+// ── Migration from v2 to v3 (Feature FF) ──────────────────────
+//
+// v3 adds OPTIONAL MemoryFile fields (supersededBy / supersedesId / stale /
+// validFrom). Existing entries are already valid without them — this
+// migration is intentionally a near-identity that just guarantees the
+// `stale` flag is a concrete boolean (false) on every entry, so retrieval's
+// `isStale` and the "Show outdated" filter behave deterministically on
+// freshly-rehydrated old stores. All other new fields stay undefined.
+function migrateV2toV3(oldState: any): any {
+  if (!oldState || !Array.isArray(oldState.entries)) return oldState
+  const entries = (oldState.entries as MemoryFile[]).map((e) => ({
+    ...e,
+    stale: e.stale === true ? true : false,
+  }))
+  return { ...oldState, entries }
+}
+
 // ── Store ─────────────────────────────────────────────────────
 
 export const useMemoryStore = create<MemoryState>()(
@@ -183,24 +303,37 @@ export const useMemoryStore = create<MemoryState>()(
           ],
           lastSynced: Date.now(),
         }))
+        // Embed in the background — never blocks the synchronous add.
+        void enqueueEmbedding({ id, title: memory.title, content: trimmedContent })
         return id
       },
 
-      updateMemory: (id, updates) =>
+      updateMemory: (id, updates) => {
         set((state) => ({
           entries: state.entries.map((e) =>
             e.id === id ? { ...e, ...updates, updatedAt: Date.now() } : e
           ),
           lastSynced: Date.now(),
-        })),
+        }))
+        // Re-embed when title/content changed (hashContent skips a no-op).
+        if (updates.title !== undefined || updates.content !== undefined) {
+          const updated = get().entries.find((e) => e.id === id)
+          if (updated) void enqueueEmbedding({ id, title: updated.title, content: updated.content })
+        }
+      },
 
-      removeMemory: (id) =>
+      removeMemory: (id) => {
         set((state) => ({
           entries: state.entries.filter((e) => e.id !== id),
           lastSynced: Date.now(),
-        })),
+        }))
+        void deleteVector(id)
+      },
 
-      clearAll: () => set({ entries: [], lastSynced: Date.now() }),
+      clearAll: () => {
+        set({ entries: [], lastSynced: Date.now() })
+        void clearAllVectors()
+      },
 
       // ── Search ──────────────────────────────────────────────
 
@@ -225,6 +358,11 @@ export const useMemoryStore = create<MemoryState>()(
 
       // ── Context-Aware Prompt Injection ──────────────────────
 
+      // ── Context-Aware Prompt Injection (sync, keyword) ──────
+      //
+      // This is the OFFLINE-SAFE fallback path. It never touches Ollama or
+      // IndexedDB. getMemoriesForPromptAsync below layers embedding-blended
+      // ordering on top and degrades to exactly this output on any error.
       getMemoriesForPrompt: (query, contextTokens) => {
         const budget = getMemoryBudget(contextTokens)
 
@@ -232,54 +370,176 @@ export const useMemoryStore = create<MemoryState>()(
         if (budget.budgetTokens === 0 || budget.maxMemories === 0) return ''
 
         const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
-        let candidates = get().entries
+        let candidates = get().entries.filter(e => !isStale(e))
 
         // Filter by allowed types for this tier
         if (budget.typesAllowed !== 'all') {
           candidates = candidates.filter(e => (budget.typesAllowed as MemoryType[]).includes(e.type))
         }
 
-        // Score and sort
-        const scored = candidates
+        // Score and sort (keyword)
+        const ordered = candidates
           .map((entry) => ({ entry, score: scoreMemory(entry, words) }))
           .filter(({ score }) => score > 0)
           .sort((a, b) => b.score - a.score)
           .slice(0, budget.maxMemories)
+          .map(({ entry }) => entry)
 
-        if (scored.length === 0) return ''
+        return renderRememberedContext(ordered, budget.budgetTokens)
+      },
 
-        // Group by type for structured output
-        const grouped: Record<MemoryType, MemoryFile[]> = {
-          user: [], feedback: [], project: [], reference: [],
-        }
-        for (const { entry } of scored) {
-          grouped[entry.type].push(entry)
-        }
+      // ── Context-Aware Prompt Injection (async, embedding-first) ──
+      //
+      // Embed the query, hydrate candidate vectors from IndexedDB, blend-score
+      // (semantic + keyword + recency + type boost), then reuse the EXACT same
+      // budget tiers / type filter / sanitization / grouped output as the sync
+      // path — only the candidate ORDERING changes. Wrapped so ANY failure
+      // (Ollama unreachable, nomic missing, IDB absent, dim mismatch) falls
+      // back to the keyword result. Offline correctness invariant: this never
+      // returns empty/incorrect when the sync path would have returned text.
+      getMemoriesForPromptAsync: async (query, contextTokens) => {
+        const fallback = () => get().getMemoriesForPrompt(query, contextTokens)
+        try {
+          const budget = getMemoryBudget(contextTokens)
+          // No-op cases (no budget, no candidates, empty query) must return
+          // EXACTLY what the sync keyword path would — defer to fallback()
+          // rather than re-deriving '' so behaviour stays identical (and so a
+          // stubbed sync method in tests is honoured).
+          if (budget.budgetTokens === 0 || budget.maxMemories === 0) return fallback()
 
-        // Build output within char budget (tokens * 4 chars/token)
-        const maxChars = budget.budgetTokens * 4
-        let result = ''
-        const typeOrder: MemoryType[] = ['user', 'feedback', 'project', 'reference']
-
-        for (const type of typeOrder) {
-          const items = grouped[type]
-          if (items.length === 0) continue
-
-          const header = `### ${TYPE_SECTION_HEADERS[type]}\n`
-          if (result.length + header.length > maxChars) break
-          result += header
-
-          for (const item of items) {
-            const sanitized = sanitizeForInjection(item.content).replace(/\n/g, ' ')
-            const line = `- ${item.title}: ${sanitized}\n`
-            if (result.length + line.length > maxChars) break
-            result += line
+          let candidates = get().entries.filter(e => !isStale(e))
+          if (budget.typesAllowed !== 'all') {
+            candidates = candidates.filter(e => (budget.typesAllowed as MemoryType[]).includes(e.type))
           }
-          result += '\n'
-        }
+          if (candidates.length === 0) return fallback()
 
-        if (!result.trim()) return ''
-        return `<remembered_context>\n${result.trim()}\n</remembered_context>`
+          // Embed the query. Empty query has nothing to embed → no semantic
+          // signal → keyword path is strictly better (it filters by score).
+          if (!query.trim()) return fallback()
+          let queryVec: number[] = []
+          const [vec] = await _embedFn([query])
+          if (vec && vec.length > 0) queryVec = vec
+
+          // No usable query vector → fall back to keyword.
+          if (queryVec.length === 0) return fallback()
+
+          // Hydrate candidate vectors into a hot Map. dim-mismatched vectors
+          // are dropped here (scorer also guards) → treated as keyword-only.
+          const vecMap = await loadVectors(candidates.map(c => c.id))
+          const blendCandidates: BlendCandidate[] = candidates.map((memory) => {
+            const rec = vecMap.get(memory.id)
+            const vector = rec && rec.dim === queryVec.length ? rec.vector : null
+            return { memory, vector }
+          })
+
+          // If NOT A SINGLE candidate has a usable vector, the blend reduces to
+          // keyword+recency with no semantic lift — the sync keyword path is
+          // the better-tested equivalent, so fall back to it.
+          if (!blendCandidates.some(c => c.vector)) return fallback()
+
+          const scored = scoreMemoriesBlended(queryVec, query, blendCandidates)
+          const ordered = scored.slice(0, budget.maxMemories).map(s => s.memory)
+
+          // Defensive: a degenerate blend that filtered everything out should
+          // not silently inject nothing when keyword would have found matches.
+          if (ordered.length === 0) return fallback()
+
+          return renderRememberedContext(ordered, budget.budgetTokens)
+        } catch {
+          return fallback()
+        }
+      },
+
+      // ── Write-decision application (Feature FF) ─────────────
+      //
+      // Applies the resolver's ADD/UPDATE/NOOP decision for an
+      // already-extracted, already-added candidate fact.
+      //   - ADD:    nothing to do here (the fact was added by the caller).
+      //   - NOOP:   skip (caller decided not to add it).
+      //   - UPDATE: rewrite the target's content + re-embed + bump updatedAt
+      //             + set validFrom, and mark the (separate) superseded entry
+      //             stale rather than deleting it. The `newId` (the entry the
+      //             caller just added for this fact, if any) is removed so the
+      //             merge doesn't leave a near-duplicate behind.
+      applyWriteDecision: (decision: ResolutionDecision, ctx?: { newId?: string }) => {
+        if (decision.action === 'NOOP') return
+        if (decision.action === 'ADD') return // caller already added it
+
+        // UPDATE
+        const { targetId, mergedContent } = decision
+        if (!targetId || !mergedContent) return
+        const target = get().entries.find((e) => e.id === targetId)
+        if (!target) return
+
+        const merged = mergedContent.trim()
+        if (!merged) return
+
+        const now = Date.now()
+        set((state) => ({
+          entries: state.entries.map((e) => {
+            if (e.id === targetId) {
+              return {
+                ...e,
+                content: merged,
+                description: merged.substring(0, 120),
+                updatedAt: now,
+                validFrom: now,
+                // Clearing stale/supersededBy in case we're refreshing a
+                // previously-superseded entry.
+                stale: false,
+                supersededBy: undefined,
+              }
+            }
+            // The freshly-added candidate (if provided) is the OLD shape of
+            // this fact → mark it stale + point it at the merged target.
+            if (ctx?.newId && e.id === ctx.newId) {
+              return { ...e, stale: true, supersededBy: targetId }
+            }
+            return e
+          }),
+          lastSynced: now,
+        }))
+
+        // Re-embed the merged target; drop the superseded candidate's vector.
+        const updated = get().entries.find((e) => e.id === targetId)
+        if (updated) void enqueueEmbedding({ id: targetId, title: updated.title, content: updated.content })
+        if (ctx?.newId && ctx.newId !== targetId) void deleteVector(ctx.newId)
+      },
+
+      // ── Lazy embedding backfill (Feature FF) ────────────────
+      //
+      // Idempotent, best-effort: embed any non-stale entries that don't yet
+      // have a stored vector (e.g. memories created before v2.5.0, or while
+      // Ollama was down). Processed in small serial batches so a large memory
+      // store doesn't fire hundreds of /embed calls at once. Safe no-op in the
+      // node test env (memoryEmbedDB guards on `indexedDB`). Returns the count
+      // of entries (re)embedded.
+      ensureMemoryEmbeddings: async (batchSize = 8) => {
+        let embedded = 0
+        try {
+          const entries = get().entries.filter((e) => !isStale(e))
+          if (entries.length === 0) return 0
+          const ids = entries.map((e) => e.id)
+          const existing = await loadVectors(ids)
+          const missing = entries.filter((e) => {
+            const rec = existing.get(e.id)
+            if (!rec) return true
+            // Re-embed if the content hash drifted or model changed.
+            return rec.contentHash !== hashContent(embedText(e)) || rec.model !== MEMORY_EMBED_MODEL
+          })
+          for (let i = 0; i < missing.length; i += batchSize) {
+            const slice = missing.slice(i, i + batchSize)
+            // Serial within a slice keeps memory + Ollama pressure bounded;
+            // enqueueEmbedding already swallows its own errors.
+            for (const e of slice) {
+              await enqueueEmbedding({ id: e.id, title: e.title, content: e.content })
+              embedded++
+            }
+          }
+        } catch {
+          // Best-effort backfill — ignore failures.
+        }
+        return embedded
       },
 
       // ── Settings ────────────────────────────────────────────
@@ -384,7 +644,7 @@ export const useMemoryStore = create<MemoryState>()(
             }))
           }
         } catch {
-          console.error('Failed to parse memory JSON import')
+          log.error('Failed to parse memory JSON import')
         }
       },
 
@@ -409,13 +669,21 @@ export const useMemoryStore = create<MemoryState>()(
     }),
     {
       name: 'locally-uncensored-memory',
-      version: 2,
+      // v3 (Feature FF): adds optional staleness/supersession fields to
+      // MemoryFile. They default to unset, so old entries remain valid — the
+      // bump exists only to run migrateV2toV3 so the shape is explicit and
+      // future migrations have a clean baseline.
+      version: 3,
       storage: createSafeStorage(),
       migrate: (persistedState, version) => {
+        let state: any = persistedState
         if (version < 2) {
-          return migrateV1toV2(persistedState)
+          state = migrateV1toV2(state)
         }
-        return persistedState as MemoryState
+        if (version < 3) {
+          state = migrateV2toV3(state)
+        }
+        return state as MemoryState
       },
       partialize: (state) => ({
         entries: state.entries,

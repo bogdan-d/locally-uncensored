@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { useMemoryStore, getMemoryBudget } from '../../stores/memoryStore'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { useMemoryStore, getMemoryBudget, __setMemoryEmbedFn } from '../../stores/memoryStore'
 import { MEMORY_BUDGET_TIERS } from '../../types/agent-mode'
 import type { MemoryType, MemoryFile } from '../../types/agent-mode'
 
@@ -16,6 +16,8 @@ function resetStore() {
     },
     lastSynced: 0,
   })
+  // Always reset the injected embed fn between tests.
+  __setMemoryEmbedFn()
 }
 
 function addMem(type: MemoryType, title: string, content: string, tags: string[] = []) {
@@ -414,5 +416,212 @@ describe('Memory Edge Cases', () => {
     for (const line of lines) {
       expect(line).not.toMatch(/\n.*\n/) // no internal newlines in single entry lines
     }
+  })
+})
+
+// ══════════════════════════════════════════════════════════════
+// Feature FF (v2.5.0) — embedding-first retrieval + write-decision
+// ══════════════════════════════════════════════════════════════
+
+// ── Async retrieval: offline fallback ──────────────────────────
+
+describe('getMemoriesForPromptAsync — offline fallback', () => {
+  beforeEach(() => {
+    resetStore()
+    addMem('user', 'Developer role', 'User is a senior TypeScript developer')
+    addMem('feedback', 'Concise style', 'User prefers short, direct answers')
+    addMem('project', 'Building v2.0', 'Working on multi-provider chat app v2.0')
+    addMem('reference', 'Ollama docs', 'API reference at ollama.com/docs')
+  })
+  afterEach(() => __setMemoryEmbedFn())
+
+  it('returns EXACTLY the keyword result when the embed fn throws', async () => {
+    // Simulate Ollama unreachable.
+    __setMemoryEmbedFn(async () => { throw new Error('Cannot reach Ollama') })
+
+    const sync = useMemoryStore.getState().getMemoriesForPrompt('developer v2.0 Ollama', 16000)
+    const async = await useMemoryStore.getState().getMemoriesForPromptAsync('developer v2.0 Ollama', 16000)
+    expect(async).toBe(sync)
+    expect(async).toContain('Developer role')
+  })
+
+  it('falls back to keyword when no candidate vectors exist (node has no IndexedDB)', async () => {
+    // Embed succeeds, but loadVectors returns empty in the node env → the
+    // async path detects "no usable vectors" and defers to keyword.
+    __setMemoryEmbedFn(async (texts) => texts.map(() => [1, 0, 0]))
+    const sync = useMemoryStore.getState().getMemoriesForPrompt('developer', 16000)
+    const async = await useMemoryStore.getState().getMemoriesForPromptAsync('developer', 16000)
+    expect(async).toBe(sync)
+  })
+
+  it('returns empty for a 2K-context model (no budget), embed never called', async () => {
+    let called = false
+    __setMemoryEmbedFn(async (t) => { called = true; return t.map(() => [1, 0, 0]) })
+    const out = await useMemoryStore.getState().getMemoriesForPromptAsync('developer', 2048)
+    expect(out).toBe('')
+    expect(called).toBe(false)
+  })
+
+  it('empty query falls back to keyword (no message to embed)', async () => {
+    __setMemoryEmbedFn(async (texts) => texts.map(() => [1, 0, 0]))
+    const sync = useMemoryStore.getState().getMemoriesForPrompt('', 16000)
+    const async = await useMemoryStore.getState().getMemoriesForPromptAsync('', 16000)
+    expect(async).toBe(sync)
+  })
+})
+
+// ── Stale entries: excluded from retrieval, preserved in entries ──
+
+describe('Stale entry handling', () => {
+  beforeEach(resetStore)
+
+  it('excludes stale entries from sync retrieval but keeps them in entries', () => {
+    const liveId = addMem('user', 'Lives in Berlin', 'User lives in Berlin Germany')
+    const staleId = addMem('user', 'Lived in Munich', 'User used to live in Munich')
+    // Mark the second one stale directly.
+    useMemoryStore.setState((s) => ({
+      entries: s.entries.map((e) => e.id === staleId ? { ...e, stale: true } : e),
+    }))
+
+    // Still present in the store…
+    expect(useMemoryStore.getState().entries).toHaveLength(2)
+    expect(useMemoryStore.getState().entries.find((e) => e.id === staleId)?.stale).toBe(true)
+
+    // …but never injected.
+    const prompt = useMemoryStore.getState().getMemoriesForPrompt('live Munich Berlin', 16000)
+    expect(prompt).toContain('Lives in Berlin')
+    expect(prompt).not.toContain('Lived in Munich')
+    expect(liveId).toBeTruthy()
+  })
+
+  it('supersededBy also excludes from retrieval', () => {
+    addMem('user', 'Current fact', 'The current valid fact')
+    const oldId = addMem('user', 'Old fact', 'The old superseded fact')
+    useMemoryStore.setState((s) => ({
+      entries: s.entries.map((e) => e.id === oldId ? { ...e, supersededBy: 'something' } : e),
+    }))
+    const prompt = useMemoryStore.getState().getMemoriesForPrompt('fact valid superseded', 16000)
+    expect(prompt).toContain('Current fact')
+    expect(prompt).not.toContain('Old fact')
+  })
+})
+
+// ── applyWriteDecision: ADD / UPDATE / NOOP ────────────────────
+
+describe('applyWriteDecision', () => {
+  beforeEach(resetStore)
+
+  it('NOOP is a no-op (entries unchanged)', () => {
+    addMem('user', 'A', 'Some fact A')
+    const before = useMemoryStore.getState().entries.map((e) => ({ ...e }))
+    useMemoryStore.getState().applyWriteDecision({ action: 'NOOP' })
+    expect(useMemoryStore.getState().entries).toEqual(before)
+  })
+
+  it('ADD is a no-op here (caller already added the fact)', () => {
+    addMem('user', 'A', 'Some fact A')
+    const len = useMemoryStore.getState().entries.length
+    useMemoryStore.getState().applyWriteDecision({ action: 'ADD' })
+    expect(useMemoryStore.getState().entries).toHaveLength(len)
+  })
+
+  it('UPDATE rewrites the target content + bumps updatedAt + sets validFrom', () => {
+    const targetId = addMem('user', 'Location', 'User lives in Munich')
+    const target0 = useMemoryStore.getState().entries.find((e) => e.id === targetId)!
+    const before = target0.updatedAt
+
+    useMemoryStore.getState().applyWriteDecision({
+      action: 'UPDATE',
+      targetId,
+      mergedContent: 'User now lives in Berlin (moved from Munich)',
+    })
+
+    const after = useMemoryStore.getState().entries.find((e) => e.id === targetId)!
+    expect(after.content).toBe('User now lives in Berlin (moved from Munich)')
+    expect(after.description).toBe('User now lives in Berlin (moved from Munich)'.substring(0, 120))
+    expect(after.updatedAt).toBeGreaterThanOrEqual(before)
+    expect(after.validFrom).toBe(after.updatedAt)
+    expect(after.stale).toBe(false)
+  })
+
+  it('UPDATE marks the superseded candidate stale (not deleted) and keeps the merged target live', () => {
+    const targetId = addMem('user', 'Location', 'User lives in Munich')
+    // Simulate the speculative candidate the hook adds for the new fact.
+    const newId = addMem('user', 'New location', 'User lives in Berlin')
+
+    useMemoryStore.getState().applyWriteDecision(
+      { action: 'UPDATE', targetId, mergedContent: 'User lives in Berlin (moved from Munich)' },
+      { newId },
+    )
+
+    const entries = useMemoryStore.getState().entries
+    // Both still present (nothing deleted).
+    expect(entries).toHaveLength(2)
+    const candidate = entries.find((e) => e.id === newId)!
+    expect(candidate.stale).toBe(true)
+    expect(candidate.supersededBy).toBe(targetId)
+    // The merged target is NOT stale and is the only one injected.
+    const prompt = useMemoryStore.getState().getMemoriesForPrompt('Berlin Munich lives', 16000)
+    expect(prompt).toContain('moved from Munich')
+  })
+
+  it('UPDATE with a missing target is a safe no-op', () => {
+    addMem('user', 'A', 'Fact A')
+    const before = useMemoryStore.getState().entries.map((e) => ({ ...e }))
+    useMemoryStore.getState().applyWriteDecision({
+      action: 'UPDATE', targetId: 'does-not-exist', mergedContent: 'whatever',
+    })
+    expect(useMemoryStore.getState().entries).toEqual(before)
+  })
+
+  it('UPDATE with empty mergedContent is a safe no-op', () => {
+    const targetId = addMem('user', 'A', 'Fact A')
+    const before = useMemoryStore.getState().entries.find((e) => e.id === targetId)!.content
+    useMemoryStore.getState().applyWriteDecision({ action: 'UPDATE', targetId, mergedContent: '   ' })
+    expect(useMemoryStore.getState().entries.find((e) => e.id === targetId)!.content).toBe(before)
+  })
+})
+
+// ── ensureMemoryEmbeddings: best-effort, no crash in node ──────
+
+describe('ensureMemoryEmbeddings', () => {
+  beforeEach(resetStore)
+  afterEach(() => __setMemoryEmbedFn())
+
+  it('resolves to 0 with no entries', async () => {
+    const n = await useMemoryStore.getState().ensureMemoryEmbeddings()
+    expect(n).toBe(0)
+  })
+
+  it('does not throw when the embed fn throws (best-effort)', async () => {
+    addMem('user', 'A', 'Fact A')
+    __setMemoryEmbedFn(async () => { throw new Error('Ollama down') })
+    await expect(useMemoryStore.getState().ensureMemoryEmbeddings()).resolves.toBeTypeOf('number')
+  })
+})
+
+// ── v3 migration keeps old entries valid ───────────────────────
+
+describe('v2 → v3 migration', () => {
+  it('keeps pre-v3 entries valid (optional fields default safely)', () => {
+    // Simulate a v2 persisted entry with NO staleness fields at all.
+    useMemoryStore.setState({
+      entries: [{
+        id: 'legacy-1', type: 'user', title: 'Legacy', description: 'Legacy desc',
+        content: 'A legacy fact about TypeScript', tags: [], createdAt: 1000, updatedAt: 1000, source: 'test',
+      } as MemoryFile],
+      settings: {
+        autoExtractEnabled: false, autoExtractInAllModes: false,
+        maxMemoriesInPrompt: 10, maxMemoryChars: 3000,
+      },
+      lastSynced: 0,
+    })
+
+    // Entry survives intact and participates in retrieval (treated non-stale).
+    const e = useMemoryStore.getState().entries[0]
+    expect(e.id).toBe('legacy-1')
+    expect(e.content).toBe('A legacy fact about TypeScript')
+    const prompt = useMemoryStore.getState().getMemoriesForPrompt('legacy TypeScript fact', 16000)
+    expect(prompt).toContain('Legacy')
   })
 })

@@ -1,5 +1,6 @@
 import { classifyModel, findMatchingVAE, findMatchingCLIP } from './comfyui'
 import type { ModelType, GenerateParams, VideoParams } from './comfyui'
+import { log } from '../lib/logger'
 import {
   getAllNodeInfo,
   categorizeNodes,
@@ -253,7 +254,7 @@ export async function buildDynamicWorkflow(
   const models = detectAvailableModels(allNodes)
 
   const { strategy, reason, installHint } = determineStrategy(type, isVideo, nodes, models)
-  console.log(`[dynamic-workflow] Strategy: ${strategy} (${reason})`)
+  log.info(`[dynamic-workflow] Strategy: ${strategy} (${reason})`)
 
   if (strategy === 'unavailable') {
     throw new WorkflowUnavailableError(reason, strategy, installHint)
@@ -659,9 +660,9 @@ export async function buildDynamicWorkflow(
     }
   }
 
-  console.log(`[dynamic-workflow] Built ${Object.keys(workflow).length} nodes:`,
-    Object.entries(workflow).map(([id, node]) => `${id}:${node.class_type}`).join(' → ')
-  )
+  log.info(`[dynamic-workflow] Built ${Object.keys(workflow).length} nodes`, {
+    nodes: Object.entries(workflow).map(([id, node]) => `${id}:${node.class_type}`).join(' → ')
+  })
 
   return workflow
 }

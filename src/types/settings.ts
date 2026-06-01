@@ -53,6 +53,20 @@ export interface Settings {
   gpuVendor: 'auto' | 'nvidia' | 'amd' | 'intel'
   /** Zero-based, vendor-scoped indices of GPUs to expose. Empty = all. */
   gpuIndices: number[]
+  // Feature EE v2.5.0 — VRAM hand-off for the image/video generation MCP tool.
+  // When the agent generates an image/video via ComfyUI, the local text model
+  // and the ComfyUI model both want the GPU. This governs whether LU evicts the
+  // resident Ollama text model from VRAM for the duration of the generation
+  // (then reloads it afterwards) to avoid an OOM on single-GPU machines.
+  //   'auto'   — evict only when (text VRAM + estimated model footprint) won't
+  //              fit in total VRAM. Unknown sizes → don't evict (default).
+  //   'always' — always evict a resident local text model before generating.
+  //   'never'  — never evict (accept a possible OOM; for users who manage VRAM
+  //              themselves or run text + image on separate GPUs).
+  // Only applies to a LOCAL Ollama text model — cloud/remote models hold no
+  // local VRAM and are always skipped.
+  /** VRAM exclusivity policy for image/video generation. Default 'auto'. */
+  exclusiveVramMode: 'auto' | 'always' | 'never'
   // ── v2.5.0 Codex sprint A/B/C settings (ported from uselu) ──────
   /**
    * Codex Architect/Editor split. When on, a separate `codexArchitectModel`

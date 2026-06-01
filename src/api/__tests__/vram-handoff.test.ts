@@ -1,0 +1,417 @@
+/**
+ * Feature EE (v2.5.0) — VRAM hand-off orchestrator unit tests.
+ *
+ * What these CAN prove (pure logic + control flow, all services mocked):
+ *   1. decideUnload() math — fits / doesn't-fit / unknown sizes / mode matrix.
+ *   2. The cloud/remote SKIP path — a non-local text model must NOT be evicted.
+ *   3. The finally-ALWAYS-reloads invariant — loadModel runs even when the
+ *      generation throws (success/failure/timeout all hit the finally).
+ *   4. pollGone() timeout behaviour — gives up after the deadline.
+ *
+ * What they CANNOT prove (per the Bug-G lesson, only live E2E can): whether a
+ * real ComfyUI OOMs on low-VRAM hardware, or whether the chosen footprint
+ * estimates actually keep the two models from colliding on a given GPU. Those
+ * numbers are conservative guesses; this file only checks that the DECISION and
+ * the ORCHESTRATION are correct given known inputs.
+ *
+ * Run: npx vitest run src/api/__tests__/vram-handoff.test.ts
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+
+// ── Mocks (hoisted) ───────────────────────────────────────────────
+// Mirror the bg-tasks.test.ts pattern: top-level vi.fn()s referenced via the
+// mock factory so each test can program return values per case.
+
+const localFetch = vi.fn()
+const listRunningModels = vi.fn()
+const loadModel = vi.fn()
+const unloadModel = vi.fn()
+const getImageModels = vi.fn()
+const getVideoModels = vi.fn()
+const detectVideoBackend = vi.fn()
+const getSystemVRAM = vi.fn()
+const submitWorkflow = vi.fn()
+const getHistory = vi.fn()
+const freeMemory = vi.fn()
+const buildDynamicWorkflow = vi.fn()
+const buildTxt2VidWorkflow = vi.fn()
+const backendCall = vi.fn()
+const getActiveAgentModel = vi.fn()
+let isOllamaLocalReturn = true
+
+vi.mock('../backend', () => ({
+  backendCall: (...a: unknown[]) => backendCall(...a),
+  localFetch: (...a: unknown[]) => localFetch(...a),
+  ollamaUrl: (p: string) => `http://localhost:11434/api${p.startsWith('/') ? p : '/' + p}`,
+  comfyuiUrl: (p: string) => `http://localhost:8188${p}`,
+  isOllamaLocal: () => isOllamaLocalReturn,
+}))
+
+vi.mock('../ollama', () => ({
+  listRunningModels: (...a: unknown[]) => listRunningModels(...a),
+  loadModel: (...a: unknown[]) => loadModel(...a),
+  unloadModel: (...a: unknown[]) => unloadModel(...a),
+}))
+
+vi.mock('../comfyui', async () => {
+  const actual = await vi.importActual<typeof import('../comfyui')>('../comfyui')
+  return {
+    ...actual,
+    getImageModels: (...a: unknown[]) => getImageModels(...a),
+    getVideoModels: (...a: unknown[]) => getVideoModels(...a),
+    detectVideoBackend: (...a: unknown[]) => detectVideoBackend(...a),
+    getSystemVRAM: (...a: unknown[]) => getSystemVRAM(...a),
+    submitWorkflow: (...a: unknown[]) => submitWorkflow(...a),
+    getHistory: (...a: unknown[]) => getHistory(...a),
+    freeMemory: (...a: unknown[]) => freeMemory(...a),
+    buildTxt2VidWorkflow: (...a: unknown[]) => buildTxt2VidWorkflow(...a),
+    // classifyModel, snapToVideoGrid, extractComfyOutputFiles, getImageUrl,
+    // MODEL_TYPE_DEFAULTS keep their real implementations (pure helpers).
+  }
+})
+
+vi.mock('../dynamic-workflow', () => ({
+  buildDynamicWorkflow: (...a: unknown[]) => buildDynamicWorkflow(...a),
+}))
+
+vi.mock('../agent-context', () => ({
+  getActiveAgentModel: () => getActiveAgentModel(),
+}))
+
+// settingsStore is the real module — pure, no services. The orchestrator reads
+// settings.exclusiveVramMode through it; default DEFAULT_SETTINGS = 'auto'.
+
+import { decideUnload, vramHandoffGenerate, pollGone } from '../vram-handoff'
+import { useSettingsStore } from '../../stores/settingsStore'
+
+const GB = 1024 * 1024 * 1024
+
+beforeEach(() => {
+  localFetch.mockReset()
+  listRunningModels.mockReset()
+  loadModel.mockReset()
+  unloadModel.mockReset()
+  getImageModels.mockReset()
+  getVideoModels.mockReset()
+  detectVideoBackend.mockReset()
+  getSystemVRAM.mockReset()
+  submitWorkflow.mockReset()
+  getHistory.mockReset()
+  freeMemory.mockReset()
+  buildDynamicWorkflow.mockReset()
+  buildTxt2VidWorkflow.mockReset()
+  backendCall.mockReset()
+  getActiveAgentModel.mockReset()
+  isOllamaLocalReturn = true
+  // Default: no model resident, ComfyUI already running.
+  listRunningModels.mockResolvedValue([])
+  freeMemory.mockResolvedValue(undefined)
+  loadModel.mockResolvedValue(undefined)
+  unloadModel.mockResolvedValue(undefined)
+  backendCall.mockImplementation(async (cmd: string) => {
+    if (cmd === 'comfyui_status') return { running: true }
+    return {}
+  })
+  // Reset exclusiveVramMode to default each test.
+  useSettingsStore.getState().updateSettings({ exclusiveVramMode: 'auto' })
+})
+
+// ── 1. decideUnload() math ────────────────────────────────────────
+
+describe('decideUnload', () => {
+  it("auto: doesn't-fit → unload (text + footprint > VRAM)", () => {
+    const r = decideUnload({ textVramBytes: 9 * GB, modelFootprintGB: 16, systemVramGB: 12, mode: 'auto' })
+    expect(r.unload).toBe(true)
+  })
+
+  it('auto: fits → do NOT unload (text + footprint <= VRAM)', () => {
+    const r = decideUnload({ textVramBytes: 4 * GB, modelFootprintGB: 8, systemVramGB: 24, mode: 'auto' })
+    expect(r.unload).toBe(false)
+  })
+
+  it('auto: unknown footprint → do NOT unload (no eviction on a guess)', () => {
+    const r = decideUnload({ textVramBytes: 9 * GB, modelFootprintGB: null, systemVramGB: 12, mode: 'auto' })
+    expect(r.unload).toBe(false)
+  })
+
+  it('auto: unknown system VRAM → do NOT unload', () => {
+    const r = decideUnload({ textVramBytes: 9 * GB, modelFootprintGB: 16, systemVramGB: null, mode: 'auto' })
+    expect(r.unload).toBe(false)
+  })
+
+  it('auto: no text model resident (0 bytes) → nothing to free', () => {
+    const r = decideUnload({ textVramBytes: 0, modelFootprintGB: 16, systemVramGB: 12, mode: 'auto' })
+    expect(r.unload).toBe(false)
+  })
+
+  it("always: resident text model → unload regardless of fit", () => {
+    const r = decideUnload({ textVramBytes: 2 * GB, modelFootprintGB: 4, systemVramGB: 80, mode: 'always' })
+    expect(r.unload).toBe(true)
+  })
+
+  it('always: but no resident text model → nothing to unload', () => {
+    const r = decideUnload({ textVramBytes: 0, modelFootprintGB: 4, systemVramGB: 8, mode: 'always' })
+    expect(r.unload).toBe(false)
+  })
+
+  it('never: always false even when it clearly would not fit', () => {
+    const r = decideUnload({ textVramBytes: 20 * GB, modelFootprintGB: 24, systemVramGB: 12, mode: 'never' })
+    expect(r.unload).toBe(false)
+  })
+
+  it('auto: exact boundary (== VRAM) does NOT unload (fits)', () => {
+    // 4GB text + 8GB model = 12GB, system 12GB → not strictly greater → fits.
+    const r = decideUnload({ textVramBytes: 4 * GB, modelFootprintGB: 8, systemVramGB: 12, mode: 'auto' })
+    expect(r.unload).toBe(false)
+  })
+})
+
+// ── helpers for the orchestrator tests ────────────────────────────
+
+/** Program a completed history with one image output for a given promptId. */
+function completedHistory() {
+  return {
+    status: { completed: true },
+    outputs: { '9': { images: [{ filename: 'out.png', subfolder: '', type: 'output' }] } },
+  }
+}
+
+// ── 2. cloud/remote SKIP path ─────────────────────────────────────
+
+describe('vramHandoffGenerate — cloud/remote SKIP path', () => {
+  it('cloud text model → never evicts, still generates', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    buildDynamicWorkflow.mockResolvedValue({ '9': { class_type: 'SaveImage' } })
+    submitWorkflow.mockResolvedValue('pid-1')
+    getHistory.mockResolvedValue(completedHistory())
+
+    const out = await vramHandoffGenerate('image', { prompt: 'a cat' })
+
+    expect(unloadModel).not.toHaveBeenCalled()
+    expect(out).toContain('Image generated: out.png')
+    expect(out).toContain('/view?filename=out.png')
+  })
+
+  it('remote Ollama base → never evicts (no LOCAL VRAM to free)', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'llama3:8b', providerId: 'ollama', remote: true })
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    buildDynamicWorkflow.mockResolvedValue({})
+    submitWorkflow.mockResolvedValue('pid-1')
+    getHistory.mockResolvedValue(completedHistory())
+
+    await vramHandoffGenerate('image', { prompt: 'a dog' })
+    expect(unloadModel).not.toHaveBeenCalled()
+  })
+
+  it('no image model installed → clear error, nothing unloaded', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'llama3:8b', providerId: 'ollama', remote: false })
+    getImageModels.mockResolvedValue([])
+
+    const out = await vramHandoffGenerate('image', { prompt: 'x' })
+    expect(out).toMatch(/no image model installed/i)
+    expect(unloadModel).not.toHaveBeenCalled()
+    expect(submitWorkflow).not.toHaveBeenCalled()
+  })
+
+  it('empty prompt → guard fires, nothing touched', async () => {
+    const out = await vramHandoffGenerate('image', { prompt: '   ' })
+    expect(out).toMatch(/No prompt provided/i)
+    expect(getImageModels).not.toHaveBeenCalled()
+    expect(unloadModel).not.toHaveBeenCalled()
+  })
+})
+
+// ── 3. finally-ALWAYS-reloads invariant ───────────────────────────
+
+describe('vramHandoffGenerate — finally always restores the text model', () => {
+  it('reloads the evicted model even when submitWorkflow throws', async () => {
+    // Local Ollama model that is resident with a big footprint on a small GPU →
+    // decideUnload says unload. listRunningModels reports it resident, then gone.
+    getActiveAgentModel.mockReturnValue({ name: 'qwen:14b', providerId: 'ollama', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'flux1-dev.safetensors', type: 'flux', source: 'diffusion_model' }])
+    getSystemVRAM.mockResolvedValue(12)
+    // /api/ps: first call (decision probe) shows the model resident w/ 9GB VRAM.
+    // listRunningModels (capture-before-unload) shows it resident, then pollGone
+    // sees it gone.
+    localFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/ps')) {
+        return new Response(JSON.stringify({ models: [{ name: 'qwen:14b', size_vram: 9 * GB }] }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    })
+    listRunningModels
+      .mockResolvedValueOnce(['qwen:14b']) // capture-before-unload
+      .mockResolvedValueOnce([])           // pollGone: already gone
+    submitWorkflow.mockRejectedValue(new Error('CUDA out of memory'))
+    buildDynamicWorkflow.mockResolvedValue({})
+
+    const out = await vramHandoffGenerate('image', { prompt: 'render this' })
+
+    // It DID evict…
+    expect(unloadModel).toHaveBeenCalledWith('qwen:14b')
+    // …and the finally block DID restore it despite the throw…
+    expect(loadModel).toHaveBeenCalledWith('qwen:14b')
+    expect(freeMemory).toHaveBeenCalled()
+    // …and the OOM is surfaced VERBATIM, not masked.
+    expect(out).toContain('CUDA out of memory')
+  })
+
+  it('reloads is best-effort: a loadModel throw does not reject the call', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'qwen:14b', providerId: 'ollama', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'flux1-dev.safetensors', type: 'flux', source: 'diffusion_model' }])
+    getSystemVRAM.mockResolvedValue(12)
+    localFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/ps')) {
+        return new Response(JSON.stringify({ models: [{ name: 'qwen:14b', size_vram: 9 * GB }] }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    })
+    listRunningModels.mockResolvedValueOnce(['qwen:14b']).mockResolvedValueOnce([])
+    buildDynamicWorkflow.mockResolvedValue({})
+    submitWorkflow.mockResolvedValue('pid-1')
+    getHistory.mockResolvedValue(completedHistory())
+    loadModel.mockRejectedValue(new Error('ollama busy'))
+
+    // Must still resolve with the successful generation result.
+    const out = await vramHandoffGenerate('image', { prompt: 'render this' })
+    expect(out).toContain('Image generated: out.png')
+    expect(loadModel).toHaveBeenCalledWith('qwen:14b')
+  })
+
+  it('auto-fits: local model that co-exists is NOT evicted', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'llama3:8b', providerId: 'ollama', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'sd15.safetensors', type: 'sd15', source: 'checkpoint' }])
+    getSystemVRAM.mockResolvedValue(24) // plenty
+    localFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/ps')) {
+        return new Response(JSON.stringify({ models: [{ name: 'llama3:8b', size_vram: 5 * GB }] }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    })
+    buildDynamicWorkflow.mockResolvedValue({})
+    submitWorkflow.mockResolvedValue('pid-1')
+    getHistory.mockResolvedValue(completedHistory())
+
+    await vramHandoffGenerate('image', { prompt: 'a fox' })
+    // 5GB + ~4GB sd15 = 9GB < 24GB → fits → no eviction.
+    expect(unloadModel).not.toHaveBeenCalled()
+    // …but ComfyUI VRAM is still freed afterwards (cleanup), and no reload was
+    // needed because nothing was evicted.
+    expect(freeMemory).toHaveBeenCalled()
+    expect(loadModel).not.toHaveBeenCalled()
+  })
+
+  it("'never' mode: never evicts even when it would not fit", async () => {
+    useSettingsStore.getState().updateSettings({ exclusiveVramMode: 'never' })
+    getActiveAgentModel.mockReturnValue({ name: 'qwen:14b', providerId: 'ollama', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'flux1-dev.safetensors', type: 'flux', source: 'diffusion_model' }])
+    getSystemVRAM.mockResolvedValue(8)
+    localFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith('/api/ps')) {
+        return new Response(JSON.stringify({ models: [{ name: 'qwen:14b', size_vram: 9 * GB }] }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    })
+    buildDynamicWorkflow.mockResolvedValue({})
+    submitWorkflow.mockResolvedValue('pid-1')
+    getHistory.mockResolvedValue(completedHistory())
+
+    await vramHandoffGenerate('image', { prompt: 'big render' })
+    expect(unloadModel).not.toHaveBeenCalled()
+  })
+})
+
+// ── 4. video path + start-ComfyUI ─────────────────────────────────
+
+describe('vramHandoffGenerate — video path', () => {
+  it('no video backend → clear error, nothing unloaded', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'llama3:8b', providerId: 'ollama', remote: false })
+    getVideoModels.mockResolvedValue([{ name: 'wan2.1.safetensors', type: 'wan', source: 'diffusion_model' }])
+    detectVideoBackend.mockResolvedValue('none')
+
+    const out = await vramHandoffGenerate('video', { prompt: 'a wave' })
+    expect(out).toMatch(/no video model installed/i)
+    expect(unloadModel).not.toHaveBeenCalled()
+  })
+
+  it('builds a video workflow via buildTxt2VidWorkflow and returns the URL', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    getVideoModels.mockResolvedValue([{ name: 'wan2.1.safetensors', type: 'wan', source: 'diffusion_model' }])
+    detectVideoBackend.mockResolvedValue('wan')
+    buildTxt2VidWorkflow.mockResolvedValue({ '9': { class_type: 'VHS_VideoCombine' } })
+    submitWorkflow.mockResolvedValue('vpid-1')
+    getHistory.mockResolvedValue({
+      status: { completed: true },
+      outputs: { '9': { gifs: [{ filename: 'clip.mp4', subfolder: '', type: 'output' }] } },
+    })
+
+    const out = await vramHandoffGenerate('video', { prompt: 'a wave', frames: 81, fps: 16 })
+    expect(buildTxt2VidWorkflow).toHaveBeenCalled()
+    // Spec: video uses Wan backend; the backend arg is the 2nd param.
+    expect(buildTxt2VidWorkflow.mock.calls[0][1]).toBe('wan')
+    expect(out).toContain('Video generated: clip.mp4')
+  })
+})
+
+// ── pollGone() timeout ────────────────────────────────────────────
+
+describe('pollGone', () => {
+  it('returns true immediately when the model is already gone', async () => {
+    listRunningModels.mockResolvedValue(['other:model'])
+    await expect(pollGone('qwen:14b', 15_000)).resolves.toBe(true)
+  })
+
+  it('times out (returns false) when the model never leaves VRAM', async () => {
+    vi.useFakeTimers()
+    try {
+      // The model is ALWAYS still resident — eviction never lands.
+      listRunningModels.mockResolvedValue(['qwen:14b'])
+      const p = pollGone('qwen:14b', 3_000)
+      // Drive the internal 750ms sleep loop past the 3s deadline.
+      await vi.advanceTimersByTimeAsync(4_000)
+      await expect(p).resolves.toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('returns true once the model disappears mid-poll', async () => {
+    vi.useFakeTimers()
+    try {
+      listRunningModels
+        .mockResolvedValueOnce(['qwen:14b']) // still there at t=0
+        .mockResolvedValueOnce(['qwen:14b']) // still there after 1st sleep
+        .mockResolvedValue([])               // gone thereafter
+      const p = pollGone('qwen:14b', 15_000)
+      await vi.advanceTimersByTimeAsync(2_000)
+      await expect(p).resolves.toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+// ── 5. starts ComfyUI when not running ────────────────────────────
+
+describe('vramHandoffGenerate — ComfyUI lifecycle', () => {
+  it('calls start_comfyui when status reports not running, then proceeds', async () => {
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    getImageModels.mockResolvedValue([{ name: 'sdxl.safetensors', type: 'sdxl', source: 'checkpoint' }])
+    buildDynamicWorkflow.mockResolvedValue({})
+    submitWorkflow.mockResolvedValue('pid-1')
+    getHistory.mockResolvedValue(completedHistory())
+
+    // First comfyui_status → not running, then running after start.
+    let started = false
+    backendCall.mockImplementation(async (cmd: string) => {
+      if (cmd === 'start_comfyui') { started = true; return {} }
+      if (cmd === 'comfyui_status') return { running: started }
+      return {}
+    })
+
+    const out = await vramHandoffGenerate('image', { prompt: 'a tree' })
+    expect(backendCall).toHaveBeenCalledWith('start_comfyui')
+    expect(out).toContain('Image generated: out.png')
+  })
+})

@@ -3,6 +3,7 @@ import type { ModelType } from './comfyui'
 import type { GenerateParams, VideoParams } from './comfyui'
 import { findMatchingVAE, findMatchingCLIP } from './comfyui'
 import { fetchExternal, fetchExternalBytes } from './backend'
+import { log } from '../lib/logger'
 import type {
   WorkflowTemplate,
   WorkflowSearchResult,
@@ -311,9 +312,9 @@ export async function injectParameters(
     inject(paramMap.fps, (params as VideoParams).fps)
   }
 
-  console.log('[workflows] Injected workflow nodes:', Object.entries(wf).map(([id, n]: [string, any]) =>
+  log.info('[workflows] Injected workflow nodes', { nodes: Object.entries(wf).map(([id, n]: [string, any]) =>
     `${id}: ${n.class_type} (${Object.keys(n.inputs || {}).join(', ')})`
-  ).join(' | '))
+  ).join(' | ') })
 
   // Auto-resolve VAE and CLIP loaders with real model files
   for (const [nodeId, node] of Object.entries(wf)) {
@@ -333,7 +334,7 @@ export async function injectParameters(
         else if (modelType === 'wan' || modelType === 'hunyuan') node.inputs.type = 'wan'
       }
     } catch (err) {
-      console.warn(`[workflows] Failed to resolve ${ct} for ${modelType}:`, err)
+      log.warn(`[workflows] Failed to resolve ${ct} for ${modelType}`, { err })
     }
   }
 
@@ -606,7 +607,7 @@ export async function searchCivitai(query: string): Promise<WorkflowSearchResult
     const text = await fetchExternal(`https://civitai.com/api/v1/models?${params}`)
     const data = JSON.parse(text)
     if (!data.items) {
-      console.warn('[workflows] CivitAI returned no items')
+      log.warn('[workflows] CivitAI returned no items')
       return []
     }
     const items: CivitAIModel[] = data.items ?? []
@@ -641,7 +642,7 @@ export async function searchCivitai(query: string): Promise<WorkflowSearchResult
       }
     })
   } catch (err) {
-    console.warn('[workflows] CivitAI search failed:', err)
+    log.warn('[workflows] CivitAI search failed', { err })
     return []
   }
 }

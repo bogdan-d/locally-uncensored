@@ -11,6 +11,7 @@ import {
   transcribeAudio,
   type AudioRecorder,
 } from "../api/voice";
+import { log } from "../lib/logger";
 
 export function useVoice() {
   const store = useVoiceStore();
@@ -30,7 +31,7 @@ export function useVoice() {
       store.setRecording(true);
       store.setTranscript("");
     } catch (err) {
-      console.error("Failed to start recording:", err);
+      log.error("Failed to start recording", { err });
       recorderRef.current = null;
     }
   }, [store]);
@@ -53,13 +54,13 @@ export function useVoice() {
         store.setTranscript(transcript);
         return transcript;
       } catch (err) {
-        console.error("Whisper transcription error:", err);
+        log.error("Whisper transcription error", { err });
         return "";
       } finally {
         store.setTranscribing(false);
       }
     } catch (err) {
-      console.error("Failed to stop recording:", err);
+      log.error("Failed to stop recording", { err });
       store.setRecording(false);
       store.setTranscribing(false);
       recorderRef.current = null;
@@ -82,7 +83,7 @@ export function useVoice() {
 
         await speak(text, voice, store.ttsRate, store.ttsPitch);
       } catch (err) {
-        console.error("Speech synthesis error:", err);
+        log.error("Speech synthesis error", { err });
       } finally {
         store.setSpeaking(false);
       }
@@ -105,7 +106,7 @@ export function useVoice() {
 
         await speakStreaming(text, voice, store.ttsRate, store.ttsPitch);
       } catch (err) {
-        console.error("Speech synthesis streaming error:", err);
+        log.error("Speech synthesis streaming error", { err });
       } finally {
         store.setSpeaking(false);
       }

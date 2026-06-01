@@ -2,6 +2,118 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ─────────────────────────────────────────────────────────────────────
+   v2.5.0 Design-Polish — token layer (DD)
+   Strategy: redefine the palette at the root so every existing utility
+   (bg-/text-/border-/ring-/from-/hover:/dark:) inherits the new look
+   without touching 300+ component call-sites.
+   - ONE accent: the whole cool-accent family (blue/indigo/violet/purple/
+     sky/cyan) collapses to a single muted violet → primary actions only.
+   - Semantics kept: green/emerald stay green for success/status, just
+     desaturated so they read "calm" instead of "neon toy".
+   - Neutral ramp: spread wider than the flat #0a0a0a base for real depth.
+   ───────────────────────────────────────────────────────────────────── */
+@theme {
+  /* ── Accent → muted violet ──────────────────────────────────────────
+     The whole cool-accent family (blue/indigo/purple/violet/sky/cyan)
+     collapses to ONE violet ramp. Full 50→900 so badges, hovers and
+     dark/light tints all stay on-brand instead of a few stray blues. */
+  --color-violet-50:  #f4f1fe;
+  --color-violet-100: #e9e3fc;
+  --color-violet-200: #d6cbf8;
+  --color-violet-300: #cabef5;
+  --color-violet-400: #b09cf0;
+  --color-violet-500: #8b7cf6;
+  --color-violet-600: #7860d8;
+  --color-violet-700: #6450b5;
+  --color-violet-800: #4e3f8f;
+  --color-violet-900: #3a2f6b;
+
+  --color-purple-50:  #f4f1fe;
+  --color-purple-100: #e9e3fc;
+  --color-purple-200: #d6cbf8;
+  --color-purple-300: #cabef5;
+  --color-purple-400: #b09cf0;
+  --color-purple-500: #8b7cf6;
+  --color-purple-600: #7860d8;
+  --color-purple-700: #6450b5;
+  --color-purple-800: #4e3f8f;
+  --color-purple-900: #3a2f6b;
+
+  --color-indigo-50:  #f4f1fe;
+  --color-indigo-100: #e9e3fc;
+  --color-indigo-200: #d6cbf8;
+  --color-indigo-300: #cabef5;
+  --color-indigo-400: #b09cf0;
+  --color-indigo-500: #8b7cf6;
+  --color-indigo-600: #7860d8;
+  --color-indigo-700: #6450b5;
+  --color-indigo-800: #4e3f8f;
+  --color-indigo-900: #3a2f6b;
+
+  --color-blue-50:  #f4f1fe;
+  --color-blue-100: #e9e3fc;
+  --color-blue-200: #d6cbf8;
+  --color-blue-300: #cabef5;
+  --color-blue-400: #b09cf0;
+  --color-blue-500: #8b7cf6;
+  --color-blue-600: #7860d8;
+  --color-blue-700: #6450b5;
+  --color-blue-800: #4e3f8f;
+  --color-blue-900: #3a2f6b;
+
+  --color-sky-300: #cabef5;
+  --color-sky-400: #b09cf0;
+  --color-sky-500: #8b7cf6;
+  --color-sky-600: #7860d8;
+
+  --color-cyan-300: #cabef5;
+  --color-cyan-400: #b09cf0;
+  --color-cyan-500: #8b7cf6;
+  --color-cyan-600: #7860d8;
+
+  /* ── Success / status → desaturated green (semantics preserved) ──
+     Stays unmistakably green for online/success/checkmarks, just calmed
+     down from neon #22c55e so it reads "instrument", not "toy". */
+  --color-green-50:  #eef7f2;
+  --color-green-100: #d8ede1;
+  --color-green-200: #b3dcc6;
+  --color-green-300: #8ccba8;
+  --color-green-400: #6fc096;
+  --color-green-500: #54a87b;
+  --color-green-600: #428a63;
+  --color-green-700: #356f50;
+  --color-green-800: #2a5840;
+  --color-green-900: #1f4030;
+
+  --color-emerald-50:  #eef7f2;
+  --color-emerald-100: #d8ede1;
+  --color-emerald-200: #b3dcc6;
+  --color-emerald-300: #8ccba8;
+  --color-emerald-400: #6fc096;
+  --color-emerald-500: #54a87b;
+  --color-emerald-600: #428a63;
+  --color-emerald-700: #356f50;
+  --color-emerald-800: #2a5840;
+  --color-emerald-900: #1f4030;
+
+  /* ── Neutral ramp — spread for depth (uselu base, widened) ── */
+  --color-lu-base: #141414;     /* app canvas */
+  --color-lu-panel: #1a1a1a;    /* sidebar, panels (= uselu base) */
+  --color-lu-raised: #212121;   /* cards, hover (= uselu elevated) */
+  --color-lu-overlay: #2a2a2a;  /* dropdowns, modals, popovers */
+
+  /* ── Form: moderately less round (pills/cards read less "toy") ── */
+  --radius-xl: 0.5rem;
+  --radius-2xl: 0.625rem;
+  --radius-3xl: 0.75rem;
+
+  /* ── Depth: shadows tuned to be visible on dark backgrounds ── */
+  --shadow-lg: 0 8px 24px -6px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
+  --shadow-xl: 0 16px 48px -12px rgba(0, 0, 0, 0.7), 0 4px 12px -4px rgba(0, 0, 0, 0.5);
+  --shadow-2xl: 0 24px 64px -16px rgba(0, 0, 0, 0.8);
+}
+
 html {
   font-size: 18.4px; /* 16px * 1.15 = 15% larger UI */
 }
@@ -22,24 +134,23 @@ body {
   height: 100vh;
 }
 
-/* Light mode glass card — Linear/Arc: near-invisible */
+/* Glass card — v2.5.0 polish: was "near-invisible" (border-bottom only),
+   now a real raised surface so panels read as built objects with depth
+   instead of a flat mockup. */
 .light .glass-card {
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 0;
-  padding-bottom: 0.75rem;
-  margin-bottom: 0.25rem;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 0.625rem;
+  padding: 0.75rem 0.875rem;
+  margin-bottom: 0.5rem;
 }
 
-/* Dark mode glass card — Linear/Arc: near-invisible */
 .dark .glass-card {
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 0;
-  padding-bottom: 0.75rem;
-  margin-bottom: 0.25rem;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0.625rem;
+  padding: 0.75rem 0.875rem;
+  margin-bottom: 0.5rem;
 }
 
 /* Custom scrollbar */
@@ -131,7 +242,69 @@ input[type="range"]::-webkit-slider-thumb {
   -webkit-app-region: no-drag;
 }
 
-/* Selection */
+/* Selection — tinted to the violet accent */
 ::selection {
-  background: rgba(100, 100, 100, 0.3);
+  background: rgba(139, 124, 246, 0.28);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   v2.5.0 Design-Polish — HUD layer (ported from uselu web app)
+   Gives the desktop the same "alive / tech instrument" character the
+   web companion already has, and keeps the two visually consistent.
+   ───────────────────────────────────────────────────────────────────── */
+
+/* Faint vertical scan-grid over the app canvas — barely-there texture so
+   the large empty dark areas stop reading as a flat void. */
+.dark #root {
+  background-image: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.012) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 100% 3px;
+  background-repeat: repeat-y;
+}
+.light #root {
+  background-image: linear-gradient(
+    180deg,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.01) 50%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  background-size: 100% 3px;
+  background-repeat: repeat-y;
+}
+
+/* Refined focus ring — thin, violet, replaces the browser default blue.
+   Limited to clickable elements; inputs/textcareas get their focus
+   affordance from their own border-color change (adding an outline there
+   reads as a doubled "Windows accent ring"). */
+:is(button, a):focus-visible {
+  outline: 1px solid rgba(139, 124, 246, 0.6);
+  outline-offset: 1px;
+}
+:is(input, textarea, select):focus-visible {
+  outline: none;
+}
+
+/* Status readouts (token counters, version strings, t/s, VRAM) in mono
+   with tabular figures so digits stop jittering. Opt-in via `.lu-hud-num`. */
+.lu-hud-num {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+  letter-spacing: 0.01em;
+}
+
+/* Elevated surfaces — modals, dropdowns, popovers. Pairs the overlay bg
+   with a real shadow so floating layers actually float on dark. */
+.lu-elevated {
+  background: var(--color-lu-overlay);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: var(--shadow-xl);
+}
+.light .lu-elevated {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-lg);
 }

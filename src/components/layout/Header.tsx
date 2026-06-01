@@ -6,6 +6,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
 import { ModelSelector } from '../models/ModelSelector'
+import { LuLogo } from './LuLogo'
 import { UpdateBadge } from './UpdateBadge'
 import { DownloadBadge } from './DownloadBadge'
 import { CreateTopControls } from '../create/CreateTopControls'
@@ -176,7 +177,7 @@ export function Header() {
   )
 
   return (
-    <header className="h-10 flex items-center justify-between px-3 border-b border-gray-200 dark:border-white/[0.04] bg-gray-50 dark:bg-[#0e0e0e] z-20">
+    <header className="h-10 flex items-center justify-between px-3 border-b border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-[#1a1a1a] z-20">
       {/* Left: Sidebar + Logo */}
       <div className="flex items-center gap-2">
         <button
@@ -194,8 +195,7 @@ export function Header() {
           }}
           className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition"
         >
-          <img src="/LU-monogram-bw.png" alt="" width={16} height={16} className="dark:invert-0 invert opacity-70" />
-          <span className="font-semibold text-[0.7rem] tracking-wide">LUncensored</span>
+          <LuLogo size={22} />
         </button>
       </div>
 

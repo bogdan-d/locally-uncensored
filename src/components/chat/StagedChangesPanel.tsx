@@ -4,6 +4,7 @@ import { useStagedChangesStore, type StagedChange } from '../../stores/stagedCha
 import { useChatStore } from '../../stores/chatStore'
 import { toolRegistry } from '../../api/mcp'
 import { DiffView } from './DiffView'
+import { log } from '../../lib/logger'
 
 interface Props {
   /** Active conversation id — the panel scopes itself to this chat. */
@@ -57,7 +58,7 @@ export function StagedChangesPanel({ chatId }: Props) {
       })
     } catch (e) {
       // Apply failures leave the entry in the queue so the user can retry.
-      console.error('[StagedChangesPanel] apply failed', e)
+      log.error('[StagedChangesPanel] apply failed', { err: e })
     } finally {
       setApplying((prev) => {
         const next = new Set(prev)

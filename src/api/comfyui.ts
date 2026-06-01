@@ -226,7 +226,7 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
   sdxl: { loader: 'CheckpointLoaderSimple', needsSeparateVAE: false, needsSeparateCLIP: false },
   flux: {
     loader: 'UNETLoader', needsSeparateVAE: true, needsSeparateCLIP: true, clipType: 'flux',
-    vae: { matchPatterns: ['flux2', 'flux', 'ae'], downloadFilename: 'flux2-vae.safetensors' },
+    vae: { matchPatterns: ['ae', 'flux'], downloadFilename: 'ae.safetensors' },
     clip: { matchPatterns: ['t5'], downloadFilename: 't5xxl_fp8_e4m3fn.safetensors' },
   },
   flux2: {
@@ -496,7 +496,7 @@ export async function filterPartialFiles(filenames: string[]): Promise<Set<strin
       await backendCall('check_model_sizes', { files: filesToCheck })
     const incomplete = new Set(results.filter(r => !r.complete).map(r => r.filename))
     if (incomplete.size > 0) {
-      console.log(`[ComfyUI] Filtered ${incomplete.size} partial downloads:`, [...incomplete])
+      log.info('comfyui.filtered_partial_downloads', { count: incomplete.size, files: [...incomplete] })
     }
     return new Set(filenames.filter(name => !incomplete.has(name)))
   } catch {
@@ -579,7 +579,7 @@ export async function detectVideoBackend(): Promise<VideoBackend> {
     ])
     if (hasADELoad && hasADESampling) return 'animatediff'
   } catch (err) {
-    console.warn('[ComfyUI] Failed to detect video backend:', err)
+    log.warn('comfyui.detect_video_backend_failed', { err })
   }
   return 'none'
 }
@@ -599,11 +599,20 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     if (match) return match
     throw new Error(`No Z-Image VAE found. Download "ae.safetensors" from the Model Manager.`)
   }
-  if (modelType === 'flux' || modelType === 'flux2' || modelType === 'ernie_image') {
-    const match = vaes.find(v => lower(v).includes('flux2') || lower(v).includes('flux'))
+  if (modelType === 'flux') {
+    // FLUX.1 uses the 16-channel ae.safetensors autoencoder, NOT the FLUX 2 VAE.
+    const match = vaes.find(v => lower(v) === 'ae.safetensors')
+      || vaes.find(v => lower(v).includes('ae') && !lower(v).includes('flux2'))
+      || vaes.find(v => lower(v).includes('flux') && !lower(v).includes('flux2'))
+    if (match) return match
+    throw new Error(`No FLUX.1 VAE found. Download "ae.safetensors" from the Model Manager.`)
+  }
+  if (modelType === 'flux2' || modelType === 'ernie_image') {
+    const match = vaes.find(v => lower(v).includes('flux2'))
+      || vaes.find(v => lower(v).includes('flux'))
       || vaes.find(v => lower(v).includes('ae'))
     if (match) return match
-    throw new Error(`No FLUX VAE found. Download "flux2-vae.safetensors" from the Model Manager.`)
+    throw new Error(`No FLUX 2 VAE found. Download "flux2-vae.safetensors" from the Model Manager.`)
   }
   if (modelType === 'hunyuan') {
     // HunyuanVideo has its own VAE — prefer it, fall back to Wan VAE
@@ -799,8 +808,7 @@ export async function submitWorkflow(workflow: Record<string, any>, clientId?: s
     } catch {
       if (rawText) errMsg = rawText.slice(0, 500)
     }
-    console.error('[ComfyUI] Workflow rejected:', errMsg)
-    console.error('[ComfyUI] Submitted workflow:', JSON.stringify(workflow).slice(0, 2000))
+    log.error('comfyui.workflow_rejected', { errMsg, workflow: JSON.stringify(workflow).slice(0, 2000) })
     throw new Error(`ComfyUI rejected workflow: ${errMsg}`)
   }
   const data = await res.json()
