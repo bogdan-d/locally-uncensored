@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
 import type { MemoryEntry, MemoryCategory, MemoryFile, MemoryType, MemorySettings } from '../types/agent-mode'
 import { MEMORY_MIGRATION_MAP, MEMORY_BUDGET_TIERS } from '../types/agent-mode'
-import { createSafeStorage } from '../lib/storage-quota'
+import { idbStorage } from '../lib/idbStorage'
 import { generateEmbeddings } from '../api/rag'
 import { saveVector, loadVectors, deleteVector, clearAll as clearAllVectors, type MemoryVectorRecord } from '../lib/memoryEmbedDB'
 import { scoreMemoriesBlended, isStale, type BlendCandidate } from '../lib/memory-retrieval'
@@ -674,11 +674,11 @@ export const useMemoryStore = create<MemoryState>()(
       // bump exists only to run migrateV2toV3 so the shape is explicit and
       // future migrations have a clean baseline.
       version: 3,
-      // zustand v5: wrap the STRING-based createSafeStorage in createJSONStorage,
-      // else zustand passes the {state,version} object to setItem → "[object Object]"
-      // → memories never hydrate and are wiped on restart (v2.5.0 regression). Same
-      // root cause + fix as chatStore.
-      storage: createJSONStorage(() => createSafeStorage()),
+      // IndexedDB (idbStorage) instead of localStorage — memories + their growth
+      // shouldn't be capped at ~5 MB; idb is disk-backed and migrates existing
+      // localStorage data on first read. createJSONStorage wrap still required
+      // (zustand v5 PersistStorage; raw StateStorage → "[object Object]", FIX-3).
+      storage: createJSONStorage(() => idbStorage),
       migrate: (persistedState, version) => {
         let state: any = persistedState
         if (version < 2) {

@@ -3,7 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
 import type { Conversation, Message } from '../types/chat'
 import type { AgentBlock } from '../types/agent-mode'
-import { createSafeStorage } from '../lib/storage-quota'
+import { idbStorage } from '../lib/idbStorage'
 import { migrateBlockInPlace } from '../api/agents/block-helpers'
 
 /**
@@ -208,12 +208,11 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'chat-conversations',
-      // zustand v5: `storage` expects a PersistStorage (object-based). createSafeStorage
-      // is a STRING-based StateStorage, so it MUST be wrapped in createJSONStorage.
-      // Passing it raw made zustand hand the {state,version} OBJECT straight to
-      // setItem → localStorage.setItem(name, object) → "[object Object]" → chats
-      // never hydrated and were wiped on every restart (v2.5.0 regression).
-      storage: createJSONStorage(() => createSafeStorage()),
+      // IndexedDB (disk-backed, tens of GB) instead of localStorage's ~5 MB cap —
+      // chat history with inline images needs the room. idbStorage migrates existing
+      // localStorage data on first read. createJSONStorage wrap is still required
+      // (zustand v5 PersistStorage; raw StateStorage → "[object Object]", see FIX-3).
+      storage: createJSONStorage(() => idbStorage),
       // Phase 1 (v2.4.0) — rehydrate legacy singular `toolCall` into `toolCalls[]`.
       // Persisted shape is whatever was last written; migration runs on every load
       // and is idempotent, so version bumps are not required.
