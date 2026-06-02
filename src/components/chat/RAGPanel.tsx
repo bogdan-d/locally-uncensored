@@ -51,7 +51,7 @@ export function RAGPanel({ conversationId, onClose }: Props) {
   if (!conversationId) {
     return (
       <motion.div
-        className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#2a2a2a] flex flex-col"
+        className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#363636] flex flex-col"
         initial={{ width: 0, opacity: 0 }}
         animate={{ width: 280, opacity: 1 }}
         exit={{ width: 0, opacity: 0 }}
@@ -221,7 +221,7 @@ function RAGPanelInner({ conversationId, onClose }: { conversationId: string; on
 
   return (
     <motion.div
-      className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#2a2a2a] flex flex-col"
+      className="w-[280px] shrink-0 h-full border-l border-gray-200 dark:border-white/5 bg-white dark:bg-[#363636] flex flex-col"
       initial={{ width: 0, opacity: 0 }}
       animate={{ width: 280, opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}

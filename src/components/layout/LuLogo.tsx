@@ -1,8 +1,11 @@
 // Brand mark — the LU monogram painted in the v2.5.0 accent violet.
 //
-// The shipped asset (`/LU-monogram-bw.png`) is a MONOCHROME glyph: the
-// monogram lives in the image's ALPHA channel, the colour is irrelevant.
-// Instead of shipping a separate tinted PNG (and keeping it in sync), we
+// The shipped asset (`/LU-monogram.svg`) is a VECTOR glyph (white-filled paths
+// on transparent — vectorised from the old 512px bitmap whose binary 1-bit alpha
+// rendered visibly jagged at every size). As a CSS mask it anti-aliases perfectly
+// at any size. White fill = opaque under BOTH alpha- and luminance-mask modes
+// (robust against WebView2 mask-mode ambiguity; black would invert under luminance).
+// Instead of shipping a separate tinted asset (and keeping it in sync), we
 // render the glyph through a CSS mask and fill it with the violet token —
 // so the same source asset can be painted ANY colour, and it tracks the
 // design-token palette automatically. WebView2 / Chromium support
@@ -36,8 +39,8 @@ export function LuLogo({
         width: size,
         height: size,
         backgroundColor: color,
-        WebkitMaskImage: 'url(/LU-monogram-bw.png)',
-        maskImage: 'url(/LU-monogram-bw.png)',
+        WebkitMaskImage: 'url(/LU-monogram.svg)',
+        maskImage: 'url(/LU-monogram.svg)',
         WebkitMaskRepeat: 'no-repeat',
         maskRepeat: 'no-repeat',
         WebkitMaskPosition: 'center',

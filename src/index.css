@@ -11,7 +11,7 @@
      sky/cyan) collapses to a single muted violet → primary actions only.
    - Semantics kept: green/emerald stay green for success/status, just
      desaturated so they read "calm" instead of "neon toy".
-   - Neutral ramp: spread wider than the flat #0a0a0a base for real depth.
+   - Neutral ramp: spread wider than the flat #161616 base for real depth.
    ───────────────────────────────────────────────────────────────────── */
 @theme {
   /* ── Accent → muted violet ──────────────────────────────────────────
@@ -22,55 +22,55 @@
   --color-violet-100: #e9e3fc;
   --color-violet-200: #d6cbf8;
   --color-violet-300: #cabef5;
-  --color-violet-400: #b09cf0;
-  --color-violet-500: #8b7cf6;
-  --color-violet-600: #7860d8;
-  --color-violet-700: #6450b5;
-  --color-violet-800: #4e3f8f;
-  --color-violet-900: #3a2f6b;
+  --color-violet-400: #c2b2f3;
+  --color-violet-500: #a094f8;
+  --color-violet-600: #8974dd;
+  --color-violet-700: #7462bd;
+  --color-violet-800: #5847a1;
+  --color-violet-900: #44377d;
 
   --color-purple-50:  #f4f1fe;
   --color-purple-100: #e9e3fc;
   --color-purple-200: #d6cbf8;
   --color-purple-300: #cabef5;
-  --color-purple-400: #b09cf0;
-  --color-purple-500: #8b7cf6;
-  --color-purple-600: #7860d8;
-  --color-purple-700: #6450b5;
-  --color-purple-800: #4e3f8f;
-  --color-purple-900: #3a2f6b;
+  --color-purple-400: #c2b2f3;
+  --color-purple-500: #a094f8;
+  --color-purple-600: #8974dd;
+  --color-purple-700: #7462bd;
+  --color-purple-800: #5847a1;
+  --color-purple-900: #44377d;
 
   --color-indigo-50:  #f4f1fe;
   --color-indigo-100: #e9e3fc;
   --color-indigo-200: #d6cbf8;
   --color-indigo-300: #cabef5;
-  --color-indigo-400: #b09cf0;
-  --color-indigo-500: #8b7cf6;
-  --color-indigo-600: #7860d8;
-  --color-indigo-700: #6450b5;
-  --color-indigo-800: #4e3f8f;
-  --color-indigo-900: #3a2f6b;
+  --color-indigo-400: #c2b2f3;
+  --color-indigo-500: #a094f8;
+  --color-indigo-600: #8974dd;
+  --color-indigo-700: #7462bd;
+  --color-indigo-800: #5847a1;
+  --color-indigo-900: #44377d;
 
   --color-blue-50:  #f4f1fe;
   --color-blue-100: #e9e3fc;
   --color-blue-200: #d6cbf8;
   --color-blue-300: #cabef5;
-  --color-blue-400: #b09cf0;
-  --color-blue-500: #8b7cf6;
-  --color-blue-600: #7860d8;
-  --color-blue-700: #6450b5;
-  --color-blue-800: #4e3f8f;
-  --color-blue-900: #3a2f6b;
+  --color-blue-400: #c2b2f3;
+  --color-blue-500: #a094f8;
+  --color-blue-600: #8974dd;
+  --color-blue-700: #7462bd;
+  --color-blue-800: #5847a1;
+  --color-blue-900: #44377d;
 
   --color-sky-300: #cabef5;
-  --color-sky-400: #b09cf0;
-  --color-sky-500: #8b7cf6;
-  --color-sky-600: #7860d8;
+  --color-sky-400: #c2b2f3;
+  --color-sky-500: #a094f8;
+  --color-sky-600: #8974dd;
 
   --color-cyan-300: #cabef5;
-  --color-cyan-400: #b09cf0;
-  --color-cyan-500: #8b7cf6;
-  --color-cyan-600: #7860d8;
+  --color-cyan-400: #c2b2f3;
+  --color-cyan-500: #a094f8;
+  --color-cyan-600: #8974dd;
 
   /* ── Success / status → desaturated green (semantics preserved) ──
      Stays unmistakably green for online/success/checkmarks, just calmed
@@ -98,10 +98,10 @@
   --color-emerald-900: #1f4030;
 
   /* ── Neutral ramp — spread for depth (uselu base, widened) ── */
-  --color-lu-base: #141414;     /* app canvas */
-  --color-lu-panel: #1a1a1a;    /* sidebar, panels (= uselu base) */
-  --color-lu-raised: #212121;   /* cards, hover (= uselu elevated) */
-  --color-lu-overlay: #2a2a2a;  /* dropdowns, modals, popovers */
+  --color-lu-base: #202020;     /* app canvas */
+  --color-lu-panel: #262626;    /* sidebar, panels (= uselu base) */
+  --color-lu-raised: #2d2d2d;   /* cards, hover (= uselu elevated) */
+  --color-lu-overlay: #363636;  /* dropdowns, modals, popovers */
 
   /* ── Form: moderately less round (pills/cards read less "toy") ── */
   --radius-xl: 0.5rem;
@@ -300,7 +300,7 @@ input[type="range"]::-webkit-slider-thumb {
 
 /* Selection — tinted to the violet accent */
 ::selection {
-  background: rgba(139, 124, 246, 0.28);
+  background: rgba(160, 148, 248, 0.28);
 }
 
 /* ─────────────────────────────────────────────────────────────────────
@@ -337,7 +337,7 @@ input[type="range"]::-webkit-slider-thumb {
    affordance from their own border-color change (adding an outline there
    reads as a doubled "Windows accent ring"). */
 :is(button, a):focus-visible {
-  outline: 1px solid rgba(139, 124, 246, 0.6);
+  outline: 1px solid rgba(160, 148, 248, 0.6);
   outline-offset: 1px;
 }
 :is(input, textarea, select):focus-visible {

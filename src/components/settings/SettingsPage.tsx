@@ -687,7 +687,7 @@ export function SettingsPage() {
 
         {/* P5: top-level tabs. Sticky so the user can switch tabs from
             anywhere in a long Section without scrolling back up. */}
-        <div className="sticky top-0 z-10 -mx-4 px-4 pb-2 mb-2 bg-white/80 dark:bg-[#141414]/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-[#141414]/60 border-b border-gray-100 dark:border-white/[0.06]">
+        <div className="sticky top-0 z-10 -mx-4 px-4 pb-2 mb-2 bg-white/80 dark:bg-[#202020]/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 dark:supports-[backdrop-filter]:bg-[#202020]/60 border-b border-gray-100 dark:border-white/[0.06]">
           <div className="flex items-center gap-1 overflow-x-auto scrollbar-thin">
             {SETTINGS_TABS.map(t => (
               <button

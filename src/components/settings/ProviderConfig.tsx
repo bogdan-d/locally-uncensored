@@ -314,7 +314,7 @@ export function ProviderSettings() {
           <span>Add Provider</span>
         </button>
         {dropdownOpen && (
-          <div className="absolute z-50 top-full mt-1 w-full bg-[#2a2a2a] border border-white/10 rounded-lg shadow-xl max-h-56 overflow-y-auto scrollbar-thin">
+          <div className="absolute z-50 top-full mt-1 w-full bg-[#363636] border border-white/10 rounded-lg shadow-xl max-h-56 overflow-y-auto scrollbar-thin">
             {/* Local group */}
             <div className="px-2.5 py-1 text-[0.5rem] uppercase tracking-wider text-gray-600 font-semibold">Local</div>
             {localPresets.map(preset => {

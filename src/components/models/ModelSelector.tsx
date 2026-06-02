@@ -465,7 +465,7 @@ export function ModelSelector() {
       <AnimatePresence>
         {open && (
           <motion.div
-            className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 w-72 rounded-lg overflow-hidden z-50 bg-[#2a2a2a] border border-white/[0.08] shadow-2xl shadow-black/50"
+            className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 w-72 rounded-lg overflow-hidden z-50 bg-[#363636] border border-white/[0.08] shadow-2xl shadow-black/50"
             initial={{ opacity: 0, y: -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.98 }}

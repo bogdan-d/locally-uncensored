@@ -61,7 +61,7 @@ export function PluginsDropdown() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1.5">
+          <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-1.5">
 
             {/* ── Caveman Mode Dropdown ───────────────────── */}
             <div className="px-2.5">

@@ -180,7 +180,7 @@ export function ChatView() {
                     {toolsDropdownOpen && (
                       <>
                         <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
-                        <div className="absolute left-0 top-full mt-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
+                        <div className="absolute left-0 top-full mt-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
                           <PermissionOverrideBar />
                         </div>
                       </>
@@ -209,7 +209,7 @@ export function ChatView() {
                   {exportOpen && (
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
-                      <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1">
+                      <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-1">
                         {(['markdown', 'json'] as const).map(fmt => (
                           <button
                             key={fmt}
@@ -385,7 +385,7 @@ export function ChatView() {
             {/* RAG Panel */}
             <AnimatePresence>
               {ragPanelOpen && (
-                <ErrorBoundary fallbackClassName="w-[280px] shrink-0 h-full border-l border-white/5 bg-[#2a2a2a] flex flex-col items-center justify-center p-6 gap-3">
+                <ErrorBoundary fallbackClassName="w-[280px] shrink-0 h-full border-l border-white/5 bg-[#363636] flex flex-col items-center justify-center p-6 gap-3">
                   <RAGPanel conversationId={activeConversationId} onClose={() => setRagPanelOpen(false)} />
                 </ErrorBoundary>
               )}
@@ -402,7 +402,7 @@ export function ChatView() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 12 }}
             transition={{ duration: 0.18 }}
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[120] px-4 py-2 rounded-lg bg-[#1a1a1a] border border-green-500/30 text-green-400 text-[0.7rem] shadow-xl max-w-[min(90vw,520px)] truncate"
+            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[120] px-4 py-2 rounded-lg bg-[#262626] border border-green-500/30 text-green-400 text-[0.7rem] shadow-xl max-w-[min(90vw,520px)] truncate"
           >
             {exportToast}
           </motion.div>

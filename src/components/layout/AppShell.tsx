@@ -571,7 +571,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-white dark:bg-[#141414] text-gray-900 dark:text-gray-100">
+    <div className="h-screen w-screen overflow-hidden bg-white dark:bg-[#202020] text-gray-900 dark:text-gray-100">
       <div className="h-full flex flex-col">
         <Titlebar />
         <Header />

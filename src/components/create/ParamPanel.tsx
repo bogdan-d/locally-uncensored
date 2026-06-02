@@ -84,7 +84,7 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
     }
   }, [videoSubTab, isVideo])
 
-  const sel = 'w-full px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/8 text-gray-900 dark:text-white text-[11px] focus:outline-none focus:border-gray-400 dark:focus:border-white/20 cursor-pointer'
+  const sel = 'w-full px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-[#262626] border border-gray-200 dark:border-white/8 text-gray-900 dark:text-white text-[11px] focus:outline-none focus:border-gray-400 dark:focus:border-white/20 cursor-pointer'
   const lbl = 'text-[10px] font-medium text-gray-500 dark:text-gray-600 uppercase tracking-widest mb-1 block'
 
   const handleModelChange = (name: string) => {

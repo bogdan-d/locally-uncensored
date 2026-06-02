@@ -47,10 +47,11 @@ export function StorageQuotaToast() {
       />
       <div className="flex-1 min-w-0 text-[0.7rem]">
         <span className="font-semibold text-amber-800 dark:text-amber-200">
-          Storage full — that item wasn't saved.
+          App storage limit reached — that setting wasn't saved.
         </span>
         <span className="ml-1.5 text-amber-700/90 dark:text-amber-300/80">
-          Free up space in Settings (clear old chats or memories) so new data can persist.
+          This is the browser's small per-app store, not your disk space. Your chats and
+          memories live in a separate, much larger local database and are unaffected.
         </span>
       </div>
       <button

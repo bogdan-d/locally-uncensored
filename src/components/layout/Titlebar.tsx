@@ -48,7 +48,7 @@ export function Titlebar() {
   return (
     <div
       data-tauri-drag-region
-      className="h-8 flex items-center justify-between bg-white dark:bg-[#141414] border-b border-gray-200 dark:border-white/[0.06] select-none"
+      className="h-8 flex items-center justify-between bg-white dark:bg-[#202020] border-b border-gray-200 dark:border-white/[0.06] select-none"
     >
       {/* Left: App icon + title */}
       <div data-tauri-drag-region className="flex items-center gap-1.5 pl-3">

@@ -71,7 +71,7 @@ function MemoryDebugPopover({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="w-[400px] max-h-[60vh] bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden"
+        className="w-[400px] max-h-[60vh] bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 rounded-xl shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

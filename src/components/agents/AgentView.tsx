@@ -139,7 +139,7 @@ export function AgentView() {
                 className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-[0.75rem] text-gray-300 focus:outline-none focus:border-white/20 min-w-[140px]"
               >
                 {models.map((m) => (
-                  <option key={m.name} value={m.name} className="bg-[#1a1a1a]">
+                  <option key={m.name} value={m.name} className="bg-[#262626]">
                     {m.name}
                   </option>
                 ))}

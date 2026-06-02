@@ -176,7 +176,7 @@ export function Header() {
   )
 
   return (
-    <header className="h-10 flex items-center justify-between px-3 border-b border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-[#1a1a1a] z-20">
+    <header className="h-10 flex items-center justify-between px-3 border-b border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-[#262626] z-20">
       {/* Left: Sidebar + Logo */}
       <div className="flex items-center gap-2">
         <button

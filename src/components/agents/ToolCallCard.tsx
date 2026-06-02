@@ -28,7 +28,7 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: Props) {
       initial={{ opacity: 0, scale: 0.97 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.15 }}
-      className="glass-card rounded-lg p-3 dark:bg-[#2a2a2a] border border-white/5"
+      className="glass-card rounded-lg p-3 dark:bg-[#363636] border border-white/5"
     >
       {/* Tool Name */}
       <div className="flex items-center justify-between mb-2">

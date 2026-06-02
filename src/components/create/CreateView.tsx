@@ -972,7 +972,7 @@ export function CreateView() {
         {!showNoModelsEmptyState && showParams && (
           <div className="fixed inset-0 z-40 lg:hidden" onClick={() => setShowParams(false)}>
             <div className="absolute inset-0 bg-black/60" />
-            <div className="absolute right-0 top-0 h-full w-64 bg-white dark:bg-[#212121] border-l border-gray-200 dark:border-white/5 p-3 overflow-y-auto"
+            <div className="absolute right-0 top-0 h-full w-64 bg-white dark:bg-[#2d2d2d] border-l border-gray-200 dark:border-white/5 p-3 overflow-y-auto"
               onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[10px] font-medium text-gray-600 uppercase tracking-widest">Parameters</p>
