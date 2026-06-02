@@ -804,8 +804,15 @@ export function useCodex() {
           // questions (David 2026-06-02: coding agent "antwortet in loops" on a
           // simple question — it called shell_execute 3× + repeated "Task
           // completed" because "completed" never matched the completion regex).
-          const stalledNarration = /\b(i'?m about to|i will(?: now)?|i'?ll\b|let me\b|next,?\s*i\b|now i'?ll|going to|first,?\s*i\b|then i'?ll|i need to (?:read|open|check|look|run|see|find))\b/i.test(turnContent)
-          const asksForInfo = /\b(please provide|could you (?:please )?(?:provide|share|tell|give|specify)|what(?:'s| is) the (?:path|file|name|location)|which file|can you (?:provide|share|specify|tell)|provide (?:the|me) (?:the )?(?:path|file|details|more)|need (?:the|more) (?:path|info|details|context))\b/i.test(turnContent)
+          const stalledNarration = /\b(i(?:'?m| am) about to|i will(?: now)?|i'?ll\b|let me\b|next,?\s*i\b|now i'?ll|going to|first,?\s*i\b|then i'?ll|i (?:need|have|am going) to (?:read|open|check|look|run|see|find))\b/i.test(turnContent)
+          // "asksForInfo" also catches the model giving up by asking the user to
+          // VERIFY/CONFIRM a path it can discover itself ("it seems there is an
+          // issue with the file path … could you please verify the correct path
+          // to sum.js?" — David 2026-06-02 live coding run with qwen2.5-coder:7b).
+          // The verify/confirm/clarify branch is anchored on a path/file NOUN so
+          // a genuine completion ("I fixed it, please verify the changes") does
+          // NOT match — only "verify the (correct) path/file/location" does.
+          const asksForInfo = /\b(please provide|could you (?:please )?(?:provide|share|tell|give|specify|verify|confirm|clarify)|what(?:'s| is) the (?:path|file|name|location)|which file|can you (?:provide|share|specify|tell)|provide (?:the|me) (?:the )?(?:path|file|details|more)|(?:verify|confirm|clarify) (?:the )?(?:correct |right |exact |full )?(?:path|file ?path|location|directory|filename|file name)|need (?:the|more) (?:path|info|details|context))\b/i.test(turnContent)
           const emptyTurn = turnContent.trim().length === 0
           if ((stalledNarration || asksForInfo || emptyTurn) && continueNudgesRemaining > 0) {
             continueNudgesRemaining--

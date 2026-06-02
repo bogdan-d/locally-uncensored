@@ -23,11 +23,25 @@ function stripChannelTags(text: string): string {
     .replace(/<\|?channel\|?>/gi, '')
     .replace(/<channel\|>/gi, '')
   // Display safety net (David 2026-06-02): the user must only ever see real
-  // prose answers + the rendered tool-call BLOCKS — never the raw tool-call
-  // JSON / <tool_call> tags some local models emit as content instead of a real
-  // answer. The engine already strips these in most paths, but this guarantees
-  // a leak can never surface in the chat regardless of upstream.
+  // prose answers + the rendered tool-call BLOCKS — never raw tool-call JSON,
+  // hermes orchestration tags, or our own continue-nudge echoed back as prose.
+  // The engine strips most of this upstream, but this guarantees a leak can
+  // never surface in the chat regardless of which weak model is driving.
+  //
+  // 1) tool_call / tool_response / tool_result tags + their content. qwen2.5-
+  //    coder:7b (confirmed live 2026-06-02) HALLUCINATES hermes-style
+  //    <tool_response> Error: … </tool_response> blocks INTO its prose. Native
+  //    tool results are role:'tool' messages and never reach assistant content,
+  //    so anything matching these tags is noise meant only for the model.
   t = t.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/<\/?tool_call>/gi, '')
+  t = t.replace(/<tool_response>[\s\S]*?<\/tool_response>/gi, '').replace(/<\/?tool_response>/gi, '')
+  t = t.replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, '').replace(/<\/?tool_result>/gi, '')
+  // 2) The autonomous-continue NUDGE, if a weak model parrots it back as its
+  //    own answer (qwen2.5-coder:7b did this verbatim). It is OUR fixed
+  //    instruction from useCodex — strip from its opening clause ("…continue
+  //    working autonomously…") through the closing "finished and verified."
+  //    so the orchestration sentence never reads as a real LLM answer.
+  t = t.replace(/(?:please wait[,;:]?\s*(?:while\s+)?i\s+(?:will\s+)?)?continue working autonomously[\s\S]*?finished and verified\.?/gi, '')
   try {
     const { ranges } = extractToolCallsWithRanges(t)
     if (ranges.length) t = stripRanges(t, ranges)
@@ -221,12 +235,16 @@ export function CodexView() {
                                         )
                                       }
                                       if (block.phase === 'answer' && block.content.trim()) {
+                                        // Strip FIRST: if the block was only a
+                                        // parroted nudge / hallucinated tool tag,
+                                        // it strips to empty — render nothing
+                                        // rather than an empty bubble.
+                                        const answer = stripChannelTags(block.content)
+                                        if (!answer) return null
                                         return (
                                           <div key={block.id} className="px-1 py-0.5">
                                             <div className="text-[0.75rem] leading-relaxed">
-                                              <MarkdownRenderer
-                                                content={stripChannelTags(block.content)}
-                                              />
+                                              <MarkdownRenderer content={answer} />
                                             </div>
                                           </div>
                                         )
