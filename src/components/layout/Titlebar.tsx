@@ -52,13 +52,7 @@ export function Titlebar() {
     >
       {/* Left: App icon + title */}
       <div data-tauri-drag-region className="flex items-center gap-1.5 pl-3">
-        <LuLogo size={14} className="pointer-events-none" />
-        <span
-          data-tauri-drag-region
-          className="text-[0.6rem] tracking-widest font-medium text-gray-400 dark:text-gray-500 uppercase pointer-events-none"
-        >
-          Locally Uncensored
-        </span>
+        <LuLogo size={21} className="pointer-events-none" />
       </div>
 
       {/* Right: Window controls */}

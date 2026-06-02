@@ -6,7 +6,6 @@ import { useChatStore } from '../../stores/chatStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
 import { ModelSelector } from '../models/ModelSelector'
-import { LuLogo } from './LuLogo'
 import { UpdateBadge } from './UpdateBadge'
 import { DownloadBadge } from './DownloadBadge'
 import { CreateTopControls } from '../create/CreateTopControls'
@@ -193,9 +192,16 @@ export function Header() {
             useCompareStore.getState().setComparing(false)
             setView('chat')
           }}
-          className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition"
+          className="flex items-center shrink-0 transition"
+          title="LU Studio"
         >
-          <LuLogo size={22} />
+          {/* Brand wordmark in the top panel (David 2026-06-02): no logo here
+              (the big mark was too large) — just "LU Studio". The logo itself
+              lives in the titlebar above. */}
+          <span className="text-sm font-semibold tracking-tight">
+            <span className="text-violet-500">LU</span>{' '}
+            <span className="text-gray-700 dark:text-gray-200">Studio</span>
+          </span>
         </button>
       </div>
 
@@ -238,7 +244,7 @@ export function Header() {
                       ? 'bg-red-500/30 border border-red-400/60 animate-pulse'
                       : isModelLoaded
                         ? 'bg-green-500/25 border border-green-400/50'
-                        : 'bg-red-500/20 border border-red-400/40 hover:bg-red-500/30'
+                        : 'bg-gray-200 dark:bg-white/10 border border-gray-300 dark:border-white/15 hover:bg-gray-300 dark:hover:bg-white/15'
                 }`}
               >
                 <span
@@ -249,7 +255,7 @@ export function Header() {
                         ? 'left-[1px] bg-red-500'
                         : isModelLoaded
                           ? 'left-[18px] bg-green-400'
-                          : 'left-[1px] bg-red-400'
+                          : 'left-[1px] bg-gray-400 dark:bg-gray-500'
                   }`}
                 >
                   {busy ? (

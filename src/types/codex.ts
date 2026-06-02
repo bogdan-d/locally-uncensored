@@ -1,4 +1,9 @@
-export type ChatMode = 'lu' | 'codex' | 'openclaw' | 'claude-code' | 'remote'
+// NOTE: the 'codex' value is kept as a stable internal id for storage
+// back-compat (zustand persist key 'locally-uncensored-codex' + per-chat
+// mode tag). It is an invisible identifier — the user-facing label is
+// "Coding Agent" (see CodexView / Sidebar). Renaming it would wipe existing
+// users' coding chats + working-dir on upgrade.
+export type ChatMode = 'lu' | 'codex' | 'openclaw' | 'remote'
 
 export type CodexEventType = 'instruction' | 'file_change' | 'terminal_output' | 'reasoning' | 'error' | 'done'
 

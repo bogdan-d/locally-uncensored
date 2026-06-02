@@ -182,7 +182,7 @@ describe('Video bundles → strategy pipeline', () => {
 // ── Chat mode system ────────────────────────────────────────────────────
 
 describe('Chat mode system', () => {
-  const validModes = ['lu', 'codex', 'openclaw', 'claude-code', 'remote'] as const
+  const validModes = ['lu', 'codex', 'openclaw', 'remote'] as const
 
   it('all modes are strings (not undefined)', () => {
     for (const mode of validModes) {

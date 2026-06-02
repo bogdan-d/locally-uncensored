@@ -1,7 +1,7 @@
 // Agent Mode — Type Definitions
 // Part of the Agent Mode feature (coding-orch branch)
 
-// Permission tiers (Claude Code pattern)
+// Permission tiers (auto-approve reads, confirm writes)
 export type ToolPermission = 'auto' | 'confirm'
 
 // Tool definition for internal use
@@ -129,7 +129,7 @@ export interface MemoryEntry {
   source?: string // e.g. "agent:web_search", "user:manual", "auto:extraction"
 }
 
-// ── Enhanced Memory System (Claude Code-inspired) ─────────────
+// ── Enhanced Memory System ────────────────────────────────────
 
 export type MemoryType = 'user' | 'feedback' | 'project' | 'reference'
 

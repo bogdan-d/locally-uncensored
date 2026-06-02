@@ -250,13 +250,6 @@ export async function backendCall<T = any>(
     start_tunnel: { path: "/local-api/start-tunnel", method: "POST" },
     stop_tunnel: { path: "/local-api/stop-tunnel", method: "POST" },
     tunnel_status: { path: "/local-api/tunnel-status" },
-    // Claude Code
-    detect_claude_code: { path: "/local-api/detect-claude-code" },
-    install_claude_code: { path: "/local-api/install-claude-code", method: "POST" },
-    install_claude_code_status: { path: "/local-api/install-claude-code-status" },
-    start_claude_code: { path: "/local-api/start-claude-code", method: "POST" },
-    stop_claude_code: { path: "/local-api/stop-claude-code", method: "POST" },
-    send_claude_code_input: { path: "/local-api/send-claude-code-input", method: "POST" },
     // Agent tools (Phase 1 — new commands)
     shell_execute: { path: "/local-api/shell-execute", method: "POST" },
     fs_read: { path: "/local-api/fs-read", method: "POST" },
@@ -474,4 +467,26 @@ export async function openExternal(url: string): Promise<void> {
   } else {
     window.open(url, '_blank')
   }
+}
+
+/** Git availability for the Codex coding view (v2.5.0). */
+export interface GitStatus {
+  installed: boolean
+  native: boolean
+  version?: string | null
+  hint?: string | null
+  download_url: string
+}
+
+/**
+ * Check whether `git` is available so the Codex view can show an install
+ * banner when it's missing. In a plain browser (dev without Tauri) we assume
+ * git is present so the banner never shows during web-only development.
+ */
+export async function checkGitInstalled(): Promise<GitStatus> {
+  if (!isTauri()) {
+    return { installed: true, native: true, download_url: 'https://git-scm.com/downloads' }
+  }
+  const invoke = await getInvoke()
+  return (await invoke('check_git_installed')) as GitStatus
 }

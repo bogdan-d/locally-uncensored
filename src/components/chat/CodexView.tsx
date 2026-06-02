@@ -12,8 +12,9 @@ import { PluginsDropdown } from './PluginsDropdown'
 import { TypingIndicator } from './TypingIndicator'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { StagedChangesPanel } from './StagedChangesPanel'
-import { User, Code, Brain, Eye } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { User, Code, Brain, Eye, GitBranch, Download, RefreshCw } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
 
 function stripChannelTags(text: string): string {
   return text
@@ -43,6 +44,25 @@ export function CodexView() {
   const codexReviewMode = useSettingsStore((s) => s.settings.codexReviewMode)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
 
+  // Git availability for the Codex view (v2.5.0). Codex shells out to git for
+  // git_status/diff/commit/log; if git is missing those tools fail. Probe on
+  // open and surface a minimal install banner when it's not on PATH.
+  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null)
+  const [gitChecking, setGitChecking] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    setGitChecking(true)
+    checkGitInstalled()
+      .then((s) => { if (!cancelled) setGitStatus(s) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setGitChecking(false) })
+    return () => { cancelled = true }
+  }, [])
+  const recheckGit = () => {
+    setGitChecking(true)
+    checkGitInstalled().then(setGitStatus).catch(() => {}).finally(() => setGitChecking(false))
+  }
+
   return (
     <div className="flex-1 flex overflow-hidden">
       {/* Main panel */}
@@ -50,7 +70,7 @@ export function CodexView() {
         {/* Codex header */}
         <div className="flex items-center gap-1.5 px-2 py-0.5 border-b border-gray-200 dark:border-white/[0.04]">
           <Code size={9} className="text-gray-500" />
-          <span className="text-[0.55rem] text-gray-600 dark:text-gray-400 font-medium">Codex</span>
+          <span className="text-[0.55rem] text-gray-600 dark:text-gray-400 font-medium">Coding Agent</span>
           {/* Code-Review Mode badge (B13) — makes it impossible to miss
               that the agent is read-only. The toggle itself lives in
               Settings → Codex Agent; clicking the badge jumps you there
@@ -58,7 +78,7 @@ export function CodexView() {
           {codexReviewMode && (
             <span
               className="flex items-center gap-1 px-1.5 py-0 rounded border border-amber-500/30 text-amber-500 text-[0.55rem] bg-amber-500/[0.04]"
-              title="Code-Review Mode is active. Codex will inspect the codebase but won't write files or run commands. Disable in Settings → Codex Agent."
+              title="Code-Review Mode is active. The coding agent will inspect the codebase but won't write files or run commands. Disable in Settings → Coding Agent."
             >
               <Eye size={9} />
               <span>Review</span>
@@ -70,6 +90,33 @@ export function CodexView() {
           <PluginsDropdown />
         </div>
 
+        {/* Git-missing banner (v2.5.0). Codex shells out to git for
+            status/diff/commit/log — without it those tools fail. Minimal,
+            dismiss-by-installing: an Install button (opens the platform git
+            download page) + a Recheck button for after the install. */}
+        {gitStatus && !gitStatus.installed && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-amber-500/20 bg-amber-500/[0.06]">
+            <GitBranch size={12} className="text-amber-500 shrink-0" />
+            <span className="text-[0.6rem] text-amber-600 dark:text-amber-400/90 flex-1 leading-tight">
+              Git isn't installed. The coding agent needs it for diffs, commits and history.
+            </span>
+            <button
+              onClick={() => openExternal(gitStatus.download_url)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-[0.6rem] font-medium bg-amber-500/15 text-amber-600 dark:text-amber-300 hover:bg-amber-500/25 border border-amber-500/30 transition-colors"
+            >
+              <Download size={11} /> Install Git
+            </button>
+            <button
+              onClick={recheckGit}
+              disabled={gitChecking}
+              title="Re-check after installing Git"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={11} className={gitChecking ? 'animate-spin' : ''} />
+            </button>
+          </div>
+        )}
+
         {/* Stage-and-Approve queue (B10). Renders nothing when there
             are no pending changes for the active chat, so non-stage-mode
             users never see it. */}
@@ -80,9 +127,9 @@ export function CodexView() {
           {messages.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-center">
               <Code size={24} className="text-gray-300 dark:text-gray-700 mb-2" />
-              <p className="text-[0.7rem] text-gray-500 font-medium">Codex Coding Agent</p>
+              <p className="text-[0.7rem] text-gray-500 font-medium">Coding Agent</p>
               <p className="text-[0.55rem] text-gray-400 dark:text-gray-600 mt-0.5 max-w-[300px]">
-                Send a coding instruction. Codex will read your codebase, write code, and run commands.
+                Send a coding instruction. The coding agent will read your codebase, write code, and run commands.
               </p>
               {!thread?.workingDirectory && (
                 <p className="text-[0.55rem] text-amber-500/70 mt-2">

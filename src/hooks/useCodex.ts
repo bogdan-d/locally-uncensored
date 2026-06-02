@@ -23,7 +23,6 @@ import { computeUnifiedDiff } from '../lib/diff'
 import { log } from '../lib/logger'
 import type { CodexEvent } from '../types/codex'
 import type { AgentBlock, AgentToolCall } from '../types/agent-mode'
-import { selectRelevantTools } from '../lib/tool-selection'
 import { isThinkingCompatible, isPlainTextPlanner } from '../lib/model-compatibility'
 import type { ChatMessage, ToolCall, ToolDefinition } from '../api/providers/types'
 import { executeParallel, applyResultToToolCall, type ExecutionRequest } from '../api/agents/tool-executor'
@@ -34,6 +33,7 @@ import { budgetFromSettings } from '../api/agents/budget'
 import { finalStripThinkingTags } from '../lib/thinking-stripper'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { repairToolCallArgs, extractToolCallsFromContent, extractToolCallsWithRanges, stripRanges } from '../lib/tool-call-repair'
+import { selectRelevantTools } from '../lib/tool-selection'
 import { compactMessages, getModelMaxTokens } from '../lib/context-compaction'
 import { useMemoryStore } from '../stores/memoryStore'
 import { extractMemoriesFromPair } from './useMemory'
@@ -52,7 +52,7 @@ function diagLog(_tag: string, _data: unknown): void {
 // framing for a read-only reviewer and would fight the executor gate. The
 // list-stripping below (REVIEW_MODE_FORBIDDEN_TOOLS) still enforces
 // read-only programmatically even if the model tries a write tool anyway.
-const CODEX_REVIEW_SYSTEM_PROMPT = `You are Codex in REVIEW MODE — a read-only code reviewer inside Locally Uncensored. You DO NOT modify any files, run any commands, or change any state. Your job is to read code with file_read / file_list / file_search / git_diff / git_log and return INLINE COMMENTS only.
+const CODEX_REVIEW_SYSTEM_PROMPT = `You are the Coding Agent in REVIEW MODE — a read-only code reviewer inside Locally Uncensored. You DO NOT modify any files, run any commands, or change any state. Your job is to read code with file_read / file_list / file_search / git_diff / git_log and return INLINE COMMENTS only.
 
 REVIEW MODE CONTRACT (binding):
 - You MAY call: file_read, file_list, file_search, git_status, git_log, git_diff, system_info, process_list, get_current_time, web_fetch, web_search.
@@ -60,7 +60,7 @@ REVIEW MODE CONTRACT (binding):
 - Output format: a markdown report with sections "## Summary", "## Findings (priority order)", "## Suggested follow-ups". For each finding cite the file + line range (path:line or path:start-end).
 - Be direct. No flattery, no boilerplate. If the code is fine, say so in one sentence and stop.`
 
-const CODEX_SYSTEM_PROMPT = `You are Codex, an autonomous coding agent inside Locally Uncensored. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.
+const CODEX_SYSTEM_PROMPT = `You are the Coding Agent, an autonomous coding agent inside Locally Uncensored. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.
 
 AUTONOMY CONTRACT (read carefully):
 - You are expected to COMPLETE multi-step tasks without the user prompting between steps.
@@ -136,18 +136,23 @@ const lurulesReader: RulesReader = {
 }
 
 // Detect when the model emits a re-introduction of itself ("Hello, I am
-// Codex, an autonomous coding agent…") instead of the actual answer.
-// Gemma 4 + smaller models do this after a tool error — they re-spawn
-// the system-prompt echo as if the conversation just started. The user
-// asked to silence these: drop the content, do not render it, do not
-// persist it to the assistant message, and let the loop retry.
+// the Coding Agent, an autonomous coding agent…") instead of the actual
+// answer. Gemma 4 + smaller models do this after a tool error — they
+// re-spawn the system-prompt echo as if the conversation just started.
+// The user asked to silence these: drop the content, do not render it, do
+// not persist it to the assistant message, and let the loop retry.
+//
+// The self-name is "the Coding Agent" (see CODEX_SYSTEM_PROMPT), so the
+// guard matches "(the) Coding Agent" — the optional "the" covers both the
+// literal prompt echo ("You are the Coding Agent,") and the dropped-article
+// form small models tend to produce ("I am Coding Agent, an autonomous…").
 function isSystemPromptEcho(content: string): boolean {
   if (!content) return false
   const head = content.trim().slice(0, 240)
   return (
-    /^(hello[!,.]?\s+|hi[!,.]?\s+|hey[!,.]?\s+)?(i['’]?m|i am|you are)\s+codex[,.]?\s+(an?\s+)?(autonomous\s+)?coding\s+agent/i.test(head) ||
-    /^codex:?\s+(an?\s+)?autonomous\s+coding\s+agent/i.test(head) ||
-    /^you are codex,/i.test(head)
+    /^(hello[!,.]?\s+|hi[!,.]?\s+|hey[!,.]?\s+)?(i['’]?m|i am|you are)\s+(the\s+)?coding\s+agent[,.]?\s+(an?\s+)?(autonomous\s+)?coding\s+agent/i.test(head) ||
+    /^(the\s+)?coding\s+agent:?\s+(an?\s+)?autonomous\s+coding\s+agent/i.test(head) ||
+    /^you are (the\s+)?coding\s+agent,/i.test(head)
   )
 }
 
@@ -370,7 +375,7 @@ export function useCodex() {
           id: uuid(),
           phase: 'reflection',
           content:
-            `🏗️ Architect skipped — \`${archModel}\` is a cloud model and "Allow cloud architect" is off. Enable it in Settings → Codex Agent, or pick a local model.`,
+            `🏗️ Architect skipped — \`${archModel}\` is a cloud model and "Allow cloud architect" is off. Enable it in Settings → Coding Agent, or pick a local model.`,
           timestamp: Date.now(),
         })
         useChatStore.getState().updateMessageAgentBlocks(convId, assistantMsg.id, [...blocks])
@@ -457,11 +462,23 @@ export function useCodex() {
       let prevBatchSig: string | null = null
       let sameBatchRepeats = 0
       // Echo guard — small models occasionally re-emit the system prompt
-      // ("Hello, I am Codex, an autonomous coding agent…") after a tool
-      // error. The user asked to silence those silently rather than
+      // ("Hello, I am the Coding Agent, an autonomous coding agent…") after a
+      // tool error. The user asked to silence those silently rather than
       // letting them surface as the assistant's reply. Cap silent
       // retries so we never loop forever.
       let echoRetriesRemaining = 3
+      // Agentic harness for SMALL local models (v2.5.0). qwen2.5-coder:7b and
+      // similar 7B/8B models frequently NARRATE the next step ("I'm about to
+      // read the source file.") or ASK for info they could discover themselves
+      // ("please provide the path to the source file") instead of emitting the
+      // next tool call — which ends the ReAct loop after a single step. Strong
+      // models (Cloud Opus/Sonnet, local 70B — what the uselu reference targets)
+      // don't need this; small LOCAL models (LU's whole point) do. When a turn
+      // produces text with NO tool call and NO genuine completion signal, push
+      // one synthetic "act, don't narrate" nudge and loop again instead of
+      // stopping. Capped so a model that simply refuses to act can't loop
+      // forever (budget + loop-detector are the other backstops).
+      let continueNudgesRemaining = 3
       // Raised from 20 → 50 (v2.3.7): large refactors across 10+ files
       // legitimately need >20 tool calls. Budget still caps via
       // agentMaxToolCalls/agentMaxIterations.
@@ -530,6 +547,16 @@ export function useCodex() {
           const codexTools = settings.codexReviewMode
             ? codexToolsAll.filter((t) => !REVIEW_MODE_FORBIDDEN_TOOLS.has(t.name))
             : codexToolsAll
+          // Keep the tool list LEAN — exactly like the uselu reference. A small
+          // model (qwen2.5-coder:7b) handed the full ~24-tool category set every
+          // turn degrades fast: it lapses into prose narration or dumps raw
+          // tool-call JSON instead of emitting clean native tool_calls, and the
+          // ReAct loop then stops after one step. uselu narrows to a handful of
+          // keyword-relevant tools, which keeps small models on-rails; git/test
+          // operations go through shell_execute (the dedicated git_*/run_tests
+          // tools are intentionally not surfaced by the keyword router). This
+          // line is the single most important parity point with uselu — do NOT
+          // replace it with the full `codexTools` set (that was the regression).
           const relevantDefs = selectRelevantTools(lastUserMsg, codexTools, permissions)
           const tools: ToolDefinition[] = relevantDefs.map(t => ({
             type: 'function' as const,
@@ -557,8 +584,8 @@ export function useCodex() {
             // Echo guard: while a turn is streaming we keep updating the
             // visible message — but if the partial content already
             // matches the system-prompt echo pattern we stop pushing
-            // updates so the "Hello, I am Codex…" line never lands in
-            // the chat. The post-stream echoDetected branch then drops
+            // updates so the "Hello, I am the Coding Agent…" line never
+            // lands in the chat. The post-stream echoDetected branch then drops
             // the buffer entirely and forces a silent retry.
             let turn: { content: string; toolCalls: ToolCall[]; thinking: string }
             const liveContent = (c: string) => {
@@ -716,8 +743,8 @@ export function useCodex() {
         }
 
         // Silent-retry on system-prompt echo — Gemma 4 sometimes
-        // restarts with "Hello, I am Codex, an autonomous coding
-        // agent…" after a tool error. Drop that content entirely
+        // restarts with "Hello, I am the Coding Agent, an autonomous
+        // coding agent…" after a tool error. Drop that content entirely
         // (don't append, don't render) and force the loop to take
         // another swing instead of letting the echo bubble up as
         // the assistant's reply. Cap the silent retries so a model
@@ -759,8 +786,25 @@ export function useCodex() {
           })
         }
 
-        // No tool calls → done
+        // No tool calls in this turn. For a strong model that means "task
+        // done". For a small local model it's usually a PREMATURE stop — it
+        // narrated the next step or asked for info instead of acting. Nudge it
+        // to continue (capped) before giving up, unless the text clearly signals
+        // genuine completion. The completion regex is deliberately CONSERVATIVE
+        // (only strong "is complete / all tests pass / committed" phrases, not
+        // forward-looking "to complete the fix") so we err toward nudging.
         if (toolCalls.length === 0) {
+          const looksComplete = /\b(the (task|fix|change|work) is (now )?complete|task complete|all (the )?tests?(?: now)? pass(ed)?|i (?:have|'ve) (?:committed|fixed and committed)|successfully committed|committed the (?:fix|change|changes)|no (?:further|more) (?:changes|steps|action)s? (?:are )?(?:needed|required)|nothing (?:else|more) to do)\b/i.test(turnContent)
+          if (!looksComplete && continueNudgesRemaining > 0) {
+            continueNudgesRemaining--
+            void diagLog('continue-nudge', { iter: i, remaining: continueNudgesRemaining, turnContentLen: turnContent.length })
+            messages.push({
+              role: 'user',
+              content:
+                'Continue working autonomously until the task is fully done. Do NOT narrate what you are about to do, and do NOT ask me for paths or details you can discover yourself — use file_list / file_search / file_read to find them. Emit the NEXT step as an actual tool call right now. Only stop once everything is finished and verified.',
+            })
+            continue
+          }
           void diagLog('break-no-toolcalls', { iter: i, turnContentLen: turnContent.length, fullContentLen: fullContent.length })
           break
         }
@@ -1075,7 +1119,7 @@ export function useCodex() {
         const parts: string[] = []
         if (e?.code) parts.push(`[${e.code}]`)
         if (typeof e?.statusCode === 'number') parts.push(`HTTP ${e.statusCode}`)
-        parts.push(e?.message || String(err) || 'Codex error')
+        parts.push(e?.message || String(err) || 'Coding Agent error')
         const msg = parts.join(' ')
         // Surface common causes so the user can see WHY it failed instead of
         // a bare "Connection error" — previously we only printed `.message`,

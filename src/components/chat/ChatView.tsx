@@ -25,7 +25,6 @@ import { exportConversation } from '../../lib/chat-export'
 import { PermissionOverrideBar } from './PermissionOverrideBar'
 import { RealtimeCounter } from './RealtimeCounter'
 import { CodexView } from './CodexView'
-import { ClaudeCodeView } from './ClaudeCodeView'
 import { useCodexStore } from '../../stores/codexStore'
 import { useRemoteStore } from '../../stores/remoteStore'
 
@@ -164,8 +163,6 @@ export function ChatView() {
             <div className="flex-1 flex flex-col min-w-0 relative">
               {chatMode === 'codex' ? (
                 <CodexView />
-              ) : chatMode === 'claude-code' ? (
-                <ClaudeCodeView />
               ) : (<>
               {/* Top bar — compact (LU mode) */}
               <div className="flex items-center gap-1.5 px-2 pt-0.5">

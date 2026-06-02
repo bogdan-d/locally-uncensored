@@ -86,8 +86,8 @@ describe('Message interface — field support', () => {
 })
 
 describe('Conversation interface', () => {
-  it('supports all 5 chat modes', () => {
-    const modes: Conversation['mode'][] = ['lu', 'codex', 'openclaw', 'claude-code', 'remote']
+  it('supports all 4 chat modes', () => {
+    const modes: Conversation['mode'][] = ['lu', 'codex', 'openclaw', 'remote']
     for (const mode of modes) {
       const c: Conversation = {
         id: `conv-${mode}`, title: 'Test', messages: [],
@@ -127,11 +127,10 @@ describe('Message type source integrity', () => {
     expect(src).toContain('images?: ImageAttachment[]')
   })
 
-  it('Conversation has mode with all 5 options', () => {
+  it('Conversation has mode with all 4 options', () => {
     expect(src).toContain("'lu'")
     expect(src).toContain("'codex'")
     expect(src).toContain("'openclaw'")
-    expect(src).toContain("'claude-code'")
     expect(src).toContain("'remote'")
   })
 

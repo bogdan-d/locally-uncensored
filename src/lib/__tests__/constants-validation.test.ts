@@ -78,12 +78,6 @@ describe('constants-validation', () => {
     it('has tavilyApiKey as string', () => {
       expect(typeof DEFAULT_SETTINGS.tavilyApiKey).toBe('string')
     })
-
-    it('has Claude Code fields', () => {
-      expect(typeof DEFAULT_SETTINGS.claudeCodeModel).toBe('string')
-      expect(typeof DEFAULT_SETTINGS.claudeCodeAutoApprove).toBe('boolean')
-      expect(typeof DEFAULT_SETTINGS.claudeCodePath).toBe('string')
-    })
   })
 
   // ── BUILT_IN_PERSONAS ────────────────────────────────────────

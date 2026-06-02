@@ -93,11 +93,15 @@ export const useCodexStore = create<CodexState>()(
         }),
     }),
     {
+      // Persist key kept as 'locally-uncensored-codex' for storage
+      // back-compat — renaming it would orphan every existing user's
+      // coding working-directory. Internal id only; user-facing label is
+      // "Coding Agent".
       name: 'locally-uncensored-codex',
       // chatMode is intentionally NOT persisted: newcomers should always land in
       // the Chat tab on startup, not whatever tab they left off in. If a user
-      // wants to stay in Codex or Claude Code, they pick it from the sidebar
-      // each session. workingDirectory still persists so Codex remembers the
+      // wants to stay in the Coding Agent, they pick it from the sidebar
+      // each session. workingDirectory still persists so it remembers the
       // last project path.
       partialize: (state) => ({
         workingDirectory: state.workingDirectory,

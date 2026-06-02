@@ -29,7 +29,7 @@ export function migratePersistedChat(state: any): any {
 interface ChatState {
   conversations: Conversation[]
   activeConversationId: string | null
-  createConversation: (model: string, systemPrompt: string, mode?: 'lu' | 'codex' | 'openclaw' | 'claude-code' | 'remote') => string
+  createConversation: (model: string, systemPrompt: string, mode?: 'lu' | 'codex' | 'openclaw' | 'remote') => string
   deleteConversation: (id: string) => void
   renameConversation: (id: string, title: string) => void
   setActiveConversation: (id: string | null) => void
@@ -58,8 +58,9 @@ export const useChatStore = create<ChatState>()(
         const id = uuid()
         // Auto-number remote chats so users can distinguish sessions in the sidebar
         let title: string
-        if (mode === 'codex') title = 'Codex Chat'
-        else if (mode === 'claude-code') title = 'Claude Code'
+        // 'codex' is the internal back-compat mode id; the user-facing
+        // default title is "Coding Agent".
+        if (mode === 'codex') title = 'Coding Agent'
         else if (mode === 'remote') {
           const state = get()
           const nextNum = state.conversations.filter((c) => c.mode === 'remote').length + 1

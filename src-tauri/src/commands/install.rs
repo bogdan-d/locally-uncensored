@@ -1014,6 +1014,98 @@ pub fn windows_git_install_hint(state: &WindowsGitState) -> Option<String> {
     }
 }
 
+/// Git availability for the Codex coding view (v2.5.0). The coding agent shells
+/// out to `git` for `git_status`/`git_diff`/`git_commit`/`git_log`, so if git
+/// isn't on PATH those tools fail with confusing errors. The Codex view calls
+/// this on open and, when git is missing, shows a minimal "Install Git" banner.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct GitStatus {
+    /// `git --version` ran successfully.
+    pub installed: bool,
+    /// Windows: Git-for-Windows (clone-safe). Other OS: same as `installed`.
+    pub native: bool,
+    /// The raw `git --version` line, when available.
+    pub version: Option<String>,
+    /// User-facing hint when missing / non-native; `None` when all good.
+    pub hint: Option<String>,
+    /// Platform-correct git download page for the install button.
+    pub download_url: String,
+}
+
+/// Run `git --version` (no console window on Windows) and return the trimmed
+/// stdout line, or `None` if git is missing / failed to run.
+fn git_version_string() -> Option<String> {
+    let mut cmd = Command::new("git");
+    cmd.arg("--version");
+    #[cfg(target_os = "windows")]
+    {
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    match cmd.output() {
+        Ok(o) if o.status.success() => {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            (!s.is_empty()).then_some(s)
+        }
+        _ => None,
+    }
+}
+
+/// Platform-correct git download page.
+fn git_download_url() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "https://git-scm.com/download/win"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "https://git-scm.com/download/mac"
+    }
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        "https://git-scm.com/download/linux"
+    }
+}
+
+/// Cross-platform git availability check for the Codex view's install banner.
+#[tauri::command]
+pub fn check_git_installed() -> GitStatus {
+    let download_url = git_download_url().to_string();
+    let version = git_version_string();
+
+    #[cfg(target_os = "windows")]
+    {
+        let state = windows_git_probe();
+        GitStatus {
+            installed: state != WindowsGitState::Missing,
+            native: state == WindowsGitState::Native,
+            version,
+            hint: windows_git_install_hint(&state),
+            download_url,
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let installed = version.is_some();
+        GitStatus {
+            installed,
+            native: installed,
+            version,
+            hint: if installed {
+                None
+            } else {
+                Some(
+                    "Git is not installed or not on PATH. Install it from your \
+                     package manager (e.g. `sudo apt install git`, `brew install \
+                     git`) or https://git-scm.com/downloads, then restart LU so the \
+                     new PATH is picked up."
+                        .to_string(),
+                )
+            },
+            download_url,
+        }
+    }
+}
+
 /// Wait for Ollama HTTP API to respond on the default port (best-effort
 /// shared startup probe used after every platform-specific install path).
 fn wait_for_ollama_ready() -> bool {

@@ -4,7 +4,7 @@
  * After each conversation turn, optionally asks the LLM to analyze the exchange
  * and extract information worth remembering across conversations.
  *
- * Categories (Claude Code-inspired):
+ * Categories:
  * - user:      User preferences, role, knowledge level
  * - feedback:  Corrections and confirmations ("don't do X", "yes, keep doing Y")
  * - project:   Ongoing work context, goals, decisions

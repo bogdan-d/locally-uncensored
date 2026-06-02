@@ -147,7 +147,7 @@ export function AgentWorkspaceDialog({
             <WorkspaceOption
               icon={<Folder size={16} className="text-amber-500" />}
               title={picking ? 'Opening picker…' : 'Pick a folder…'}
-              body="Choose a real directory. The agent edits files in there directly — like Codex."
+              body="Choose a real directory. The agent edits files in there directly — like the Coding Agent."
               onClick={handlePick}
               disabled={picking}
             />

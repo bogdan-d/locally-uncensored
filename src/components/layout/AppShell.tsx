@@ -39,7 +39,7 @@ export function AppShell() {
   // ── Store backup/restore: survive NSIS updates that wipe WebView2 data ──
   const STORE_KEYS = [
     'chat-conversations', 'chat-settings', 'chat-models', 'lu-providers',
-    'create-store', 'locally-uncensored-codex', 'locally-uncensored-claude-code',
+    'create-store', 'locally-uncensored-codex',
     'locally-uncensored-permissions', 'locally-uncensored-mcp-servers',
     'locally-uncensored-agent-mode', 'locally-uncensored-memory',
     'locally-uncensored-agent-workflows', 'locally-uncensored-agent',
@@ -417,7 +417,7 @@ export function AppShell() {
             if (!convId) {
               const title = (chat_title && chat_title.trim())
                 ? `${chat_title}  ${tagged}`
-                : `Mobile Codex  ${tagged}`
+                : `Mobile Coding Agent  ${tagged}`
               const activeModel = useModelStore.getState().activeModel || model || ''
               convId = chat.createConversation(activeModel, '', 'codex')
               chat.renameConversation(convId, title)

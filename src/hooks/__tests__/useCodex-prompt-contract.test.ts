@@ -53,8 +53,8 @@ describe('Desktop CODEX_SYSTEM_PROMPT (useCodex.ts)', () => {
     expect(src).toContain('Chain tool calls')
   })
 
-  it('defines the model as Codex', () => {
-    expect(src).toContain('You are Codex')
+  it('defines the model as the Coding Agent', () => {
+    expect(src).toContain('You are the Coding Agent')
   })
 })
 

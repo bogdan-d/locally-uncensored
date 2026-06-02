@@ -8,7 +8,6 @@
  * - isAgentCompatible (tool calling support)
  * - isThinkingCompatible (native think parameter)
  * - isPlainTextPlanner (Gemma 3/4 bypass logic)
- * - isClaudeCodeCompatible
  * - getToolCallingStrategy (native vs hermes_xml)
  * - getRecommendedAgentModels
  * - Abliterated model handling
@@ -21,7 +20,6 @@ import {
   hasNativeToolCalling,
   isThinkingCompatible,
   isPlainTextPlanner,
-  isClaudeCodeCompatible,
   getToolCallingStrategy,
   getRecommendedAgentModels,
 } from '../model-compatibility'
@@ -123,22 +121,6 @@ describe('isPlainTextPlanner', () => {
 
   it('returns false for null', () => {
     expect(isPlainTextPlanner(null)).toBe(false)
-  })
-})
-
-// ── Claude Code Compatibility ───────────────────────────────────────────
-
-describe('isClaudeCodeCompatible', () => {
-  it('returns true for Claude-Code-capable models', () => {
-    expect(isClaudeCodeCompatible('qwen3-coder:30b')).toBe(true)
-    expect(isClaudeCodeCompatible('hermes3:8b')).toBe(true)
-    expect(isClaudeCodeCompatible('gemma4:12b')).toBe(true)
-    expect(isClaudeCodeCompatible('deepseek-v3:latest')).toBe(true)
-  })
-
-  it('returns false for incompatible models', () => {
-    expect(isClaudeCodeCompatible('llama3.1:8b')).toBe(false)
-    expect(isClaudeCodeCompatible('mistral:7b')).toBe(false)
   })
 })
 

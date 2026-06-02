@@ -4,8 +4,8 @@
  * Providers that stream tool-call arguments (OpenAI via
  * choice.delta.tool_calls[].function.arguments, Anthropic via
  * input_json_delta) emit JSON in fragments. To render "args as they
- * stream" in the UI — the same experience Claude Code ships — we need a
- * cheap best-effort parser that takes the accumulated string so far and
+ * stream" in the UI — the same experience leading coding agents ship — we
+ * need a cheap best-effort parser that takes the accumulated string so far and
  * returns a partial object.
  *
  * Strategy:

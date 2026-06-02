@@ -121,6 +121,7 @@ fn main() {
             commands::install::install_custom_node,
             commands::install::install_whisper,
             commands::install::install_whisper_status,
+            commands::install::check_git_installed,
             // Whisper STT
             commands::whisper::whisper_status,
             commands::whisper::transcribe,

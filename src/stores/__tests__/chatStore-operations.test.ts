@@ -2,7 +2,7 @@
  * Smoke tests for chatStore — the central conversation state manager.
  *
  * Tests all critical store operations that underpin Chat, Codex, Agent, and Remote:
- * - createConversation (all modes: lu, codex, claude-code, remote)
+ * - createConversation (all modes: lu, codex, remote)
  * - addMessage / updateMessageContent / updateMessageThinking
  * - insertMessageBefore (Codex continue capability)
  * - deleteConversation / renameConversation
@@ -41,13 +41,8 @@ describe('chatStore — conversation CRUD', () => {
 
   it('creates Codex conversation with correct title', () => {
     const id = useChatStore.getState().createConversation('qwen3-coder:30b', '', 'codex')
-    expect(useChatStore.getState().conversations[0].title).toBe('Codex Chat')
+    expect(useChatStore.getState().conversations[0].title).toBe('Coding Agent')
     expect(useChatStore.getState().conversations[0].mode).toBe('codex')
-  })
-
-  it('creates Claude Code conversation', () => {
-    useChatStore.getState().createConversation('hermes3:8b', '', 'claude-code')
-    expect(useChatStore.getState().conversations[0].title).toBe('Claude Code')
   })
 
   it('auto-numbers remote conversations', () => {
@@ -82,8 +77,8 @@ describe('chatStore — conversation CRUD', () => {
   it('does NOT auto-rename Codex/Remote chats', () => {
     const id = useChatStore.getState().createConversation('gemma4', '', 'codex')
     useChatStore.getState().addMessage(id, msg({ content: 'Build a website' }))
-    // Codex Chat title stays — auto-rename only kicks on title === 'New Chat'
-    expect(useChatStore.getState().conversations[0].title).toBe('Codex Chat')
+    // "Coding Agent" title stays — auto-rename only kicks on title === 'New Chat'
+    expect(useChatStore.getState().conversations[0].title).toBe('Coding Agent')
   })
 })
 

@@ -6,7 +6,7 @@
  * public args shape or polluting the tool JSON schema the model sees.
  *
  * How it flows:
- *   1. useAgentChat / useCodex / useClaudeCode → setActiveChatId(convId)
+ *   1. useAgentChat / useCodex → setActiveChatId(convId)
  *      at the start of their agent loop.
  *   2. Tool executors in `src/api/mcp/builtin-tools.ts` → backendCall
  *      includes `{ chatId: getActiveChatId() }` in the request body.

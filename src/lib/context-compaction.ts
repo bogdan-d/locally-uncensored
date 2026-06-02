@@ -1,7 +1,7 @@
 /**
  * Context Compaction — prevents "Failed to fetch" from context window exhaustion.
  *
- * Strategy (from Claude Code / Claw Code pattern):
+ * Strategy:
  * - Keep the last N messages intact (recent context matters most)
  * - Summarize older messages into compact one-liners
  * - Tool call + result pairs become: "Used tool_name('args') → result_snippet"

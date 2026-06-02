@@ -19,10 +19,6 @@ export const DEFAULT_SETTINGS: Settings = {
   searchProvider: 'auto',
   braveApiKey: '',
   tavilyApiKey: '',
-  // Claude Code
-  claudeCodeModel: '',
-  claudeCodeAutoApprove: false,
-  claudeCodePath: '',
   // Agent budget — bumped in v2.5.0 (uselu live-test 2026-05-25, commit
   // 1af958b2): on a real scaffold-install-fix-verify loop with a 35B
   // local model, 25 iterations / 50 tool calls fired the cap while the

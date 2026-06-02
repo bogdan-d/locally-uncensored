@@ -17,10 +17,6 @@ export interface Settings {
   searchProvider: SearchProvider
   braveApiKey: string
   tavilyApiKey: string
-  // Claude Code
-  claudeCodeModel: string
-  claudeCodeAutoApprove: boolean
-  claudeCodePath: string
   // Agent budget (Phase 10 v2.4.0) — hard caps that halt a runaway agent.
   /** Hard cap on tool calls per user turn. 0 = unlimited (not recommended). */
   agentMaxToolCalls: number
