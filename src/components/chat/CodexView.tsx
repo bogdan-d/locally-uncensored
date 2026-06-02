@@ -12,60 +12,27 @@ import { PluginsDropdown } from './PluginsDropdown'
 import { TypingIndicator } from './TypingIndicator'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { StagedChangesPanel } from './StagedChangesPanel'
-import { User, Code, Brain, Eye, GitBranch, Download, RefreshCw, ChevronRight } from 'lucide-react'
+import { User, Code, Brain, Eye, GitBranch, Download, RefreshCw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
+import { extractToolCallsWithRanges, stripRanges } from '../../lib/tool-call-repair'
 
 function stripChannelTags(text: string): string {
-  return text
+  let t = text
     .replace(/<\|?channel>?\s*thought\s*/gi, '')
     .replace(/<\|?channel\|?>/gi, '')
     .replace(/<channel\|>/gi, '')
-    .trim()
-}
-
-/**
- * Collapsible agent work-log (David 2026-06-02). The coding agent's
- * step-by-step tasks + per-step commentary used to sprawl down the chat — and
- * on weaker local models the same task/answer could repeat several times. Keep
- * it ALWAYS collapsed by default into one small clean row (a preview of the
- * final answer + a step count); click to expand the full task/answer log. The
- * loop itself is curbed in useCodex's nudge guard; this just keeps the
- * transcript tidy regardless of model/provider.
- */
-function CollapsibleSteps({
-  toolCount,
-  preview,
-  children,
-}: {
-  toolCount: number
-  preview: string
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 w-full text-left px-1 py-0.5 rounded text-[0.7rem] select-none hover:bg-gray-100/50 dark:hover:bg-white/[0.03] transition-colors"
-        aria-expanded={open}
-      >
-        <ChevronRight
-          size={11}
-          className={`shrink-0 text-gray-400 transition-transform ${open ? 'rotate-90' : ''}`}
-        />
-        <span className="flex-1 min-w-0 truncate text-gray-700 dark:text-gray-300">
-          {preview || 'Coding steps'}
-        </span>
-        {toolCount > 0 && (
-          <span className="shrink-0 text-[0.6rem] text-gray-400 dark:text-gray-500">
-            {toolCount} {toolCount === 1 ? 'step' : 'steps'}
-          </span>
-        )}
-      </button>
-      {open && <div className="space-y-1 mt-1 pl-1">{children}</div>}
-    </div>
-  )
+  // Display safety net (David 2026-06-02): the user must only ever see real
+  // prose answers + the rendered tool-call BLOCKS — never the raw tool-call
+  // JSON / <tool_call> tags some local models emit as content instead of a real
+  // answer. The engine already strips these in most paths, but this guarantees
+  // a leak can never surface in the chat regardless of upstream.
+  t = t.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').replace(/<\/?tool_call>/gi, '')
+  try {
+    const { ranges } = extractToolCallsWithRanges(t)
+    if (ranges.length) t = stripRanges(t, ranges)
+  } catch { /* ignore — never let a strip error hide the answer */ }
+  return t.trim()
 }
 
 export function CodexView() {
@@ -234,57 +201,49 @@ export function CodexView() {
                           tool_call blocks. */}
                       {msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0
                         ? (() => {
-                            const blocks = msg.agentBlocks!
-                            const toolCount = blocks.filter(
-                              (b) => b.phase === 'tool_call' && b.toolCall,
-                            ).length
-                            const lastAns = [...blocks]
-                              .reverse()
-                              .find((b) => b.phase === 'answer' && b.content.trim())
-                            const preview = lastAns
-                              ? stripChannelTags(lastAns.content).replace(/\s+/g, ' ').slice(0, 90)
-                              : ''
-                            const hasAnswerBlock = blocks.some(
+                            const hasAnswerBlock = msg.agentBlocks!.some(
                               (b) => b.phase === 'answer' && b.content.trim(),
                             )
-                            const inner = hasAnswerBlock ? (
-                              <div className="space-y-1">
-                                {[...blocks]
-                                  .filter(
-                                    (b) =>
-                                      (b.phase === 'tool_call' && b.toolCall) ||
-                                      (b.phase === 'answer' && b.content.trim()),
-                                  )
-                                  .sort((a, b) => a.timestamp - b.timestamp)
-                                  .map((block) => {
-                                    if (block.phase === 'tool_call' && block.toolCall) {
-                                      return <ToolCallBlock key={block.id} toolCall={block.toolCall} />
-                                    }
-                                    if (block.phase === 'answer' && block.content.trim()) {
-                                      return (
-                                        <div key={block.id} className="px-1 py-0.5">
-                                          <div className="text-[0.75rem] leading-relaxed">
-                                            <MarkdownRenderer content={stripChannelTags(block.content)} />
+                            if (hasAnswerBlock) {
+                              return (
+                                <div className="space-y-1">
+                                  {[...msg.agentBlocks!]
+                                    .filter(
+                                      (b) =>
+                                        (b.phase === 'tool_call' && b.toolCall) ||
+                                        (b.phase === 'answer' && b.content.trim()),
+                                    )
+                                    .sort((a, b) => a.timestamp - b.timestamp)
+                                    .map((block) => {
+                                      if (block.phase === 'tool_call' && block.toolCall) {
+                                        return (
+                                          <ToolCallBlock key={block.id} toolCall={block.toolCall} />
+                                        )
+                                      }
+                                      if (block.phase === 'answer' && block.content.trim()) {
+                                        return (
+                                          <div key={block.id} className="px-1 py-0.5">
+                                            <div className="text-[0.75rem] leading-relaxed">
+                                              <MarkdownRenderer
+                                                content={stripChannelTags(block.content)}
+                                              />
+                                            </div>
                                           </div>
-                                        </div>
-                                      )
-                                    }
-                                    return null
-                                  })}
-                              </div>
-                            ) : (
+                                        )
+                                      }
+                                      return null
+                                    })}
+                                </div>
+                              )
+                            }
+                            return (
                               <div className="space-y-0">
-                                {blocks
+                                {msg.agentBlocks!
                                   .filter((b) => b.phase === 'tool_call' && b.toolCall)
                                   .map((block) => (
                                     <ToolCallBlock key={block.id} toolCall={block.toolCall!} />
                                   ))}
                               </div>
-                            )
-                            return (
-                              <CollapsibleSteps toolCount={toolCount} preview={preview}>
-                                {inner}
-                              </CollapsibleSteps>
                             )
                           })()
                         : null}
