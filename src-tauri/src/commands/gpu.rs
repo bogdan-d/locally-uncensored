@@ -202,13 +202,18 @@ fn detect_other_via_wmic() -> Vec<DetectedGpu> {
     };
     let mut gpus = Vec::new();
     let mut idx: u32 = 0;
-    for line in raw.lines().skip(1) {
+    // wmic `/format:csv` emits a LEADING blank line before the header row
+    // ("Node,AdapterRAM,Name"). A bare `.skip(1)` would skip that blank line and
+    // then parse the header itself as a device → a phantom GPU literally named
+    // "Name". Filter empty lines FIRST (same as detect_amd), THEN skip the
+    // header, and defensively drop the header label if the format ever shifts.
+    for line in raw.lines().filter(|l| !l.trim().is_empty()).skip(1) {
         let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
         // Format: Node, AdapterRAM, Name
         if parts.len() < 3 { continue }
         let ram_bytes: Option<u64> = parts[1].parse().ok();
         let name = parts[2].to_string();
-        if name.is_empty() { continue }
+        if name.is_empty() || name.eq_ignore_ascii_case("name") { continue }
         let lname = name.to_lowercase();
         let vendor = if lname.contains("intel") { "intel" }
                      else if lname.contains("amd") || lname.contains("radeon") { "amd" }

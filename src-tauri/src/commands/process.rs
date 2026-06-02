@@ -892,9 +892,30 @@ pub async fn comfyui_status(state: State<'_, AppState>) -> Result<serde_json::Va
         None => false,
     };
 
+    // Reap the spawned child so a crash-on-startup doesn't read as "alive".
+    // We store the Child from start_comfyui in state.comfy_process. If that
+    // process exits early (the classic case: ComfyUI's main.py aborts on a bad
+    // dependency / missing torch / SQLAlchemy<2.0 / "no NVIDIA driver" before it
+    // binds the port), the handle would otherwise linger as Some(_) forever —
+    // making process_alive=true and therefore `starting` (process_alive &&
+    // !running) STICK TRUE INDEFINITELY. The user then stares at an endless
+    // "ComfyUI starting…" with no error. try_wait() detects the early exit so we
+    // clear the handle and report "stopped", letting the UI re-offer "click to
+    // start" + the troubleshoot panel instead of a phantom loading state.
     let process_alive = {
-        let proc = state.comfy_process.lock().unwrap();
-        proc.is_some()
+        let mut proc = state.comfy_process.lock().unwrap();
+        match proc.as_mut() {
+            Some(child) => match child.try_wait() {
+                Ok(Some(status)) => {
+                    error!(exit = ?status, "comfyui process exited early (crash on startup?) — clearing handle");
+                    *proc = None;
+                    false
+                }
+                Ok(None) => true,  // still running; just hasn't bound the port yet
+                Err(_) => true,    // can't determine — assume alive, don't thrash
+            },
+            None => false,
+        }
     };
 
     let path = {
