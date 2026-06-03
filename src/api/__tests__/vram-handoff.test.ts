@@ -81,7 +81,7 @@ vi.mock('../agent-context', () => ({
 // settingsStore is the real module — pure, no services. The orchestrator reads
 // settings.exclusiveVramMode through it; default DEFAULT_SETTINGS = 'auto'.
 
-import { decideUnload, vramHandoffGenerate, pollGone } from '../vram-handoff'
+import { decideUnload, vramHandoffGenerate, pollGone, resolveClip } from '../vram-handoff'
 import { useSettingsStore } from '../../stores/settingsStore'
 
 const GB = 1024 * 1024 * 1024
@@ -163,6 +163,40 @@ describe('decideUnload', () => {
     // 4GB text + 8GB model = 12GB, system 12GB → not strictly greater → fits.
     const r = decideUnload({ textVramBytes: 4 * GB, modelFootprintGB: 8, systemVramGB: 12, mode: 'auto' })
     expect(r.unload).toBe(false)
+  })
+})
+
+// ── resolveClip: video length from seconds/frames/fps (David: "video nur 1s") ──
+
+describe('resolveClip', () => {
+  const SVD = { defFps: 8, defFrames: 25, maxFrames: 25 }
+  const WAN = { defFps: 16, defFrames: 81, maxFrames: 161 }
+
+  it('SVD default (no args) → full 25-frame clip, not a stubby 14 (~3s @ 8fps)', () => {
+    expect(resolveClip({ prompt: 'x' }, SVD)).toEqual({ frames: 25, fps: 8 })
+  })
+
+  it('SVD seconds=2 → 16 frames @ 8fps (fits under the cap)', () => {
+    expect(resolveClip({ prompt: 'x', seconds: 2 }, SVD)).toEqual({ frames: 16, fps: 8 })
+  })
+
+  it('SVD seconds=4 → caps at 25 frames but LOWERS fps so it still lasts ~4s', () => {
+    const r = resolveClip({ prompt: 'x', seconds: 4 }, SVD)
+    expect(r.frames).toBe(25)
+    expect(r.fps).toBe(6) // 25/4 ≈ 6 → 25 frames @ 6fps ≈ 4.2s (duration honored)
+  })
+
+  it('explicit frames is respected (advanced) and clamped to the model cap', () => {
+    expect(resolveClip({ prompt: 'x', frames: 14 }, SVD)).toEqual({ frames: 14, fps: 8 })
+    expect(resolveClip({ prompt: 'x', frames: 999 }, SVD).frames).toBe(25)
+  })
+
+  it('Wan seconds=4 → 64 frames @ 16fps (text-to-video can run longer)', () => {
+    expect(resolveClip({ prompt: 'x', seconds: 4 }, WAN)).toEqual({ frames: 64, fps: 16 })
+  })
+
+  it('Wan default → the model default length', () => {
+    expect(resolveClip({ prompt: 'x' }, WAN)).toEqual({ frames: 81, fps: 16 })
   })
 })
 

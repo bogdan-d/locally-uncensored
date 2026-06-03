@@ -494,6 +494,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
     description:
       'Generate a short video clip from a text prompt via the local ComfyUI pipeline (Wan / Hunyuan / AnimateDiff backend, auto-detected). Blocks up to 10 minutes. '
       + 'USE for "make a video of", "animate", "generate a clip". '
+      + 'For a specific length pass `seconds` (e.g. seconds=4 for a 4-second clip) — prefer this over raw frames. Image-to-video (SVD) effectively tops out around 3-4 seconds; text-to-video can run longer. '
       + 'Pass `inputImage` (a filename from an earlier image_generate result) to animate a still image — image-to-video, which auto-selects an installed I2V model such as SVD; omit it for text-to-video. First installed video model is auto-selected (or pass `model`). '
       + 'Write ONE clear prompt and call this ONCE per turn — video generation is slow and ComfyUI queues parallel calls rather than speeding up. '
       + 'EXPECT A PAUSE: LU will briefly unload the chat model from VRAM to fit the (large) video model, then reload it after — typically a 30-90s swap, longer on a cold ComfyUI start. This prevents out-of-memory errors; your conversation is preserved across the swap.',
@@ -503,7 +504,8 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
         prompt: { type: 'string', description: 'Positive text description of the desired video / motion' },
         negativePrompt: { type: 'string', description: 'Things to avoid (static, blurry, deformed, etc.)' },
         model: { type: 'string', description: 'Optional video model filename to use. Omit to auto-select the first installed video model.' },
-        frames: { type: 'number', description: 'Number of frames to generate (clamped per model defaults; e.g. ~81 for Wan). Omit for the model default.' },
+        seconds: { type: 'number', description: 'Desired clip length in seconds (e.g. 4). PREFER this over frames for "an N second video". Image-to-video (SVD) effectively maxes near 3-4s; text-to-video can be longer.' },
+        frames: { type: 'number', description: 'Advanced: exact frame count (clamped per model; e.g. ~81 for Wan, ~25 for SVD). Prefer `seconds`. Omit for the model default.' },
         fps: { type: 'number', description: 'Frames per second of the output clip (e.g. 16). Omit for the model default.' },
         inputImage: { type: 'string', description: 'Optional. Filename of a previously generated image to animate (image-to-video). Requires an installed I2V model such as SVD. Omit for text-to-video.' },
       },

@@ -356,6 +356,10 @@ export interface VramHandoffArgs {
   // Video-only
   frames?: number
   fps?: number
+  // Desired clip length in seconds. Preferred over raw frames for the agent —
+  // LU converts it to frames/fps per model (honoring the duration even when a
+  // model like SVD caps the frame count).
+  seconds?: number
   [k: string]: unknown
 }
 
@@ -591,8 +595,9 @@ async function generateVideo(
     if (typeof args.inputImage === 'string' && args.inputImage && isI2VModel(model)) {
       const { buildDynamicWorkflow } = await import('./dynamic-workflow')
       const inputImage = await resolveInputImage(args.inputImage)
-      const frames = clampInt(args.frames, 14, 1, 25)
-      const fps = clampInt(args.fps, 8, 1, 30)
+      // SVD-XT caps ~25 frames. Default to the full clip (~3 s @ 8 fps) and honor
+      // a requested `seconds` (lowering playback fps if 25 frames can't reach it).
+      const { frames, fps } = resolveClip(args, { defFps: 8, defFrames: 25, maxFrames: 25 })
       const workflow = await buildDynamicWorkflow(
         {
           prompt,
@@ -621,8 +626,9 @@ async function generateVideo(
     // ── Text-to-video ──────────────────────────────────────────────
     const defaults = MODEL_TYPE_DEFAULTS[type] ?? MODEL_TYPE_DEFAULTS.wan
     const snapped = snapToVideoGrid(defaults.width, defaults.height)
-    const frames = clampInt(args.frames, defaults.frames, 1, 256)
-    const fps = clampInt(args.fps, defaults.fps, 1, 60)
+    // Text-to-video (Wan/Hunyuan/AnimateDiff) can run longer than SVD — honor a
+    // requested `seconds` up to a generous cap; default to the model's own length.
+    const { frames, fps } = resolveClip(args, { defFps: defaults.fps, defFrames: defaults.frames, maxFrames: Math.max(defaults.frames, 161) })
 
     const workflow = await buildTxt2VidWorkflow(
       {
@@ -702,6 +708,39 @@ function clampFloat(v: unknown, fallback: number, min: number, max: number): num
   const n = typeof v === 'number' ? v : Number(v)
   if (!Number.isFinite(n)) return fallback
   return Math.max(min, Math.min(max, n))
+}
+
+/**
+ * Resolve a clip's (frames, fps) from the agent's optional `seconds` / `frames`
+ * / `fps`, capped to a model's frame limit.
+ *
+ * David 2026-06-03: chat videos came out ~1 s because the I2V default was a
+ * stubby 14 frames @ 8 fps. Now:
+ *  - `seconds` is the preferred control → frames = round(seconds * fps).
+ *  - When the requested duration needs more frames than the model can make
+ *    (SVD-XT tops out ~25), we KEEP the max frames and LOWER the playback fps
+ *    so the clip still LASTS ~seconds (honoring the user's "4 second video";
+ *    motion is just a touch slower since SVD can't synthesize more frames).
+ *  - With no `seconds` and no `frames`, default to the model's full frame count
+ *    (e.g. 25 for SVD ≈ ~3 s, not 1.75 s).
+ */
+export function resolveClip(
+  args: VramHandoffArgs,
+  opts: { defFps: number; defFrames: number; maxFrames: number },
+): { frames: number; fps: number } {
+  const fpsBase = clampInt(args.fps, opts.defFps, 1, 60)
+  const wantSeconds = clampFloat(args.seconds, 0, 0, 60) // 0 = not requested
+  let frames: number
+  if (wantSeconds > 0) frames = Math.round(wantSeconds * fpsBase)
+  else if (typeof args.frames === 'number' && Number.isFinite(args.frames)) frames = Math.round(args.frames)
+  else frames = opts.defFrames
+  frames = Math.max(1, Math.min(opts.maxFrames, frames))
+  let fps = fpsBase
+  // Duration won't fit at fpsBase (frame cap hit) → slow playback to honor it.
+  if (wantSeconds > 0 && frames / fpsBase < wantSeconds - 0.25) {
+    fps = Math.max(4, Math.min(60, Math.round(frames / wantSeconds)))
+  }
+  return { frames, fps }
 }
 
 /**
