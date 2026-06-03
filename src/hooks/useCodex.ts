@@ -415,7 +415,12 @@ export function useCodex() {
       try {
         const repoMap = await fetchRepoMap({
           workingDirectory: workDir,
-          query: instruction,
+          // Do NOT pass the raw instruction as `query`: the Rust side filters
+          // file paths with a whole-string case-insensitive substring match, so
+          // any realistic multi-word instruction ("add a dark mode toggle …")
+          // is never a substring of a path → the map silently empties and the
+          // whole feature no-ops. Omitting query returns the global PageRank
+          // top-N — the intended Aider-style repo map for context.
           limit: settings.codexRepoMapLimit ?? 20,
           signal: abort.signal,
         })
@@ -954,9 +959,18 @@ export function useCodex() {
           const path = String(args.path ?? '')
           if (!path) return 'file_write: missing path'
           const newContent = String(args.content ?? '')
+          // Resolve against the run's workspace NOW (at stage time). Apply
+          // happens later, after this turn's finally clears the active
+          // chat/workspace context, so a relative path would otherwise route to
+          // agent-workspace/default/ instead of the real project folder. The
+          // bridge uses an absolute path as-is. (v2.5.0 audit fix.)
+          const isAbs = /^([a-zA-Z]:[\\/]|[\\/]|\\\\)/.test(path)
+          const resolvedPath = isAbs || !workDir || workDir === '.'
+            ? path
+            : `${workDir.replace(/[\\/]+$/, '')}${workDir.includes('\\') ? '\\' : '/'}${path.replace(/^[\\/]+/, '')}`
           let oldContent = ''
           try {
-            const r = await backendCall<{ content?: string }>('file_read', { path })
+            const r = await backendCall<{ content?: string }>('file_read', { path: resolvedPath })
             oldContent = r?.content ?? ''
           } catch {
             // New file — leave oldContent empty so the diff renders an
@@ -965,6 +979,7 @@ export function useCodex() {
           const diff = computeUnifiedDiff(path, oldContent, newContent)
           useStagedChangesStore.getState().stage(convId!, {
             path,
+            resolvedPath,
             oldContent,
             newContent,
             diff,

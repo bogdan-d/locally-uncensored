@@ -181,6 +181,17 @@ async fn shell_task_start_impl(args: &Value) -> CmdResult {
         .spawn()
         .map_err(|e| internal(format!("spawn {}: {}", program, e)))?;
 
+    // Orphan-safety: tie the child to a kill-on-close Job Object so a true app
+    // Quit (tray Quit / parent death) tears these long-running background tasks
+    // down too — matching how Ollama/ComfyUI are handled. shutdown_subprocesses
+    // (state.rs) only knows the AppState-held PIDs, never this static REGISTRY,
+    // so without this a `shell_execute_background` task (e.g. a long build) would
+    // be orphaned on Windows after Quit. (v2.5.0 audit fix.)
+    #[cfg(target_os = "windows")]
+    if let Some(pid) = child.id() {
+        crate::commands::process::assign_pid_to_kill_on_close_job(pid);
+    }
+
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();

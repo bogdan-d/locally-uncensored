@@ -43,7 +43,10 @@ export function StagedChangesPanel({ chatId }: Props) {
     setApplying((prev) => new Set(prev).add(change.id))
     try {
       await toolRegistry.execute('file_write', {
-        path: change.path,
+        // Use the absolute path captured at stage time: by apply time the run's
+        // active chat/workspace context is cleared, so a relative path would
+        // land in agent-workspace/default/ instead of the project folder. (audit fix)
+        path: change.resolvedPath || change.path,
         content: change.newContent,
       })
       remove(chatId, change.id)

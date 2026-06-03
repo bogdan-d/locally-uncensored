@@ -18,9 +18,19 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// automatically terminates all processes in the job — no Drop needed.
 #[cfg(target_os = "windows")]
 fn assign_to_kill_on_close_job(child: &std::process::Child) {
+    assign_pid_to_kill_on_close_job(child.id());
+}
+
+/// PID-based variant of [`assign_to_kill_on_close_job`]. Usable from spawn paths
+/// that don't own a `std::process::Child` — notably `tokio::process::Child`
+/// (whose `id()` is `Option<u32>`) in the background-task runner (bg_tasks.rs).
+/// Same KILL_ON_JOB_CLOSE semantics; a pid of 0 is ignored.
+#[cfg(target_os = "windows")]
+pub(crate) fn assign_pid_to_kill_on_close_job(pid: u32) {
     use windows_sys::Win32::System::JobObjects::*;
     use windows_sys::Win32::Foundation::*;
 
+    if pid == 0 { return; }
     unsafe {
         let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
         if job.is_null() { return; }
@@ -35,8 +45,6 @@ fn assign_to_kill_on_close_job(child: &std::process::Child) {
             std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
         );
 
-        // Open process handle from PID
-        let pid = child.id();
         let handle = windows_sys::Win32::System::Threading::OpenProcess(
             windows_sys::Win32::System::Threading::PROCESS_SET_QUOTA
             | windows_sys::Win32::System::Threading::PROCESS_TERMINATE,

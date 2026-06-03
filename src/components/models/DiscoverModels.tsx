@@ -20,6 +20,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { getProviderIdFromModel } from '../../api/providers'
+import { matchesLmStudioInstalled, type InstalledModelLike } from '../../lib/lmstudio-match'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
@@ -324,24 +325,12 @@ export function DiscoverModels({ category }: Props) {
     // because LM Studio surfaces them by file basename in the openai-compat
     // listing rather than by an Ollama-style hf.co tag. Match by filename
     // (case-insensitive, with/without trailing `.gguf`).
-    if (model.filename) {
-      const wantBase = model.filename.toLowerCase().replace(/\.gguf$/, '')
-      const installedLmStudio = installedModels.filter(m => {
-        if (m.provider !== 'openai') return false
-        const pname = (m.providerName || '').toLowerCase()
-        return pname.includes('lm studio') || pname.includes('lmstudio')
-      })
-      for (const m of installedLmStudio) {
-        const candidates = [m.model, m.name]
-          .filter(Boolean)
-          .map(s => String(s).toLowerCase())
-        for (const c of candidates) {
-          const cBase = c.replace(/\.gguf$/, '')
-          if (cBase === wantBase || cBase.endsWith(`/${wantBase}`) || cBase.endsWith(`\\${wantBase}`)) {
-            return true
-          }
-        }
-      }
+    // Match against LM Studio's installed models too (not just Ollama tags).
+    // The matcher (lib/lmstudio-match.ts, unit-tested) handles both the older
+    // full-basename id form AND LM Studio's modern quant-less publisher/short
+    // key (e.g. "qwen/qwen2.5-vl-7b" vs "Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf").
+    if (model.filename && matchesLmStudioInstalled(model.filename, installedModels as unknown as InstalledModelLike[])) {
+      return true
     }
 
     return false

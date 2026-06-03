@@ -326,9 +326,13 @@ export function ModelSelector() {
    * (the user might have multiple LM Studio models loaded already).
    */
   const toggleLmStudioLoad = async (model: AIModel) => {
-    const id = ('lmsKey' in model && typeof (model as any).lmsKey === 'string'
-      ? (model as any).lmsKey
-      : model.name) as string
+    // Use lmsIdOf so LU's `openai::` routing prefix is stripped. Re-deriving the
+    // id inline (as this did) passed "openai::<key>" to `lms load`, which
+    // matches no model → silent failure; and the loaded-set / spinner checks
+    // below compare against the BARE lmsIdOf, so they never matched the prefixed
+    // id either (no spinner, green state never reflected reality). The same
+    // prefix strip is already applied to handleSelectModel + rowId.
+    const id = lmsIdOf(model)
     if (!id || togglingLms) return
     setTogglingLms(id)
     try {

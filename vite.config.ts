@@ -60,6 +60,13 @@ function stripConsolePlugin(): Plugin {
       if (id.includes('\0')) return null // virtual module
       if (id.includes('node_modules')) return null
       const clean = id.split('?')[0]
+      // The structured logger (src/lib/logger.ts) is the ONE sanctioned console
+      // sink: in production it serialises every event to a single-line JSON
+      // object on stdout via `console.log`. That call is a brace-less
+      // `else console.log(line)` which this plugin would neutralise to `void 0`,
+      // silencing every log.info/log.debug in prod and defeating the logger's
+      // whole purpose. Leave the logger module untouched, like node_modules.
+      if (/[\\/]lib[\\/]logger\.[cm]?[jt]sx?$/.test(clean)) return null
       if (!STRIPPABLE.test(clean)) return null
       if (!code.includes('console.')) return null
 

@@ -4,8 +4,17 @@ import { v4 as uuid } from 'uuid'
 export interface StagedChange {
   /** Stable id assigned at stage-time so the UI can key + remove safely. */
   id: string
-  /** Path the model called `file_write` with — unresolved; the bridge resolves on apply. */
+  /** Path the model called `file_write` with (as the model wrote it — may be relative). */
   path: string
+  /**
+   * Absolute path resolved against the run's workspace AT STAGE TIME. Apply
+   * happens after the run ends, when useCodex's finally has cleared the active
+   * chat/workspace context — so a relative `path` would route to
+   * agent-workspace/default/ instead of the project folder the agent wrote into.
+   * Writing this captured absolute path makes the approved diff land exactly
+   * where it should. Falls back to `path` (already absolute / no workspace set).
+   */
+  resolvedPath?: string
   /** Full file content before the write — empty string when the target didn't exist. */
   oldContent: string
   /** Full file content the model wants to write. */
