@@ -1,9 +1,12 @@
 import { usePermissionStore } from '../../stores/permissionStore'
 import { useChatStore } from '../../stores/chatStore'
 import type { ToolCategory } from '../../api/mcp/types'
-import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, GitBranch, Lock } from 'lucide-react'
+import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, Film, GitBranch, Lock } from 'lucide-react'
 
-const LOCKED: Set<ToolCategory> = new Set(['image'])
+// Image + Video generation are LIVE (chat agent → ComfyUI, gemma4 vision loop),
+// so neither is locked anymore — both are user-toggleable on/off like every
+// other category. (Kept the LOCKED mechanism for any future "coming soon" tool.)
+const LOCKED: Set<ToolCategory> = new Set([])
 
 const CATEGORIES: { key: ToolCategory; icon: typeof Globe; label: string }[] = [
   { key: 'web', icon: Globe, label: 'Web' },
@@ -12,6 +15,7 @@ const CATEGORIES: { key: ToolCategory; icon: typeof Globe; label: string }[] = [
   { key: 'terminal', icon: Terminal, label: 'Shell' },
   { key: 'desktop', icon: Monitor, label: 'Screenshot' },
   { key: 'image', icon: Image, label: 'Image' },
+  { key: 'video', icon: Film, label: 'Video' },
   { key: 'workflow', icon: GitBranch, label: 'Workflows' },
 ]
 

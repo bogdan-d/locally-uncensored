@@ -509,7 +509,7 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       },
       required: ['prompt'],
     },
-    category: 'image',
+    category: 'video',
     source: 'builtin',
   },
 

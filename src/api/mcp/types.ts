@@ -13,6 +13,7 @@ export const DEFAULT_PERMISSIONS: PermissionMap = {
   web: 'auto',
   system: 'auto',
   image: 'confirm',
+  video: 'confirm',
   workflow: 'confirm',
 }
 
