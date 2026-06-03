@@ -958,8 +958,11 @@ async function executeVideoGenerate(args: Record<string, any>): Promise<string> 
   // won't co-exist, runs buildTxt2VidWorkflow, then reloads the text model.
   // Same inline-render contract as image_generate (the URL may end .webp/.mp4 —
   // ToolCallBlock renders a <video> for those).
-  const prompt = args.prompt || args.description || ''
-  if (!prompt) return 'Error: No prompt provided for video generation.'
+  // No prompt guard here: image-to-video can animate a still WITHOUT a text
+  // prompt, and small models routinely omit it (gemma4 live). runHandoff
+  // defaults a gentle-motion prompt for video, normalizes a snake_case
+  // input_image alias, and falls back to the last generated image — so the
+  // "animate the image you just made" chain works even with a sloppy call.
   const { vramHandoffGenerate } = await import('../vram-handoff')
   return vramHandoffGenerate('video', args)
 }
