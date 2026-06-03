@@ -509,7 +509,10 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
         fps: { type: 'number', description: 'Frames per second of the output clip (e.g. 16). Omit for the model default.' },
         inputImage: { type: 'string', description: 'Optional. Filename of a previously generated image to animate (image-to-video). Requires an installed I2V model such as SVD. Omit for text-to-video.' },
       },
-      required: ['prompt'],
+      // prompt intentionally NOT required: image-to-video can animate a still
+      // without an explicit text prompt, and small models sometimes omit it —
+      // LU defaults a gentle-motion prompt rather than rejecting the call.
+      required: [],
     },
     category: 'video',
     source: 'builtin',

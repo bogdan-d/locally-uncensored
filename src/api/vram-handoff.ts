@@ -343,6 +343,13 @@ function sleep(ms: number): Promise<void> {
 // reload-in-finally of call #1 can never overlap the generate of call #2.
 let _inFlight: Promise<unknown> = Promise.resolve()
 
+// Last image LU actually produced this session. Small models routinely pass a
+// hallucinated filename (e.g. "locally_saved_image.png") to a follow-up
+// video_generate; when the given name can't be resolved we fall back to this so
+// the "animate the image you just made" chain still works. Set after each
+// successful image generation.
+let _lastImageFilename: string | null = null
+
 // ── Public orchestrator ───────────────────────────────────────────
 
 export interface VramHandoffArgs {
@@ -383,8 +390,21 @@ export async function vramHandoffGenerate(kind: 'image' | 'video', args: VramHan
 }
 
 async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promise<string> {
-  const prompt = String(args.prompt ?? args.description ?? '').trim()
-  if (!prompt) return `Error: No prompt provided for ${kind} generation.`
+  // Robustness for small local models (gemma4:e4b live): they frequently emit a
+  // snake_case `input_image` alias and sometimes omit `prompt` on a video call.
+  // Normalize the alias so the I2V path still finds the source image.
+  if (args.inputImage == null) {
+    const alt = (args as Record<string, unknown>).input_image ?? (args as Record<string, unknown>).image
+    if (typeof alt === 'string' && alt) args.inputImage = alt
+  }
+  let prompt = String(args.prompt ?? args.description ?? '').trim()
+  if (!prompt) {
+    // A video call (esp. image-to-video / SVD) can animate without an explicit
+    // prompt — default a gentle motion rather than hard-failing on "prompt
+    // required" (which made gemma give up mid-chain). Images still need a prompt.
+    if (kind === 'video') prompt = 'gentle, subtle natural motion'
+    else return `Error: No prompt provided for ${kind} generation.`
+  }
 
   emitHandoff('deciding', { kind })
 
@@ -571,7 +591,12 @@ async function generateImage(prompt: string, model: string, args: VramHandoffArg
     log.info('vram_handoff.image.submit', { model, i2i: !!inputImage })
     const promptId = await submitWorkflow(workflow)
     log.info('vram_handoff.image.submitted', { promptId })
-    return await pollAndExtract(promptId, prompt, label('image'), getImageTimeoutMs())
+    const result = await pollAndExtract(promptId, prompt, label('image'), getImageTimeoutMs())
+    // Remember the produced filename so a follow-up "animate it" video call can
+    // fall back to it when the model passes a wrong/hallucinated inputImage.
+    const fn = result.match(/generated:\s*([^\s(]+\.(?:png|jpe?g|webp))/i)
+    if (fn) _lastImageFilename = fn[1]
+    return result
   } catch (err) {
     // Surface ComfyUI's message verbatim — an OOM must NOT be masked.
     return `${label('image')} generation failed: ${err instanceof Error ? err.message : String(err)}`
@@ -594,7 +619,19 @@ async function generateVideo(
     // it inside 12 GB; SVD bundles its own CLIP-vision + VAE in the checkpoint.
     if (typeof args.inputImage === 'string' && args.inputImage && isI2VModel(model)) {
       const { buildDynamicWorkflow } = await import('./dynamic-workflow')
-      const inputImage = await resolveInputImage(args.inputImage)
+      // Resolve the source still; if the model gave a wrong/hallucinated name,
+      // fall back to the last image LU actually produced this session.
+      let inputImage: string
+      try {
+        inputImage = await resolveInputImage(args.inputImage)
+      } catch (e) {
+        if (_lastImageFilename) {
+          log.warn('vram_handoff.i2v_input_fallback', { bad: String(args.inputImage), fallback: _lastImageFilename })
+          inputImage = await resolveInputImage(_lastImageFilename)
+        } else {
+          throw e
+        }
+      }
       // SVD-XT caps ~25 frames. Default to the full clip (~3 s @ 8 fps) and honor
       // a requested `seconds` (lowering playback fps if 25 frames can't reach it).
       const { frames, fps } = resolveClip(args, { defFps: 8, defFrames: 25, maxFrames: 25 })
