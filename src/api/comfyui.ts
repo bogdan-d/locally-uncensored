@@ -1,6 +1,25 @@
 import { comfyuiUrl, localFetch } from "./backend"
 import { log } from "../lib/logger"
 
+// ─── Control-plane fetch timeouts ───
+//
+// These ComfyUI endpoints enqueue / list / poll / free and MUST answer in well
+// under a few seconds on localhost: ComfyUI serves them on its asyncio event
+// loop while the actual generation runs on a SEPARATE worker thread, so HTTP
+// stays responsive even mid-render. A generation's real compute time is observed
+// by repeatedly polling /history (each poll quick), NOT by any single long-lived
+// fetch. Without an explicit cap every call below inherits the Rust proxy's
+// 300 s default — and ONE wedged control call (e.g. /object_info right after a
+// ComfyUI restart, or a /prompt POST that never returns) froze the whole image-
+// MCP VRAM hand-off for minutes with the text model left unloaded (chat-agent
+// hang, 2026-06-03). Bounding each call converts that infinite stall into a fast,
+// clean error so the hand-off's `finally` can always free VRAM + reload the model.
+const COMFY_LIST_TIMEOUT_MS = 15_000    // /object_info/<Node> single-node listings
+const COMFY_SUBMIT_TIMEOUT_MS = 30_000  // POST /prompt — validates + enqueues, returns prompt_id only
+const COMFY_POLL_TIMEOUT_MS = 15_000    // GET /history/<id> per status poll
+const COMFY_STATS_TIMEOUT_MS = 10_000   // /system_stats, /api/refresh, /interrupt
+const COMFY_FREE_TIMEOUT_MS = 20_000    // POST /free — VRAM release
+
 // ─── Types ───
 
 export interface GenerateParams {
@@ -320,7 +339,7 @@ export async function checkComfyConnection(): Promise<boolean> {
 export async function refreshComfyModels(maxAttempts = 3): Promise<boolean> {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const res = await localFetch(comfyuiUrl('/api/refresh'), { method: 'POST' })
+      const res = await localFetch(comfyuiUrl('/api/refresh'), { method: 'POST', timeoutMs: COMFY_STATS_TIMEOUT_MS })
       if (res.ok) return true
     } catch { /* network blip — retry */ }
     if (attempt < maxAttempts - 1) {
@@ -337,7 +356,7 @@ let cachedVRAM: number | null = null
 export async function getSystemVRAM(): Promise<number | null> {
   if (cachedVRAM !== null) return cachedVRAM
   try {
-    const res = await localFetch(comfyuiUrl('/system_stats'))
+    const res = await localFetch(comfyuiUrl('/system_stats'), { timeoutMs: COMFY_STATS_TIMEOUT_MS })
     if (!res.ok) return null
     const data = await res.json()
     // ComfyUI returns top-level devices[].vram_total in bytes
@@ -354,7 +373,7 @@ export async function getSystemVRAM(): Promise<number | null> {
 // Check if a specific node exists in ComfyUI (lightweight, single node check)
 async function nodeExists(nodeName: string): Promise<boolean> {
   try {
-    const res = await localFetch(comfyuiUrl(`/object_info/${nodeName}`))
+    const res = await localFetch(comfyuiUrl(`/object_info/${nodeName}`), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
     if (!res.ok) return false
     const data = await res.json()
     return !!(data && data[nodeName])
@@ -364,14 +383,14 @@ async function nodeExists(nodeName: string): Promise<boolean> {
 }
 
 export async function getCheckpoints(): Promise<string[]> {
-  const res = await localFetch(comfyuiUrl('/object_info/CheckpointLoaderSimple'))
+  const res = await localFetch(comfyuiUrl('/object_info/CheckpointLoaderSimple'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
   if (!res.ok) throw new Error(`ComfyUI /object_info/CheckpointLoaderSimple failed (HTTP ${res.status})`)
   const data = await res.json()
   return data?.CheckpointLoaderSimple?.input?.required?.ckpt_name?.[0] ?? []
 }
 
 export async function getDiffusionModels(): Promise<string[]> {
-  const res = await localFetch(comfyuiUrl('/object_info/UNETLoader'))
+  const res = await localFetch(comfyuiUrl('/object_info/UNETLoader'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
   if (!res.ok) throw new Error(`ComfyUI /object_info/UNETLoader failed (HTTP ${res.status})`)
   const data = await res.json()
   return data?.UNETLoader?.input?.required?.unet_name?.[0] ?? []
@@ -379,7 +398,7 @@ export async function getDiffusionModels(): Promise<string[]> {
 
 export async function getVAEModels(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/VAELoader'))
+    const res = await localFetch(comfyuiUrl('/object_info/VAELoader'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
     if (!res.ok) return []
     const data = await res.json()
     return data?.VAELoader?.input?.required?.vae_name?.[0] ?? []
@@ -391,7 +410,7 @@ export async function getVAEModels(): Promise<string[]> {
 
 export async function getCLIPModels(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/CLIPLoader'))
+    const res = await localFetch(comfyuiUrl('/object_info/CLIPLoader'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
     if (!res.ok) return []
     const data = await res.json()
     return data?.CLIPLoader?.input?.required?.clip_name?.[0] ?? []
@@ -409,7 +428,7 @@ export async function getCLIPModels(): Promise<string[]> {
  */
 export async function getLoraModels(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/LoraLoader'))
+    const res = await localFetch(comfyuiUrl('/object_info/LoraLoader'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
     if (!res.ok) return []
     const data = await res.json()
     return data?.LoraLoader?.input?.required?.lora_name?.[0] ?? []
@@ -421,7 +440,7 @@ export async function getLoraModels(): Promise<string[]> {
 
 export async function getSamplers(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/KSampler'))
+    const res = await localFetch(comfyuiUrl('/object_info/KSampler'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
     if (!res.ok) throw new Error('Failed')
     const data = await res.json()
     return data?.KSampler?.input?.required?.sampler_name?.[0] ?? []
@@ -432,7 +451,7 @@ export async function getSamplers(): Promise<string[]> {
 
 export async function getSchedulers(): Promise<string[]> {
   try {
-    const res = await localFetch(comfyuiUrl('/object_info/KSampler'))
+    const res = await localFetch(comfyuiUrl('/object_info/KSampler'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
     if (!res.ok) throw new Error('Failed')
     const data = await res.json()
     return data?.KSampler?.input?.required?.scheduler?.[0] ?? []
@@ -789,6 +808,10 @@ export async function submitWorkflow(workflow: Record<string, any>, clientId?: s
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+    // /prompt only validates + enqueues and returns the prompt_id immediately —
+    // it does NOT block on the render. Cap it so a wedged submit can't strand the
+    // VRAM hand-off (text model stays unloaded) for the 5-min proxy default.
+    timeoutMs: COMFY_SUBMIT_TIMEOUT_MS,
   })
   if (!res.ok) {
     const rawText = await res.text().catch(() => '')
@@ -817,7 +840,7 @@ export async function submitWorkflow(workflow: Record<string, any>, clientId?: s
 
 export async function cancelGeneration(): Promise<void> {
   try {
-    await localFetch(comfyuiUrl('/interrupt'), { method: 'POST' })
+    await localFetch(comfyuiUrl('/interrupt'), { method: 'POST', timeoutMs: COMFY_STATS_TIMEOUT_MS })
   } catch { /* best effort */ }
 }
 
@@ -827,6 +850,9 @@ export async function freeMemory(): Promise<void> {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ unload_models: true, free_memory: true }),
+      // Bounded: this runs in the hand-off's `finally` right before reloading the
+      // text model. A wedged /free must not delay that reload by 5 min.
+      timeoutMs: COMFY_FREE_TIMEOUT_MS,
     })
   } catch { /* best effort */ }
 }
@@ -837,7 +863,7 @@ export async function getHistory(promptId: string): Promise<any> {
     // reason as submitWorkflow above. Without this, a user-run ComfyUI
     // Portable would accept the /prompt POST but the polling /history GETs
     // would silently 0-out and the UI hangs in "generating…" forever.
-    const res = await localFetch(comfyuiUrl(`/history/${promptId}`))
+    const res = await localFetch(comfyuiUrl(`/history/${promptId}`), { timeoutMs: COMFY_POLL_TIMEOUT_MS })
     if (!res.ok) return null
     const data = await res.json()
     return data[promptId] ?? null

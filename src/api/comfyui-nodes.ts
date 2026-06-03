@@ -49,7 +49,14 @@ export async function getAllNodeInfo(forceRefresh = false): Promise<Record<strin
     return nodeInfoCache
   }
 
-  const res = await localFetch(comfyuiUrl('/object_info'))
+  // Bound this fetch. /object_info is the heaviest control-plane call (the full
+  // node catalogue) and is the FIRST thing buildDynamicWorkflow hits. Without an
+  // explicit cap it inherits the Rust proxy's 300 s default — and a single wedged
+  // /object_info right after a ComfyUI (re)start froze the whole image-MCP VRAM
+  // hand-off for minutes with the text model left unloaded (chat-agent hang,
+  // 2026-06-03). 30 s is far beyond a healthy localhost response; on timeout we
+  // throw a clean error so the hand-off's finally can free VRAM + reload the model.
+  const res = await localFetch(comfyuiUrl('/object_info'), { timeoutMs: 30_000 })
   if (!res.ok) throw new Error(`Failed to fetch node info: ${res.status}`)
   const data = await res.json()
 

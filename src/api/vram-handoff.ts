@@ -149,7 +149,9 @@ interface ResidentModel {
 
 async function getResidentModels(): Promise<ResidentModel[]> {
   try {
-    const res = await localFetch(ollamaUrl('/ps'))
+    // Short cap: /api/ps is a quick status read. Bounding it keeps the DECIDE
+    // phase from inheriting the proxy's 5-min default if Ollama is wedged.
+    const res = await localFetch(ollamaUrl('/ps'), { timeoutMs: 8_000 })
     if (!res.ok) return []
     const data = await res.json()
     return (data.models || []).map((m: any) => ({
@@ -558,7 +560,13 @@ async function generateImage(prompt: string, model: string, args: VramHandoffArg
       },
       classifyModel(model),
     )
+    // Phase markers (chat-agent hang 2026-06-03): make it obvious in the log
+    // whether a stall is in the workflow build (/object_info) or the submit
+    // (/prompt). Both are now timeout-bounded, so neither can strand the
+    // hand-off with the text model unloaded — these logs just pinpoint where.
+    log.info('vram_handoff.image.submit', { model, i2i: !!inputImage })
     const promptId = await submitWorkflow(workflow)
+    log.info('vram_handoff.image.submitted', { promptId })
     return await pollAndExtract(promptId, prompt, label('image'), getImageTimeoutMs())
   } catch (err) {
     // Surface ComfyUI's message verbatim — an OOM must NOT be masked.
@@ -604,7 +612,9 @@ async function generateVideo(
         },
         type,
       )
+      log.info('vram_handoff.video.submit', { model, i2v: true })
       const promptId = await submitWorkflow(workflow)
+      log.info('vram_handoff.video.submitted', { promptId })
       return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
     }
 
@@ -632,7 +642,9 @@ async function generateVideo(
       },
       backend,
     )
+    log.info('vram_handoff.video.submit', { model, i2v: false, backend })
     const promptId = await submitWorkflow(workflow)
+    log.info('vram_handoff.video.submitted', { promptId })
     return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
   } catch (err) {
     return `${label('video')} generation failed: ${err instanceof Error ? err.message : String(err)}`
