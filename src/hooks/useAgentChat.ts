@@ -22,7 +22,7 @@ import { getToolPermission, executeAgentTool, AGENT_TOOL_DEFS } from '../api/too
 import { getToolCallingStrategy, type ToolCallingStrategy } from '../lib/model-compatibility'
 import { log } from '../lib/logger'
 import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
-import { parseLooseToolCalls, stripMatchedCalls } from '../lib/loose-tool-parse'
+import { parseLooseToolCalls, stripMatchedCalls, canonicalToolName } from '../lib/loose-tool-parse'
 import { buildVisionFeedback } from '../api/vision-feedback'
 import { compactMessages, getModelMaxTokens } from '../lib/context-compaction'
 import { useMemoryStore } from '../stores/memoryStore'
@@ -670,6 +670,18 @@ export function useAgentChat() {
         // preserved as a `reflection` block so it renders above the tool
         // calls in chronological order. Only the final-turn content (no
         // tool_calls) becomes the message body.
+        const knownToolNames = toolRegistry.getAll().map((t) => t.name)
+
+        // Canonicalize near-miss tool names (David 2026-06-03): gemma4 emitted a
+        // NATIVE call to `video_generation` (not `video_generate`) → "Unknown
+        // tool" → it gave up. Map such close misses to the registered name.
+        if (toolCalls.length > 0) {
+          toolCalls = toolCalls.map((tc) => ({
+            ...tc,
+            function: { ...tc.function, name: canonicalToolName(tc.function.name, knownToolNames) },
+          }))
+        }
+
         // Loose tool-call fallback (David 2026-06-03): weak local models often
         // WRITE the call into their answer text instead of using the structured
         // tool_calls channel — gemma4:e4b answers in prose; qwen2.5-coder:14b
@@ -678,8 +690,7 @@ export function useAgentChat() {
         // channel produced nothing, lift any recognizable call out of the
         // content (known tool names only) and strip it from the visible prose.
         if (toolCalls.length === 0 && turnContent.trim()) {
-          const knownNames = toolRegistry.getAll().map((t) => t.name)
-          const loose = parseLooseToolCalls(turnContent, knownNames)
+          const loose = parseLooseToolCalls(turnContent, knownToolNames)
           if (loose.calls.length > 0) {
             toolCalls = loose.calls.map((c) => ({ function: { name: c.name, arguments: c.arguments } }))
             turnContent = stripMatchedCalls(turnContent, loose.matched)

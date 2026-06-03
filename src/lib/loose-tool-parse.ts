@@ -159,6 +159,40 @@ export function parseLooseToolCalls(text: string, known: string[]): LooseParseRe
   return { calls, matched }
 }
 
+// Common near-miss tool names small models emit instead of the registered ones
+// (gemma4 live: called `video_generation` → "Unknown tool" → gave up). Maps to
+// the canonical builtin names. Only applied when the alias target is actually a
+// known/registered tool, so this never invents capabilities.
+const TOOL_NAME_ALIASES: Record<string, string> = {
+  image_generation: 'image_generate', generate_image: 'image_generate', imagegen: 'image_generate',
+  create_image: 'image_generate', make_image: 'image_generate', draw_image: 'image_generate', text_to_image: 'image_generate',
+  video_generation: 'video_generate', generate_video: 'video_generate', videogen: 'video_generate',
+  create_video: 'video_generate', make_video: 'video_generate', animate: 'video_generate', animate_image: 'video_generate',
+  text_to_video: 'video_generate', image_to_video: 'video_generate',
+  web: 'web_search', search: 'web_search', fetch: 'web_fetch', read_file: 'file_read', write_file: 'file_write',
+  list_files: 'file_list', search_files: 'file_search', run_shell: 'shell_execute', run_code: 'code_execute',
+}
+
+/**
+ * Map a model-emitted tool name to a registered one. Tries exact, lowercase,
+ * an explicit alias table, then a punctuation-insensitive equality. Returns the
+ * original name unchanged when no confident match exists (so genuinely unknown
+ * tools still error rather than being silently rerouted).
+ */
+export function canonicalToolName(name: string, known: string[]): string {
+  if (!name) return name
+  if (known.includes(name)) return name
+  const lc = name.toLowerCase()
+  if (known.includes(lc)) return lc
+  const alias = TOOL_NAME_ALIASES[lc]
+  if (alias && known.includes(alias)) return alias
+  // Punctuation/casing-insensitive equality (videoGenerate, video-generate…).
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const target = norm(name)
+  for (const k of known) if (norm(k) === target) return k
+  return name
+}
+
 /** Remove the matched call snippets from a prose answer (best-effort). */
 export function stripMatchedCalls(text: string, matched: string[]): string {
   let out = text

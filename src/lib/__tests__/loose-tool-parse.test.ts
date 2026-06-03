@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseLooseToolCalls, stripMatchedCalls } from '../loose-tool-parse'
+import { parseLooseToolCalls, stripMatchedCalls, canonicalToolName } from '../loose-tool-parse'
 
 const KNOWN = ['image_generate', 'video_generate', 'web_search', 'file_write']
 
@@ -86,6 +86,37 @@ describe('parseLooseToolCalls — safety (no false positives)', () => {
     const txt = 'image_generate(prompt="z") and also {"name":"image_generate","arguments":{"prompt":"z"}}'
     const r = parseLooseToolCalls(txt, KNOWN)
     expect(r.calls.length).toBe(1)
+  })
+})
+
+describe('canonicalToolName — map near-miss tool names', () => {
+  const KN = ['image_generate', 'video_generate', 'web_search', 'web_fetch', 'file_read']
+
+  it('maps the exact miss gemma4 emitted live (video_generation → video_generate)', () => {
+    expect(canonicalToolName('video_generation', KN)).toBe('video_generate')
+  })
+
+  it('maps common generate_* / *_generation aliases', () => {
+    expect(canonicalToolName('image_generation', KN)).toBe('image_generate')
+    expect(canonicalToolName('generate_video', KN)).toBe('video_generate')
+    expect(canonicalToolName('generate_image', KN)).toBe('image_generate')
+  })
+
+  it('is punctuation/casing-insensitive (video-generate, VideoGenerate)', () => {
+    expect(canonicalToolName('video-generate', KN)).toBe('video_generate')
+    expect(canonicalToolName('VideoGenerate', KN)).toBe('video_generate')
+  })
+
+  it('passes exact names through unchanged', () => {
+    expect(canonicalToolName('image_generate', KN)).toBe('image_generate')
+  })
+
+  it('leaves a genuinely unknown tool unchanged (still errors downstream)', () => {
+    expect(canonicalToolName('teleport', KN)).toBe('teleport')
+  })
+
+  it('never maps an alias to a tool that is not registered', () => {
+    expect(canonicalToolName('video_generation', ['image_generate'])).toBe('video_generation')
   })
 })
 

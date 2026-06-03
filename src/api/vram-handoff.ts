@@ -397,6 +397,13 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
     const alt = (args as Record<string, unknown>).input_image ?? (args as Record<string, unknown>).image
     if (typeof alt === 'string' && alt) args.inputImage = alt
   }
+  // Duration alias: models say duration / length / durationSeconds for `seconds`
+  // (gemma4 live passed {"duration": 4}). Normalize so resolveClip honors it.
+  if (args.seconds == null) {
+    const d = (args as Record<string, unknown>).duration ?? (args as Record<string, unknown>).length ?? (args as Record<string, unknown>).durationSeconds
+    const n = typeof d === 'number' ? d : Number(d)
+    if (Number.isFinite(n) && n > 0) args.seconds = n
+  }
   let prompt = String(args.prompt ?? args.description ?? '').trim()
   if (!prompt) {
     // A video call (esp. image-to-video / SVD) can animate without an explicit
