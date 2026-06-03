@@ -365,8 +365,26 @@ describe('vramHandoffGenerate — video path', () => {
     detectVideoBackend.mockResolvedValue('none')
 
     const out = await vramHandoffGenerate('video', { prompt: 'a wave' })
-    expect(out).toMatch(/no video model installed/i)
+    expect(out).toMatch(/no text-to-video model installed/i)
     expect(unloadModel).not.toHaveBeenCalled()
+  })
+
+  it('text-to-video does NOT pick an I2V-only model (SVD) → would mis-load as UNet', async () => {
+    // Scenario 3c live: gemma omitted inputImage; T2V must skip the SVD
+    // checkpoint and use the real T2V model, else ComfyUI rejects the workflow.
+    getActiveAgentModel.mockReturnValue({ name: 'gpt-4o', providerId: 'openai', remote: false })
+    getVideoModels.mockResolvedValue([
+      { name: 'svd_xt_1_1.safetensors', type: 'svd', source: 'checkpoint' },
+      { name: 'wan2.1_t2v.safetensors', type: 'wan', source: 'diffusion_model' },
+    ])
+    detectVideoBackend.mockResolvedValue('wan')
+    buildTxt2VidWorkflow.mockResolvedValue({ '9': { class_type: 'VHS_VideoCombine' } })
+    submitWorkflow.mockResolvedValue('vpid-2')
+    getHistory.mockResolvedValue({ status: { completed: true }, outputs: { '9': { gifs: [{ filename: 'c.mp4', subfolder: '', type: 'output' }] } } })
+
+    await vramHandoffGenerate('video', { prompt: 'a wave' })
+    // The model handed to buildTxt2VidWorkflow must be the Wan one, never SVD.
+    expect(buildTxt2VidWorkflow.mock.calls[0][0].model).toBe('wan2.1_t2v.safetensors')
   })
 
   it('builds a video workflow via buildTxt2VidWorkflow and returns the URL', async () => {

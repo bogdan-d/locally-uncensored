@@ -440,11 +440,16 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
         targetModel = typeof args.model === 'string' && args.model ? args.model : i2vModels[0].name
         videoBackend = backend
       } else {
-        if (models.length === 0 || backend === 'none') {
-          emitHandoff('error', { kind, detail: 'no video model installed' })
-          return 'Error: No video model installed in ComfyUI (need a Wan/Hunyuan model or AnimateDiff nodes). Download one from the Create tab and try again.'
+        // Text-to-video must NOT pick an image-to-video-only checkpoint (SVD /
+        // FramePack) — those load via ImageOnlyCheckpointLoader, so feeding one
+        // into a Wan/UNet T2V workflow yields ComfyUI "UNETLoader: value not in
+        // list" (gemma4 live, scenario 3c). Prefer a real T2V model.
+        const t2vModels = models.filter((m) => !isI2VModel(m.name))
+        if (t2vModels.length === 0 || backend === 'none') {
+          emitHandoff('error', { kind, detail: 'no text-to-video model installed' })
+          return 'Error: No text-to-video model installed (an SVD model is image-to-video only). Download a Wan/Hunyuan model from the Create tab — or generate an image first and animate it (image-to-video).'
         }
-        targetModel = typeof args.model === 'string' && args.model ? args.model : models[0].name
+        targetModel = typeof args.model === 'string' && args.model ? args.model : t2vModels[0].name
         videoBackend = backend
       }
     }
