@@ -919,6 +919,13 @@ export async function fetchComfyImageBase64(url: string): Promise<string> {
 }
 
 // ─── Validate params ───
+//
+// LEGACY static bounds (steps 1-200 / frames 1-256). The chat-agent path
+// (vram-handoff → buildDynamicWorkflow) now validates against REAL per-model
+// limits via getModelCapabilities() in comfyui-nodes.ts and rejects-and-reports
+// over-limit requests (decision 2). These hard bounds remain only for the legacy
+// static workflow builders below (buildSDXLImgWorkflow / buildFluxImgWorkflow /
+// buildWanVideoWorkflow); new validation must use getModelCapabilities.
 
 function validateParams(params: GenerateParams) {
   if (!params.prompt.trim()) throw new Error('Prompt is empty')

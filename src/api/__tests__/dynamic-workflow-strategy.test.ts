@@ -263,3 +263,19 @@ describe('dynamic-workflow — determineStrategy', () => {
     })
   })
 })
+
+// ── FramePack length wiring (source verification) ────────────────────────
+// buildDynamicWorkflow needs a live ComfyUI connection, so we verify the
+// frame→duration wiring at the source level (same pattern as ernie-image).
+// David 2026-06-04: FramePack ignored the requested length because the sampler
+// read a non-existent `params.numFrames` (VideoParams only has `frames`).
+describe('FramePack length wiring (source verification)', () => {
+  it('total_second_length is driven by params.frames, not the dead params.numFrames', () => {
+    const { readFileSync } = require('fs')
+    const { resolve } = require('path')
+    const src = readFileSync(resolve(__dirname, '../dynamic-workflow.ts'), 'utf8')
+    expect(src).toContain('total_second_length: (params.frames || 49) / (params.fps || 16)')
+    // The dead field must be gone — otherwise FramePack silently pins to 49 frames.
+    expect(src).not.toContain('params.numFrames')
+  })
+})

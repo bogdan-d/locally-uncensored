@@ -65,6 +65,7 @@ import {
   MODEL_TYPE_DEFAULTS,
   type VideoBackend,
 } from './comfyui'
+import type { ModelCapabilities } from './comfyui-nodes'
 import { getActiveAgentModel } from './agent-context'
 import { log } from '../lib/logger'
 
@@ -219,6 +220,13 @@ export interface DecideUnloadResult {
 }
 
 const BYTES_PER_GB = 1024 * 1024 * 1024
+
+// Fallback FramePack frame ceiling. FramePack is duration-driven (total_second_length),
+// so /object_info exposes no per-model frame max — getModelCapabilities() returns this
+// same 600 for framepack, and generateVideo passes it as resolveClip's maxFrames fallback
+// when capabilities are unavailable. Guards a typo'd seconds×fps from queuing an
+// hours-long render. ~15 s @ 40 fps / ~37 s @ 16 fps.
+const FRAMEPACK_MAX_FRAMES = 600
 
 /**
  * Pure decision: should we evict the text model before generating?
@@ -423,7 +431,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
       const models = await getImageModels()
       if (models.length === 0) {
         emitHandoff('error', { kind, detail: 'no image model installed' })
-        return 'Error: No image model installed in ComfyUI. Download one from the Create tab (Model Manager) and try again.'
+        return 'Error: No image model installed. Download one from Models → Discover (e.g. "FLUX.1 [schnell] FP8", "Z-Image Turbo", or "Juggernaut XL V9") and try again.'
       }
       targetModel = typeof args.model === 'string' && args.model ? args.model : models[0].name
     } else {
@@ -447,7 +455,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
         const t2vModels = models.filter((m) => !isI2VModel(m.name))
         if (t2vModels.length === 0 || backend === 'none') {
           emitHandoff('error', { kind, detail: 'no text-to-video model installed' })
-          return 'Error: No text-to-video model installed (an SVD model is image-to-video only). Download a Wan/Hunyuan model from the Create tab — or generate an image first and animate it (image-to-video).'
+          return 'Error: No text-to-video model installed. Download one from Models → Discover (e.g. "Wan 2.1 — 1.3B (Lightweight)" for 8-10 GB VRAM or "HunyuanVideo 1.5 T2V FP8" for 12+ GB) — or generate an image first and animate it with an I2V model like "SVD-XT 1.1".'
         }
         targetModel = typeof args.model === 'string' && args.model ? args.model : t2vModels[0].name
         videoBackend = backend
@@ -571,6 +579,18 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
 async function generateImage(prompt: string, model: string, args: VramHandoffArgs): Promise<string> {
   const { buildDynamicWorkflow } = await import('./dynamic-workflow')
   try {
+    // Capability-aware: read this model's REAL limits/enums from ComfyUI and
+    // REJECT (not clamp) any explicit user value beyond them (decision 2).
+    const caps = await fetchCaps(model, 'image')
+    const tun = resolveTunables(args, caps, { steps: 20, cfg: 7, sampler: 'euler', scheduler: 'normal' })
+    if (tun.reject) return `Cannot generate: ${tun.reject}`
+
+    const a = args as Record<string, unknown>
+    const width = clampInt(a.width, 1024, 64, 4096)
+    const height = clampInt(a.height, 1024, 64, 4096)
+    const seed = (typeof a.seed === 'number' && Number.isFinite(a.seed)) ? Math.floor(a.seed) : -1
+    const batchSize = clampInt(a.batchSize ?? a.batch_size, 1, 1, 8)
+
     // Image-to-image: resolve the referenced output image into ComfyUI's input
     // folder, then let buildDynamicWorkflow wire LoadImage → VAEEncode + denoise.
     let inputImage: string | undefined
@@ -584,14 +604,18 @@ async function generateImage(prompt: string, model: string, args: VramHandoffArg
         prompt,
         negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
         model,
-        sampler: 'euler',
-        scheduler: 'normal',
-        steps: 20,
-        cfgScale: 7,
-        width: 1024,
-        height: 1024,
-        seed: -1,
-        batchSize: 1,
+        sampler: tun.sampler,
+        scheduler: tun.scheduler,
+        steps: tun.steps,
+        cfgScale: tun.cfg,
+        width,
+        height,
+        seed,
+        batchSize,
+        ...(typeof a.lora === 'string' && a.lora ? { lora: a.lora as string } : {}),
+        ...(typeof a.loraStrength === 'number' ? { loraStrength: a.loraStrength as number } : {}),
+        ...(typeof a.vae === 'string' && a.vae ? { vae: a.vae as string } : {}),
+        ...(typeof a.clipSkip === 'number' ? { clipSkip: a.clipSkip as number } : {}),
         ...(inputImage ? { inputImage, denoise } : {}),
       },
       classifyModel(model),
@@ -624,6 +648,8 @@ async function generateVideo(
 ): Promise<string> {
   try {
     const type = classifyModel(model)
+    // Capability-aware (decision 2): real per-model limits/enums from ComfyUI.
+    const caps = await fetchCaps(model, 'video')
 
     // ── Image-to-video (SVD / FramePack) ───────────────────────────
     // Resolve the still into ComfyUI's input folder and route through the
@@ -644,21 +670,32 @@ async function generateVideo(
           throw e
         }
       }
-      // SVD-XT caps ~25 frames. Default to the full clip (~3 s @ 8 fps) and honor
-      // a requested `seconds` (lowering playback fps if 25 frames can't reach it).
-      const { frames, fps } = resolveClip(args, { defFps: 8, defFrames: 25, maxFrames: 25 })
+      // SVD-XT genuinely caps ~25 frames. FramePack PACKS long video, so its real
+      // ceiling comes from getModelCapabilities (request-driven — David 2026-06-04:
+      // "FramePacks frame cap anheben durch input von uns"). REJECT (not clamp) an
+      // explicit over-limit request so the user sees the actual max (decision 2).
+      const defFps = type === 'framepack' ? 16 : 8
+      const frameRej = videoFrameReject(model, args, caps)
+      if (frameRej) return frameRej
+      const i2vMax = caps?.frameRange?.max ?? (type === 'framepack' ? FRAMEPACK_MAX_FRAMES : 25)
+      const { frames, fps } = resolveClip(args, { defFps, defFrames: type === 'framepack' ? 49 : 25, maxFrames: i2vMax })
+      const tun = resolveTunables(args, caps, { steps: type === 'framepack' ? 25 : 20, cfg: 3, sampler: 'euler', scheduler: 'normal' })
+      if (tun.reject) return `Cannot generate: ${tun.reject}`
+      const av = args as Record<string, unknown>
+      const snapped = snapToVideoGrid(clampInt(av.width, 768, 64, 2048), clampInt(av.height, 448, 64, 2048))
+      const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
       const workflow = await buildDynamicWorkflow(
         {
           prompt,
           negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
           model,
-          sampler: 'euler',
-          scheduler: 'normal',
-          steps: 20,
-          cfgScale: 3,
-          width: 768,
-          height: 448,
-          seed: -1,
+          sampler: tun.sampler,
+          scheduler: tun.scheduler,
+          steps: tun.steps,
+          cfgScale: tun.cfg,
+          width: snapped.width,
+          height: snapped.height,
+          seed,
           batchSize: 1,
           frames,
           fps,
@@ -674,23 +711,30 @@ async function generateVideo(
 
     // ── Text-to-video ──────────────────────────────────────────────
     const defaults = MODEL_TYPE_DEFAULTS[type] ?? MODEL_TYPE_DEFAULTS.wan
-    const snapped = snapToVideoGrid(defaults.width, defaults.height)
-    // Text-to-video (Wan/Hunyuan/AnimateDiff) can run longer than SVD — honor a
-    // requested `seconds` up to a generous cap; default to the model's own length.
-    const { frames, fps } = resolveClip(args, { defFps: defaults.fps, defFrames: defaults.frames, maxFrames: Math.max(defaults.frames, 161) })
+    // Text-to-video (Wan/Hunyuan/etc.) can run longer than SVD. Real ceiling from
+    // getModelCapabilities; REJECT (not clamp) an explicit over-limit request.
+    const tFrameRej = videoFrameReject(model, args, caps)
+    if (tFrameRej) return tFrameRej
+    const t2vMax = caps?.frameRange?.max ?? Math.max(defaults.frames, 161)
+    const { frames, fps } = resolveClip(args, { defFps: defaults.fps, defFrames: defaults.frames, maxFrames: t2vMax })
+    const tun = resolveTunables(args, caps, { steps: defaults.steps, cfg: defaults.cfg, sampler: defaults.sampler, scheduler: defaults.scheduler })
+    if (tun.reject) return `Cannot generate: ${tun.reject}`
+    const av = args as Record<string, unknown>
+    const snapped = snapToVideoGrid(clampInt(av.width, defaults.width, 64, 2048), clampInt(av.height, defaults.height, 64, 2048))
+    const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
 
     const workflow = await buildTxt2VidWorkflow(
       {
         prompt,
         negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
         model,
-        sampler: defaults.sampler,
-        scheduler: defaults.scheduler,
-        steps: defaults.steps,
-        cfgScale: defaults.cfg,
+        sampler: tun.sampler,
+        scheduler: tun.scheduler,
+        steps: tun.steps,
+        cfgScale: tun.cfg,
         width: snapped.width,
         height: snapped.height,
-        seed: -1,
+        seed,
         batchSize: 1,
         frames,
         fps,
@@ -757,6 +801,104 @@ function clampFloat(v: unknown, fallback: number, min: number, max: number): num
   const n = typeof v === 'number' ? v : Number(v)
   if (!Number.isFinite(n)) return fallback
   return Math.max(min, Math.min(max, n))
+}
+
+// ── Capability validation helpers (v2.5.0 — reject-and-report, decision 2) ──
+//
+// REJECT, don't clamp: when the user EXPLICITLY asks for a value beyond the
+// installed model's real ComfyUI capability, return a clear message with the
+// actual limit so they (or the LLM) can retry lower. Only explicit user values
+// are checked — our own defaults are never rejected. Exported for unit tests.
+
+export function clampOrReject(label: string, val: number | undefined, range: { min: number; max: number } | undefined): string | null {
+  if (val === undefined || range === undefined) return null
+  if (val < range.min) return `${label} ${val} is below this model's minimum ${range.min}. Increase it.`
+  if (val > range.max) return `${label} ${val} exceeds this model's maximum ${range.max} (from its ComfyUI capabilities). Lower it to ≤${range.max}, or install a model that supports a higher ${label}.`
+  return null
+}
+
+export function enumReject(label: string, val: string | undefined, options: string[] | undefined): string | null {
+  if (!val || !options || options.length === 0) return null
+  return options.includes(val) ? null : `${label} "${val}" is not available on this model. Available: ${options.join(', ')}.`
+}
+
+interface Tunables { steps: number; cfg: number; sampler: string; scheduler: string; reject: string | null }
+
+/**
+ * Resolve steps/cfg/sampler/scheduler from args (explicit user value → else the
+ * model/sane default) and reject explicit out-of-range values. Shared by image +
+ * video paths. `reject` is non-null only when the USER asked for something the
+ * model can't do.
+ */
+function resolveTunables(
+  args: VramHandoffArgs,
+  caps: ModelCapabilities | null,
+  defs: { steps: number; cfg: number; sampler: string; scheduler: string },
+): Tunables {
+  const a = args as Record<string, unknown>
+  const steps = clampInt(args.steps, caps?.stepsRange?.default ?? defs.steps, 1, 10000)
+  const cfgRaw = a.cfg ?? a.cfg_scale ?? a.cfgScale
+  const cfg = clampFloat(cfgRaw, caps?.cfgRange?.default ?? defs.cfg, 0, 100)
+  const samplerRaw = typeof a.sampler === 'string' ? a.sampler : (typeof a.sampler_name === 'string' ? a.sampler_name : undefined)
+  const sampler = samplerRaw ?? defs.sampler
+  const scheduler = typeof a.scheduler === 'string' ? a.scheduler : defs.scheduler
+  // Report the user's RAW ask in the reject message, not the internally clamped value.
+  const stepsAsk = a.steps !== undefined ? Number(a.steps) : undefined
+  const cfgAsk = cfgRaw !== undefined ? Number(cfgRaw) : undefined
+  const reject =
+    clampOrReject('steps', stepsAsk, caps?.stepsRange)
+    || clampOrReject('cfg', cfgAsk, caps?.cfgRange)
+    || (caps?.usesKSampler
+      ? (enumReject('sampler', samplerRaw, caps?.availableSamplers)
+        || enumReject('scheduler', typeof a.scheduler === 'string' ? scheduler : undefined, caps?.availableSchedulers))
+      : null)
+  return { steps, cfg, sampler, scheduler, reject }
+}
+
+// resolveClip honors a `seconds` request by lowering playback fps down to a floor
+// of 4, so the longest clip a frame-capped model can actually deliver is
+// maxFrames / 4 seconds.
+const MIN_PLAYBACK_FPS = 4
+
+/**
+ * Reject (decision 2) ONLY when the request genuinely exceeds what the model can
+ * deliver — NOT when resolveClip would still satisfy it by capping frames and
+ * slowing playback (that path is the intended behavior, e.g. SVD seconds=4 →
+ * 25f@6fps≈4.2s). Two cases:
+ *   - explicit `frames` (the exact-count advanced path) → reject if > model max.
+ *   - `seconds` (the duration control) → resolveClip slows fps to honor it, so only
+ *     reject when even the slowest playback (maxFrames / 4 fps) can't reach it.
+ * Exported for unit tests.
+ */
+export function videoFrameReject(model: string, args: VramHandoffArgs, caps: ModelCapabilities | null): string | null {
+  if (!caps) return null
+  // Duration-driven models (FramePack): the real ceiling is seconds (total_second_length).
+  if (typeof caps.maxSeconds === 'number' && typeof args.seconds === 'number' && args.seconds > caps.maxSeconds + 0.5) {
+    return `Cannot generate: ${model} can make at most ${caps.maxSeconds}s of video (you asked for ${args.seconds}s). Shorten it, or install a model that makes longer clips.`
+  }
+  if (!caps.frameRange) return null
+  const max = caps.frameRange.max
+  if (typeof args.frames === 'number' && args.frames > 0 && Math.round(args.frames) > max) {
+    return `Cannot generate: ${model} supports at most ${max} frames (you requested ${Math.round(args.frames)}). Lower the frame count, or install a model that makes longer clips (e.g. FramePack or Wan).`
+  }
+  if (typeof args.seconds === 'number' && args.seconds > 0) {
+    const deliverableMaxSec = max / MIN_PLAYBACK_FPS
+    if (args.seconds > deliverableMaxSec + 0.5) {
+      return `Cannot generate: ${model} can make at most ~${Math.floor(deliverableMaxSec)}s (${max} frames). You asked for ${args.seconds}s. Shorten it, or install a model that makes longer clips (e.g. FramePack or Wan).`
+    }
+  }
+  return null
+}
+
+/** Fetch model capabilities; non-fatal (null → caller proceeds with defaults, no validation). */
+async function fetchCaps(model: string, kind: 'image' | 'video'): Promise<ModelCapabilities | null> {
+  try {
+    const m = await import('./comfyui-nodes')
+    return await m.getModelCapabilities(model)
+  } catch (e) {
+    log.warn(`vram_handoff.${kind}.caps_failed`, { model, err: String(e) })
+    return null
+  }
 }
 
 /**

@@ -474,7 +474,8 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       + 'Pass `inputImage` (a filename from an earlier image_generate result) for image-to-image — restyle / edit an existing image at the given `denoise` strength; omit it for text-to-image. '
       + 'First installed image model is auto-selected (or pass `model`). '
       + 'EXPECT A PAUSE: on a single-GPU machine LU may briefly unload the chat model from VRAM to fit the image model, then reload it after — typically a 30-90s swap (longer on a cold ComfyUI start). This avoids out-of-memory errors; your conversation is fully preserved across the swap. '
-      + 'Rate-limit yourself to 1 call per turn — ComfyUI serializes generations internally so parallel calls will queue, not speed up.',
+      + 'Rate-limit yourself to 1 call per turn — ComfyUI serializes generations internally so parallel calls will queue, not speed up. '
+      + 'Fine-tune with the optional `settings` object (steps, cfg, sampler, scheduler, width/height, seed, lora, vae); set ONLY what the user asked for. A value beyond the installed model\'s real limit is REJECTED with the actual limit so you can retry lower — values are never silently changed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -483,6 +484,25 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
         model: { type: 'string', description: 'Optional image model filename to use. Omit to auto-select the first installed image model.' },
         inputImage: { type: 'string', description: 'Optional. Filename of a previously generated image (from an earlier image_generate result) to use as the base for image-to-image. Omit for text-to-image.' },
         denoise: { type: 'number', description: 'Image-to-image strength 0.05–1.0 (default 0.6). Lower keeps more of the input image, higher follows the prompt more. Only used together with inputImage.' },
+        settings: {
+          type: 'object',
+          description: 'Optional fine-tuning. Set ONLY what the user explicitly asked for; omit the rest (the model\'s own defaults apply). Any value beyond the installed model\'s real limit is rejected with the actual limit. Flat top-level args (above) win over the same key here.',
+          additionalProperties: true,
+          properties: {
+            steps: { type: 'number', description: 'Sampling steps.' },
+            cfg: { type: 'number', description: 'CFG / guidance scale.' },
+            sampler: { type: 'string', description: 'Sampler name — must be one this model supports, else rejected.' },
+            scheduler: { type: 'string', description: 'Scheduler name — must be one this model supports, else rejected.' },
+            seed: { type: 'number', description: 'Seed; omit or -1 for random.' },
+            width: { type: 'number', description: 'Output width in px.' },
+            height: { type: 'number', description: 'Output height in px.' },
+            negativePrompt: { type: 'string', description: 'Things to avoid.' },
+            denoise: { type: 'number', description: 'Image-to-image strength 0.05–1.0 (only with inputImage).' },
+            lora: { type: 'string', description: 'LoRA filename to apply.' },
+            loraStrength: { type: 'number', description: 'LoRA strength (~0–2).' },
+            vae: { type: 'string', description: 'Override VAE filename.' },
+          },
+        },
       },
       required: ['prompt'],
     },
@@ -497,7 +517,8 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
       + 'For a specific length pass `seconds` (e.g. seconds=4 for a 4-second clip) — prefer this over raw frames. Image-to-video (SVD) effectively tops out around 3-4 seconds; text-to-video can run longer. '
       + 'Pass `inputImage` (a filename from an earlier image_generate result) to animate a still image — image-to-video, which auto-selects an installed I2V model such as SVD; omit it for text-to-video. First installed video model is auto-selected (or pass `model`). '
       + 'Write ONE clear prompt and call this ONCE per turn — video generation is slow and ComfyUI queues parallel calls rather than speeding up. '
-      + 'EXPECT A PAUSE: LU will briefly unload the chat model from VRAM to fit the (large) video model, then reload it after — typically a 30-90s swap, longer on a cold ComfyUI start. This prevents out-of-memory errors; your conversation is preserved across the swap.',
+      + 'EXPECT A PAUSE: LU will briefly unload the chat model from VRAM to fit the (large) video model, then reload it after — typically a 30-90s swap, longer on a cold ComfyUI start. This prevents out-of-memory errors; your conversation is preserved across the swap. '
+      + 'Fine-tune with the optional `settings` object (steps, cfg, sampler, scheduler, width/height, seed); set ONLY what the user asked for. A value beyond the installed model\'s real limit (e.g. more frames than the model can make) is REJECTED with the actual limit so you can retry lower — values are never silently changed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -505,9 +526,27 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
         negativePrompt: { type: 'string', description: 'Things to avoid (static, blurry, deformed, etc.)' },
         model: { type: 'string', description: 'Optional video model filename to use. Omit to auto-select the first installed video model.' },
         seconds: { type: 'number', description: 'Desired clip length in seconds (e.g. 4). PREFER this over frames for "an N second video". Image-to-video (SVD) effectively maxes near 3-4s; text-to-video can be longer.' },
-        frames: { type: 'number', description: 'Advanced: exact frame count (clamped per model; e.g. ~81 for Wan, ~25 for SVD). Prefer `seconds`. Omit for the model default.' },
+        frames: { type: 'number', description: 'Advanced: exact frame count (rejected if beyond the model max; e.g. ~81 for Wan, ~25 for SVD). Prefer `seconds`. Omit for the model default.' },
         fps: { type: 'number', description: 'Frames per second of the output clip (e.g. 16). Omit for the model default.' },
         inputImage: { type: 'string', description: 'Optional. Filename of a previously generated image to animate (image-to-video). Requires an installed I2V model such as SVD. Omit for text-to-video.' },
+        settings: {
+          type: 'object',
+          description: 'Optional fine-tuning. Set ONLY what the user explicitly asked for; omit the rest (the model\'s own defaults apply). Any value beyond the installed model\'s real limit is rejected with the actual limit. Flat top-level args (above) win over the same key here.',
+          additionalProperties: true,
+          properties: {
+            seconds: { type: 'number', description: 'Clip length in seconds (preferred length control).' },
+            frames: { type: 'number', description: 'Exact frame count — rejected if beyond the model max.' },
+            fps: { type: 'number', description: 'Frames per second of the output clip.' },
+            steps: { type: 'number', description: 'Sampling steps.' },
+            cfg: { type: 'number', description: 'CFG / guidance scale.' },
+            sampler: { type: 'string', description: 'Sampler name — must be one this model supports (ignored by FramePack, which uses a fixed sampler).' },
+            scheduler: { type: 'string', description: 'Scheduler name — must be one this model supports.' },
+            seed: { type: 'number', description: 'Seed; omit or -1 for random.' },
+            width: { type: 'number', description: 'Output width in px (snapped to the video grid).' },
+            height: { type: 'number', description: 'Output height in px (snapped to the video grid).' },
+            negativePrompt: { type: 'string', description: 'Things to avoid.' },
+          },
+        },
       },
       // prompt intentionally NOT required: image-to-video can animate a still
       // without an explicit text prompt, and small models sometimes omit it —
@@ -947,8 +986,12 @@ async function executeImageGenerate(args: Record<string, any>): Promise<string> 
   // ToolCallBlock renders it inline and useAgentChat feeds it back unchanged.
   const prompt = args.prompt || args.description || ''
   if (!prompt) return 'Error: No prompt provided for image generation.'
+  const settings = (args.settings && typeof args.settings === 'object') ? args.settings : {}
+  const flat: Record<string, any> = {}
+  for (const [k, v] of Object.entries(args)) if (k !== 'settings' && v !== undefined) flat[k] = v
+  const merged: Record<string, any> = { ...settings, ...flat }   // explicit flat args win; undefined never clobbers settings
   const { vramHandoffGenerate } = await import('../vram-handoff')
-  return vramHandoffGenerate('image', args)
+  return vramHandoffGenerate('image', merged)
 }
 
 async function executeVideoGenerate(args: Record<string, any>): Promise<string> {
@@ -963,8 +1006,12 @@ async function executeVideoGenerate(args: Record<string, any>): Promise<string> 
   // defaults a gentle-motion prompt for video, normalizes a snake_case
   // input_image alias, and falls back to the last generated image — so the
   // "animate the image you just made" chain works even with a sloppy call.
+  const settings = (args.settings && typeof args.settings === 'object') ? args.settings : {}
+  const flat: Record<string, any> = {}
+  for (const [k, v] of Object.entries(args)) if (k !== 'settings' && v !== undefined) flat[k] = v
+  const merged: Record<string, any> = { ...settings, ...flat }   // explicit flat args win; undefined never clobbers settings
   const { vramHandoffGenerate } = await import('../vram-handoff')
-  return vramHandoffGenerate('video', args)
+  return vramHandoffGenerate('video', merged)
 }
 
 async function executeGetCurrentTime(_args: Record<string, any>): Promise<string> {

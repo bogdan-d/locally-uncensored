@@ -785,7 +785,11 @@ function buildFramePackWorkflow(params: VideoParams, seed: number, nodes: Catego
       start_latent: [vaeEncodeId, 0], image_embeds: [clipVisionEncodeId, 0],
       steps: params.steps, cfg: params.cfgScale || 1.0,
       guidance_scale: 10.0, shift: 3.0, seed, latent_window_size: 9,
-      total_second_length: (params.numFrames || 49) / (params.fps || 16),
+      // VideoParams carries `frames` (not `numFrames`) — reading the wrong field
+      // pinned every FramePack clip to the 49-frame default and silently ignored
+      // the caller's requested length. FramePack is duration-driven, so the clip
+      // length = frames / fps seconds.
+      total_second_length: (params.frames || 49) / (params.fps || 16),
       gpu_memory_preservation: 6.0, sampler: 'unipc_bh2',
       use_teacache: true, teacache_rel_l1_thresh: 0.15,
     },

@@ -198,6 +198,22 @@ describe('resolveClip', () => {
   it('Wan default → the model default length', () => {
     expect(resolveClip({ prompt: 'x' }, WAN)).toEqual({ frames: 81, fps: 16 })
   })
+
+  // FramePack packs long video, so its I2V branch uses a high ceiling instead of
+  // SVD's 25 (David 2026-06-04: "FramePacks frame cap anheben durch input von uns").
+  const FRAMEPACK = { defFps: 16, defFrames: 49, maxFrames: 600 }
+
+  it('FramePack default → 49 frames @ 16fps (model default)', () => {
+    expect(resolveClip({ prompt: 'x' }, FRAMEPACK)).toEqual({ frames: 49, fps: 16 })
+  })
+
+  it('FramePack honors the request beyond SVD: seconds=7 fps=40 → 280 frames @ 40fps (true 40fps, NOT capped to 25)', () => {
+    expect(resolveClip({ prompt: 'x', seconds: 7, fps: 40 }, FRAMEPACK)).toEqual({ frames: 280, fps: 40 })
+  })
+
+  it('FramePack clamps a runaway request to the 600-frame safety ceiling', () => {
+    expect(resolveClip({ prompt: 'x', seconds: 60, fps: 40 }, FRAMEPACK).frames).toBe(600)
+  })
 })
 
 // ── helpers for the orchestrator tests ────────────────────────────
