@@ -11,8 +11,9 @@ import { RealtimeCounter } from './RealtimeCounter'
 import { PluginsDropdown } from './PluginsDropdown'
 import { TypingIndicator } from './TypingIndicator'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useModelStore } from '../../stores/modelStore'
 import { StagedChangesPanel } from './StagedChangesPanel'
-import { User, Code, Brain, Eye, GitBranch, Download, RefreshCw, ChevronRight, ChevronDown } from 'lucide-react'
+import { User, Code, Brain, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
 import { extractToolCallsWithRanges, stripRanges } from '../../lib/tool-call-repair'
@@ -66,46 +67,11 @@ function stripChannelTags(text: string): string {
   return t.trim()
 }
 
-// A single between-tool answer. The LATEST answer renders expanded; OLDER
-// answers auto-collapse to a one-line preview as soon as a newer answer
-// arrives, yet stay visible + clickable to re-expand (David 2026-06-02 r2:
-// "jede antwort … soll auch zu sehen bleiben, aber einklappen sobald eine
-// neue antwort da ist"). `isLatest` is recomputed every render from the block
-// timestamps, so the previously-latest answer flips to collapsed on its own
-// the moment a new answer block appears — no effect/cleanup needed.
-function CollapsibleAnswer({ content, isLatest }: { content: string; isLatest: boolean }) {
-  const [override, setOverride] = useState<boolean | null>(null)
-  const expanded = override === null ? isLatest : override
-  if (expanded) {
-    return (
-      <div className="px-1 py-0.5">
-        {!isLatest && (
-          <button
-            onClick={() => setOverride(false)}
-            className="flex items-center gap-1 mb-0.5 text-[0.65rem] text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
-            title="Collapse this answer"
-          >
-            <ChevronDown size={10} /> collapse
-          </button>
-        )}
-        <div className="text-[0.75rem] leading-relaxed">
-          <MarkdownRenderer content={content} />
-        </div>
-      </div>
-    )
-  }
-  const preview = content.replace(/\s+/g, ' ').trim()
-  return (
-    <button
-      onClick={() => setOverride(true)}
-      className="group flex items-center gap-1.5 w-full text-left px-1 py-0.5 text-[0.7rem] text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 transition-colors"
-      title="Show this answer"
-    >
-      <ChevronRight size={11} className="shrink-0 opacity-70 group-hover:opacity-100" />
-      <span className="truncate italic">{preview.slice(0, 96)}{preview.length > 96 ? '…' : ''}</span>
-    </button>
-  )
-}
+// Code-Mode renders EVERY between-tool answer as normal, always-visible prose
+// now (David 2026-06-04: "kein Collapse, das soll ganz normal wie eine Antwort
+// angezeigt werden"). The render path below dedupes verbatim repeats so a
+// chatty small model can't stack the same line. (The old CollapsibleAnswer
+// one-line-preview component was removed.)
 
 export function CodexView() {
   const { sendInstruction, stopCodex, isRunning } = useCodex()
@@ -126,6 +92,9 @@ export function CodexView() {
   const thinkingEnabled = useSettingsStore((s) => s.settings.thinkingEnabled)
   const codexReviewMode = useSettingsStore((s) => s.settings.codexReviewMode)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
+  const activeModel = useModelStore((s) => s.activeModel)
+  const createConversation = useChatStore((s) => s.createConversation)
+  const codexWorkingDir = useCodexStore((s) => s.workingDirectory)
 
   // Git availability for the Codex view (v2.5.0). Codex shells out to git for
   // git_status/diff/commit/log; if git is missing those tools fail. Probe on
@@ -144,6 +113,15 @@ export function CodexView() {
   const recheckGit = () => {
     setGitChecking(true)
     checkGitInstalled().then(setGitStatus).catch(() => {}).finally(() => setGitChecking(false))
+  }
+
+  // New coding session (David 2026-06-04: "start neu" must really start new).
+  // Abort any in-flight loop, then create a fresh codex conversation. The
+  // working directory persists in codexStore, so the new session keeps the
+  // folder; a brand-new conversation means a brand-new thread on next send.
+  const startNewSession = () => {
+    stopCodex()
+    if (activeModel) createConversation(activeModel, '', 'codex')
   }
 
   return (
@@ -167,7 +145,29 @@ export function CodexView() {
               <span>Review</span>
             </span>
           )}
+          {/* Working directory indicator — so the user always sees WHERE the
+              agent operates (David 2026-06-04: "ich hab den Ordner angegeben …
+              er ist eigentlich in Dokumenten"). Empty = per-chat sandbox under
+              ~/agent-workspace, which is also where shell output now lands. */}
+          <span
+            className="flex items-center gap-1 text-[0.5rem] text-gray-500 dark:text-gray-500 font-mono truncate max-w-[200px]"
+            title={codexWorkingDir || 'Sandbox: ~/agent-workspace/<chat>'}
+          >
+            <Folder size={9} className="shrink-0 opacity-70" />
+            <span className="truncate">{codexWorkingDir || 'sandbox · ~/agent-workspace'}</span>
+          </span>
           <div className="flex-1" />
+          {/* New coding session — aborts any running loop and starts a fresh
+              chat/thread (keeps the working directory). David 2026-06-04:
+              "start neu" must actually start new. */}
+          <button
+            onClick={startNewSession}
+            title="New coding session (clears the current run, keeps the folder)"
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+          >
+            <RotateCcw size={10} />
+            <span>New</span>
+          </button>
           <TokenCounter />
           <MemoryDebugToggle />
           <PluginsDropdown />
@@ -242,7 +242,10 @@ export function CodexView() {
                     <div className="max-w-[85%] space-y-0.5">
                       {/* Thinking */}
                       {msg.role === 'assistant' && msg.thinking && (
-                        <ThinkingBlock thinking={msg.thinking} />
+                        <ThinkingBlock
+                          thinking={msg.thinking}
+                          streaming={isRunning && msg.id === messages[messages.length - 1]?.id && !cleanContent.trim()}
+                        />
                       )}
                       {/* Reflection blocks (Architect plan, RepoMap
                           context, etc.) — rendered above the tool calls
@@ -290,29 +293,31 @@ export function CodexView() {
                                     (b.phase === 'answer' && stripChannelTags(b.content)),
                                 )
                                 .sort((a, b) => a.timestamp - b.timestamp)
-                              // The newest answer stays expanded; all earlier
-                              // answers auto-collapse (CollapsibleAnswer).
-                              const answerIds = ordered
-                                .filter((b) => b.phase === 'answer')
-                                .map((b) => b.id)
-                              const latestAnswerId = answerIds.length
-                                ? answerIds[answerIds.length - 1]
-                                : null
                               return (
                                 <div className="space-y-1">
-                                  {ordered.map((block) => {
+                                  {ordered.map((block, idx) => {
                                     if (block.phase === 'tool_call' && block.toolCall) {
                                       return <ToolCallBlock key={block.id} toolCall={block.toolCall} />
                                     }
                                     if (block.phase === 'answer') {
                                       const answer = stripChannelTags(block.content)
                                       if (!answer) return null
+                                      // Render EVERY answer normally + always
+                                      // visible (David 2026-06-04: "kein Collapse,
+                                      // ganz normal wie eine Antwort"). Skip only a
+                                      // verbatim repeat of the previous answer so
+                                      // chatty small models don't stack duplicates.
+                                      const prev = ordered
+                                        .slice(0, idx)
+                                        .reverse()
+                                        .find((b) => b.phase === 'answer' && stripChannelTags(b.content))
+                                      if (prev && stripChannelTags(prev.content) === answer) return null
                                       return (
-                                        <CollapsibleAnswer
-                                          key={block.id}
-                                          content={answer}
-                                          isLatest={block.id === latestAnswerId}
-                                        />
+                                        <div key={block.id} className="px-1 py-0.5">
+                                          <div className="text-[0.75rem] leading-relaxed">
+                                            <MarkdownRenderer content={answer} />
+                                          </div>
+                                        </div>
                                       )
                                     }
                                     return null

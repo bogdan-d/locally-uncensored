@@ -467,7 +467,12 @@ export function useAgentChat() {
     const wantsImage = /\b(bild|bilder|foto|image|picture|pic|draw|zeichne|mal(e|en)?|grafik|illustration|render)\b/i.test(userPromptText)
     const wantsVideo = /\b(video|clip|animier\w*|animate|film|gif|bewegt|motion|mp4|webm)\b/i.test(userPromptText)
     const maxImageGen = wantsVideo && !wantsImage ? 0 : 1
-    const maxVideoGen = wantsVideo ? 1 : 0
+    // Video generation is turned OFF in the chat tools (video defaults to
+    // 'blocked' + locked toggle, David 2026-06-04). Respect that here so the
+    // deterministic media-synthesis fallback below never force-creates a video
+    // the user disabled.
+    const videoAllowed = permissions.video !== 'blocked'
+    const maxVideoGen = wantsVideo && videoAllowed ? 1 : 0
     let imageGenDone = 0
     let videoGenDone = 0
     let mediaSteered = false

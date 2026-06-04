@@ -3,10 +3,11 @@ import { useChatStore } from '../../stores/chatStore'
 import type { ToolCategory } from '../../api/mcp/types'
 import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, Film, GitBranch, Lock } from 'lucide-react'
 
-// Image + Video generation are LIVE (chat agent → ComfyUI, gemma4 vision loop),
-// so neither is locked anymore — both are user-toggleable on/off like every
-// other category. (Kept the LOCKED mechanism for any future "coming soon" tool.)
-const LOCKED: Set<ToolCategory> = new Set([])
+// Image generation is LIVE (chat agent → ComfyUI). Video generation is turned
+// OFF for now (David 2026-06-04): it stays in the menu but greyed-out,
+// struck-through and not clickable via the LOCKED set, and `video` defaults to
+// 'blocked' in DEFAULT_PERMISSIONS so the tool is never offered to the model.
+const LOCKED: Set<ToolCategory> = new Set(['video'])
 
 const CATEGORIES: { key: ToolCategory; icon: typeof Globe; label: string }[] = [
   { key: 'web', icon: Globe, label: 'Web' },
@@ -56,7 +57,7 @@ export function PermissionOverrideBar() {
             ) : (
               <Icon size={8} className={isOn ? 'text-green-400' : 'text-gray-600'} />
             )}
-            <span className="flex-1 text-left">{label}</span>
+            <span className={`flex-1 text-left ${isLocked ? 'line-through' : ''}`}>{label}</span>
             {isLocked ? (
               <span className="text-[0.4rem] text-gray-700">soon</span>
             ) : (

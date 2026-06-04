@@ -7,16 +7,39 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+use std::path::{Path, PathBuf};
+
+/// Resolve the per-chat agent workspace (`~/agent-workspace/<chat_id>/`).
+/// Mirrors commands/filesystem.rs::resolve_path so shell output lands in the
+/// SAME folder the file tools write to. Used as the fallback cwd when the
+/// caller doesn't pass one — without it the child process inherits the LU
+/// app's ambient cwd and dumps build output into ~/Documents (David 2026-06-04).
+fn workspace_cwd(chat_id: Option<&str>) -> PathBuf {
+    let id = chat_id.unwrap_or("default");
+    let safe: String = id
+        .chars()
+        .take(64)
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' { c } else { '_' })
+        .collect();
+    let slug = if safe.is_empty() { "default".to_string() } else { safe };
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join("agent-workspace")
+        .join(slug)
+}
+
 #[tauri::command]
+#[allow(non_snake_case)]
 pub async fn shell_execute(
     command: String,
     args: Option<Vec<String>>,
     cwd: Option<String>,
     timeout: Option<u64>,
     shell: Option<String>,
+    chatId: Option<String>,
 ) -> Result<serde_json::Value, String> {
     tokio::task::spawn_blocking(move || {
-        shell_execute_sync(command, args, cwd, timeout, shell)
+        shell_execute_sync(command, args, cwd, timeout, shell, chatId)
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
@@ -28,6 +51,7 @@ fn shell_execute_sync(
     cwd: Option<String>,
     timeout: Option<u64>,
     shell: Option<String>,
+    chat_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let timeout_ms = timeout.unwrap_or(120_000);
     let shell_bin = shell.unwrap_or_else(|| {
@@ -56,12 +80,20 @@ fn shell_execute_sync(
         }
     }
 
-    // Working directory — validate it exists
-    if let Some(ref dir) = cwd {
-        let path = std::path::Path::new(dir);
-        if path.is_dir() {
-            cmd.current_dir(path);
+    // Working directory. Use the explicit cwd when it exists; otherwise fall
+    // back to the per-chat agent workspace (created if missing) so a relative
+    // command never runs in the app's ambient cwd and scatters files into
+    // ~/Documents (David 2026-06-04). Mirrors the file tools' path resolution.
+    let workdir: PathBuf = match cwd.as_ref().map(|d| Path::new(d)) {
+        Some(p) if p.is_dir() => p.to_path_buf(),
+        _ => {
+            let w = workspace_cwd(chat_id.as_deref());
+            let _ = std::fs::create_dir_all(&w);
+            w
         }
+    };
+    if workdir.is_dir() {
+        cmd.current_dir(&workdir);
     }
 
     cmd.stdin(Stdio::null())

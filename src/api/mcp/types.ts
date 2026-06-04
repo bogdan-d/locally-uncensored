@@ -13,7 +13,11 @@ export const DEFAULT_PERMISSIONS: PermissionMap = {
   web: 'auto',
   system: 'auto',
   image: 'confirm',
-  video: 'confirm',
+  // Video generation is turned OFF for now (David 2026-06-04). 'blocked'
+  // removes video_generate from the tool list every model sees (see the
+  // tool-selection / tool-registry filters), so it is never offered. The
+  // chat Tools menu also locks the toggle. Flip back to 'confirm' to re-enable.
+  video: 'blocked',
   workflow: 'confirm',
 }
 

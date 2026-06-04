@@ -572,7 +572,7 @@ async fn handle_agent_tool(
                 }
                 let timeout = body.args.get("timeout").and_then(|v| v.as_u64());
                 let shell = body.args.get("shell").and_then(|v| v.as_str()).map(String::from);
-                crate::commands::shell::shell_execute(command, None, cwd, timeout, shell).await
+                crate::commands::shell::shell_execute(command, None, cwd, timeout, shell, chat_id.clone()).await
             }
         }
         "system_info" => crate::commands::system::system_info(),

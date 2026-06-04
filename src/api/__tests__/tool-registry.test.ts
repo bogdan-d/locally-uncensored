@@ -5,6 +5,22 @@ import {
   getToolByName,
   getToolPermission,
 } from '../tool-registry'
+import { toolRegistry, DEFAULT_PERMISSIONS } from '../mcp'
+
+// Tools whose category is BLOCKED by default are intentionally dropped from
+// getOllamaTools (it passes DEFAULT_PERMISSIONS, which excludes blocked
+// categories). video_generate is OFF by default as of v2.5.0-polish
+// (2026-06-04), so it must not be offered to the model.
+const blockedByDefaultNames = new Set(
+  toolRegistry
+    .getAll()
+    .filter((t) => DEFAULT_PERMISSIONS[t.category] === 'blocked')
+    .map((t) => t.name),
+)
+const offeredDefNames = AGENT_TOOL_DEFS
+  .map((t) => t.name)
+  .filter((n) => !blockedByDefaultNames.has(n))
+  .sort()
 
 // ── AGENT_TOOL_DEFS ─────────────────────────────────────────────
 
@@ -94,9 +110,18 @@ describe('AGENT_TOOL_DEFS', () => {
 // ── getOllamaTools ──────────────────────────────────────────────
 
 describe('getOllamaTools', () => {
-  it('returns same number of tools as AGENT_TOOL_DEFS', () => {
+  it('returns one tool per NON-blocked AGENT_TOOL_DEFS entry', () => {
     const ollamaTools = getOllamaTools()
-    expect(ollamaTools).toHaveLength(AGENT_TOOL_DEFS.length)
+    // getOllamaTools filters out default-blocked categories (video), so it
+    // returns AGENT_TOOL_DEFS minus those.
+    expect(ollamaTools).toHaveLength(AGENT_TOOL_DEFS.length - blockedByDefaultNames.size)
+  })
+
+  it('excludes video_generate (off by default) but keeps image_generate', () => {
+    const names = getOllamaTools().map((t) => t.function.name)
+    expect(blockedByDefaultNames.has('video_generate')).toBe(true)
+    expect(names).not.toContain('video_generate')
+    expect(names).toContain('image_generate')
   })
 
   it('each tool has type "function" at the top level', () => {
@@ -116,11 +141,10 @@ describe('getOllamaTools', () => {
     }
   })
 
-  it('preserves tool names from AGENT_TOOL_DEFS', () => {
+  it('preserves (non-blocked) tool names from AGENT_TOOL_DEFS', () => {
     const ollamaTools = getOllamaTools()
     const ollamaNames = ollamaTools.map((t) => t.function.name).sort()
-    const defNames = AGENT_TOOL_DEFS.map((t) => t.name).sort()
-    expect(ollamaNames).toEqual(defNames)
+    expect(ollamaNames).toEqual(offeredDefNames)
   })
 
   it('does not include permission field (Ollama format excludes it)', () => {

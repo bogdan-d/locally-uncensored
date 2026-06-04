@@ -456,6 +456,17 @@ export function useCodex() {
       agentMaxIterations: settings.agentMaxIterations ?? 200,
     })
 
+    // num_ctx for the coding loop. Code-Mode previously sent NO num_ctx, so
+    // Ollama used its small default (~4k) while compaction trimmed to the
+    // model's max → the history overflowed the real window and weak models
+    // (gemma4 with Think on) returned EMPTY turns, which the loop misread as
+    // "done" and printed a false "Task completed" (David 2026-06-04). Pin a
+    // sane floor (user override wins) and compact to it so both agree.
+    const numCtx =
+      settings.contextWindowOverride && settings.contextWindowOverride > 0
+        ? settings.contextWindowOverride
+        : 8192
+
     try {
       // Agent loop — max 20 iterations (legacy cap) AND AgentBudget cap,
       // whichever is tighter.
@@ -527,10 +538,9 @@ export function useCodex() {
         // 8K-context local models blow past their window after a few tool
         // calls and Ollama starts silently truncating or errors out.
         try {
-          const maxCtx = await getModelMaxTokens(activeModel)
           messages = compactMessages(
             messages as unknown as OllamaChatMessage[],
-            Math.floor(maxCtx * 0.8),
+            Math.floor(numCtx * 0.8),
           ) as unknown as ChatMessage[]
         } catch {
           // Compaction is best-effort; fall through with raw history.
@@ -602,7 +612,7 @@ export function useCodex() {
               void diagLog('streamWithTools-enter', { iter: i, messagesLen: messages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
               turn = await streamWithTools(
                 modelToUse, messages, tools,
-                { temperature: 0.1, thinking: chatOptions.thinking, maxTokens: chatOptions.maxTokens, signal: abort.signal },
+                { temperature: 0.1, thinking: chatOptions.thinking, maxTokens: chatOptions.maxTokens, contextWindow: numCtx, signal: abort.signal },
                 liveContent,
                 (t) => {
                   if (keepThinking) {
@@ -622,7 +632,7 @@ export function useCodex() {
               if (thinkErr?.statusCode === 400 || thinkErr?.message?.includes('does not support thinking')) {
                 turn = await streamWithTools(
                   modelToUse, messages, tools,
-                  { temperature: 0.1, thinking: undefined, maxTokens: chatOptions.maxTokens, signal: abort.signal },
+                  { temperature: 0.1, thinking: undefined, maxTokens: chatOptions.maxTokens, contextWindow: numCtx, signal: abort.signal },
                   liveContent,
                   () => {},
                 )
@@ -871,13 +881,22 @@ export function useCodex() {
 
           // Inject working directory for file/shell tools (skip if workDir is just '.' or empty)
           const hasValidWorkDir = workDir && workDir !== '.' && workDir.length > 2
-          if (toolName === 'shell_execute' && !toolArgs.cwd) {
-            if (hasValidWorkDir) toolArgs.cwd = workDir
-            if (!toolArgs.timeout) toolArgs.timeout = 30000
+          // Working directory + a GENEROUS default timeout for shell/code tools.
+          // When a folder is picked we pass it as cwd; otherwise the Rust side
+          // resolves the per-chat ~/agent-workspace/<slug> (never the app's
+          // ambient cwd, which used to dump build output into ~/Documents).
+          // The timeout must be LONG: building an app (npm install, cargo/gradle
+          // build) routinely runs minutes. The old 30s default + 60s JS hard-cap
+          // killed every real build → "coding agent can't build anything /
+          // always times out" (David 2026-06-04). The model can still pass its
+          // own timeout to go higher/lower.
+          if (toolName === 'shell_execute') {
+            if (!toolArgs.cwd && hasValidWorkDir) toolArgs.cwd = workDir
+            if (!toolArgs.timeout) toolArgs.timeout = 600000
           }
-          if (toolName === 'code_execute' && !toolArgs.cwd) {
-            if (hasValidWorkDir) toolArgs.cwd = workDir
-            if (!toolArgs.timeout) toolArgs.timeout = 30000
+          if (toolName === 'code_execute') {
+            if (!toolArgs.cwd && hasValidWorkDir) toolArgs.cwd = workDir
+            if (!toolArgs.timeout) toolArgs.timeout = 120000
           }
           // Resolve relative file paths against working directory.
           // Absolute-path detection must accept ANY drive letter (C:, D:, E:, …),
@@ -941,13 +960,29 @@ export function useCodex() {
         // 60 s per-call timeout is enforced by wrapping the executor function
         // (keeps the original safety guard — a runaway tool cannot wedge the
         // whole agent turn).
-        const withTimeout = (name: string, args: Record<string, any>) =>
-          Promise.race([
+        const withTimeout = (name: string, args: Record<string, any>) => {
+          // Shell/code/test/git tools enforce their OWN timeout in the Rust
+          // backend (args.timeout). A fixed 60s JS cap here used to preempt
+          // long-but-legitimate builds before the backend's timer fired — the
+          // root of "coding agent can't build anything / always times out"
+          // (David 2026-06-04). For those, set the JS race ceiling just ABOVE
+          // the tool's own timeout so the backend always wins; everything else
+          // keeps the original 60s guard.
+          const longRunning =
+            name === 'shell_execute' || name === 'code_execute' ||
+            name === 'shell_execute_background' || name === 'run_tests' ||
+            name === 'git_commit' || name === 'git_push'
+          const own = Number(args?.timeout)
+          const capMs = longRunning
+            ? (Number.isFinite(own) && own > 0 ? own + 15000 : 615000)
+            : 60000
+          return Promise.race([
             toolRegistry.execute(name, args),
             new Promise<string>((_, reject) =>
-              setTimeout(() => reject(new Error('Tool execution timed out (60s)')), 60000)
+              setTimeout(() => reject(new Error(`Tool execution timed out (${Math.round(capMs / 1000)}s)`)), capMs)
             ),
           ])
+        }
 
         // Multi-File Stage-and-Approve (B10). When the user has codex
         // stage mode on, file_write calls don't hit the disk — they
@@ -1139,9 +1174,21 @@ export function useCodex() {
         if (otherCompleted > 0) parts.push(`${otherCompleted} other operation(s) completed`)
         if (failed.length) parts.push(`${failed.length} operation(s) failed`)
 
-        fullContent = parts.length > 0
-          ? `Task completed: ${parts.join(', ')}.`
-          : 'Task completed.'
+        // Be HONEST about the outcome. The old code printed "Task completed"
+        // even when the model fired a couple of shell commands that errored and
+        // then went silent — the false-success David hit (gemma4: 2x
+        // shell_execute → "Task completed 1" with nothing built, 2026-06-04).
+        // Only claim a clean finish when something actually succeeded AND
+        // nothing failed.
+        if (completed.length === 0) {
+          fullContent = failed.length
+            ? `I couldn't complete the task — ${failed.length} operation(s) failed and nothing succeeded. Check the tool errors above, then refine the instruction or try a stronger model.`
+            : `I stopped without completing the task — the model ended its turn without doing any work. Try rephrasing the instruction, or turn Think off and resend.`
+        } else if (failed.length > 0) {
+          fullContent = `Partially done: ${parts.join(', ')}. Some steps failed — see the errors above; the result may be incomplete.`
+        } else {
+          fullContent = parts.length > 0 ? `Done: ${parts.join(', ')}.` : 'Done.'
+        }
         useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent)
       }
 
@@ -1172,7 +1219,7 @@ export function useCodex() {
         } else if (/does not support tools|tool.*not.*support/i.test(msg)) {
           hint = '\n\nHint: this model does not support native tool calling. Pick a tool-capable model (Qwen 3, Llama 3.1+, Gemma 4) or switch to a model without the coder-only restriction.'
         } else if (/timed out/i.test(msg)) {
-          hint = '\n\nHint: the tool call took longer than 60 s. Try a smaller model or a more targeted prompt.'
+          hint = '\n\nHint: a tool call exceeded its time budget. For long builds, raise the command timeout, split the work, or run it via shell_execute_background.'
         }
         fullContent += `\n\nError: ${msg}${hint}`
         useChatStore.getState().updateMessageContent(convId, assistantMsg.id, fullContent)
