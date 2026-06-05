@@ -642,6 +642,120 @@ export async function searchHuggingFaceModels(query: string): Promise<DiscoverMo
   }
 }
 
+// ─── HuggingFace file-tree resolution (sharded / multi-part GGUF) ───
+//
+// The naive "guess one Q4 filename from the repo name" path (search results +
+// some curated entries) breaks for three real-world layouts the HF API reveals:
+//   1. The quant lives in a subfolder (bartowski ships big quants as
+//      `<base>-<Quant>/<file>.gguf`), not at the repo root.
+//   2. The quant is split into multiple parts (`-00001-of-0000N.gguf`). Every
+//      part must land in ONE folder for llama.cpp / LM Studio to load it as a
+//      single model. `ollama pull` cannot consume split GGUF at all
+//      (ollama/ollama#5245) — direct multi-part download is the only sound path.
+//   3. The guessed single-file name simply doesn't exist (404).
+// Resolving against the real tree fixes all three.
+
+export interface HfTreeEntry { type: string; path: string; size?: number }
+
+export interface HfGgufFile { url: string; filename: string; sizeBytes: number }
+
+export interface HfGgufResolution {
+  sharded: boolean
+  files: HfGgufFile[]
+  totalBytes: number
+  quant?: string
+}
+
+// 5-digit llama.cpp split convention: `<name>-00001-of-00002.gguf`. A few
+// uploaders pad to 4, so accept 4-5.
+const GGUF_SHARD_RE = /-(\d{4,5})-of-(\d{4,5})\.gguf$/i
+// Broad quant token matcher (covers Q2_K, Q3_K_S/M/L, Q4_0/1, Q4_K_S/M/L,
+// Q5_K_*, Q6_K(_L), Q8_0, IQ1..IQ4 variants, F16/BF16/F32). Used only to LABEL
+// and PICK a group — grouping itself never depends on it.
+const GGUF_QUANT_TOKEN = /(IQ\d_[A-Z0-9]+|Q\d_K(?:_[A-Z]+)?|Q\d_[01]|BF16|F16|F32)/i
+
+/**
+ * Pure: given a HuggingFace repo file tree, pick the GGUF file-set to download.
+ * Returns every part of a sharded set (sorted) or the single matching file.
+ * Exported for unit testing without a network round-trip.
+ */
+export function selectGgufFromTree(
+  entries: HfTreeEntry[],
+  repoId: string,
+  preferredQuant?: string,
+): HfGgufResolution | null {
+  const ggufs = entries.filter(e => e.type === 'file' && /\.gguf$/i.test(e.path))
+  if (ggufs.length === 0) return null
+
+  // Group by the path with the shard suffix stripped. Single files keep their
+  // full path (their own group of one); all parts of a split set collapse to
+  // the same key regardless of whether the quant sits in the folder or the leaf.
+  interface Group { key: string; quant?: string; parts: HfTreeEntry[] }
+  const groups = new Map<string, Group>()
+  for (const f of ggufs) {
+    const key = f.path.replace(GGUF_SHARD_RE, '')
+    const leaf = (f.path.split('/').pop() || '').replace(GGUF_SHARD_RE, '.gguf')
+    const quant = (GGUF_QUANT_TOKEN.exec(leaf)?.[1] || GGUF_QUANT_TOKEN.exec(f.path)?.[1])?.toUpperCase()
+    let g = groups.get(key)
+    if (!g) { g = { key, quant, parts: [] }; groups.set(key, g) }
+    g.parts.push(f)
+  }
+
+  const all = [...groups.values()]
+  const wanted = preferredQuant?.toUpperCase()
+  const picked =
+    (wanted ? all.find(g => g.quant === wanted) : undefined) ||
+    (wanted ? all.find(g => g.key.toUpperCase().includes(wanted)) : undefined) ||
+    all.find(g => g.quant === 'Q4_K_M') ||
+    all[0]
+  if (!picked) return null
+
+  const sorted = [...picked.parts].sort((a, b) => {
+    const ai = parseInt(a.path.match(GGUF_SHARD_RE)?.[1] || '0', 10)
+    const bi = parseInt(b.path.match(GGUF_SHARD_RE)?.[1] || '0', 10)
+    return ai - bi
+  })
+  const files: HfGgufFile[] = sorted.map(p => ({
+    url: `https://huggingface.co/${repoId}/resolve/main/${p.path}`,
+    filename: p.path.split('/').pop() as string,
+    sizeBytes: p.size || 0,
+  }))
+  return {
+    sharded: files.length > 1,
+    files,
+    totalBytes: files.reduce((s, f) => s + f.sizeBytes, 0),
+    quant: picked.quant,
+  }
+}
+
+/**
+ * Resolve the real downloadable GGUF file(s) for a HuggingFace repo by querying
+ * its file tree. Returns null if the tree can't be fetched — callers then fall
+ * back to their guessed single-file URL (no regression, just no improvement).
+ */
+export async function resolveHfGgufFiles(
+  repoId: string,
+  preferredQuant?: string,
+): Promise<HfGgufResolution | null> {
+  try {
+    const url = `https://huggingface.co/api/models/${repoId}/tree/main?recursive=true`
+    let json: string
+    const { isTauri, fetchExternal } = await import('./backend')
+    if (isTauri()) {
+      json = await fetchExternal(url)
+    } else {
+      const res = await fetch(url)
+      json = await res.text()
+    }
+    const entries = JSON.parse(json)
+    if (!Array.isArray(entries)) return null
+    return selectGgufFromTree(entries as HfTreeEntry[], repoId, preferredQuant)
+  } catch (err) {
+    log.warn('[discover] HF tree resolve failed', { repoId, err })
+    return null
+  }
+}
+
 /** Detect the model directory for the active local provider */
 export async function detectProviderModelPath(providerName: string): Promise<string | null> {
   try {

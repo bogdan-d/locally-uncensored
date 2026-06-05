@@ -8,8 +8,8 @@ import {
   getUncensoredTextModels, getMainstreamTextModels,
   detectProviderModelPath, startModelDownloadToPath,
   startModelDownload, searchCivitaiModels,
-  installBundleComplete, checkBundlesInstalled,
-  type DiscoverModel, type DownloadProgress, type ModelBundle, type CivitAIModelResult,
+  installBundleComplete, checkBundlesInstalled, resolveHfGgufFiles,
+  type DiscoverModel, type DownloadProgress, type ModelBundle, type CivitAIModelResult, type HfGgufFile,
 } from '../../api/discover'
 import { getSystemVRAM } from '../../api/comfyui'
 import { openExternal } from '../../api/backend'
@@ -21,7 +21,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { getProviderIdFromModel } from '../../api/providers'
 import { matchesLmStudioInstalled, type InstalledModelLike } from '../../lib/lmstudio-match'
-import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
+import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant } from '../../lib/hf-to-provider'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
 import { ProgressBar } from '../ui/ProgressBar'
@@ -529,18 +529,79 @@ export function DiscoverModels({ category }: Props) {
     }
     if (!model.downloadUrl || !model.filename) return
 
-    // HF GGUF: route by active chat model. If neither side has an active
-    // model yet (first-launch with downloads enabled), fall back to the
-    // old enabled-wins logic so we don't deadlock empty-state users.
+    // Resolve the REAL file(s) on HuggingFace before downloading. The curated /
+    // search-derived (url, filename) is only a *guess* — the repo may host the
+    // quant in a subfolder, split it into multiple parts, or not have that
+    // exact filename. Querying the tree turns the guess into the truth.
+    const parsed = parseHfUrl(model.downloadUrl)
+    const preferredQuant = extractGgufQuant(model.filename)
+    const resolution = parsed
+      ? await resolveHfGgufFiles(`${parsed.user}/${parsed.repo}`, preferredQuant)
+      : null
+
     const lmStudioEnabled = !!providers.openai?.enabled && (providers.openai?.name || '').toLowerCase().includes('lm studio')
-    const ollamaEnabled = !!providers.ollama?.enabled
+    const ollamaEnabledNow = !!providers.ollama?.enabled
+
+    // Resolve the LM Studio-style destination dir for any direct download.
+    // LM Studio scans <models>/<user>/<repo>/<file>.gguf and llama.cpp
+    // auto-merges every `-NNNNN-of-NNNNN` part it finds in one folder.
+    const ensureDirectDir = async (): Promise<string | null> => {
+      const base = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
+      if (!base) return null
+      setHfModelPath(base)
+      const subdir = hfUrlToLmStudioSubdir(model.downloadUrl!)
+      return subdir ? `${base}/${subdir}` : base
+    }
+
+    const downloadDirect = async (files: HfGgufFile[], targetDir: string) => {
+      const names = files.map(f => f.filename)
+      // Group multi-part sets so the header badge aggregates their progress.
+      if (names.length > 1) dlStore.getState().setBundleGroup(model.name, names)
+      for (const f of files) {
+        dlStore.getState().setMeta(f.filename, f.url, 'gguf', targetDir)
+        await startModelDownloadToPath(f.url, targetDir, f.filename, f.sizeBytes || undefined)
+      }
+      dlStore.getState().startPolling()
+    }
+
+    // ── Sharded / multi-part: `ollama pull` cannot load split GGUF
+    // (ollama/ollama#5245), so the only sound path is a direct multi-part
+    // download into the LM Studio dir where llama.cpp merges the parts. ──
+    if (resolution?.sharded) {
+      const targetDir = await ensureDirectDir()
+      if (!targetDir) {
+        setInstallError('Could not determine model directory. Please check app permissions.')
+        return
+      }
+      if (isActiveOllama || (!isActiveLmStudio && !lmStudioEnabled && ollamaEnabledNow)) {
+        setInstallError(`${model.name} is a split, ${resolution.files.length}-part GGUF. Ollama can't load split GGUF (ollama/ollama#5245) — all ${resolution.files.length} parts are downloading to your LM Studio models folder. Load it from LM Studio, or pick a single-file quant for Ollama.`)
+      }
+      try {
+        await downloadDirect(resolution.files, targetDir)
+      } catch (e) {
+        log.error('Sharded GGUF download failed', { err: e })
+        setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      return
+    }
+
+    // ── Single file. Use the resolved file when available (it corrects a wrong
+    // guessed name / subfolder); else fall back to the guess so a transient HF
+    // API outage doesn't block the download. ──
+    const single = resolution?.files[0]
+    const realUrl = single?.url || model.downloadUrl
+    const realName = single?.filename || model.filename
+    const realBytes = single?.sizeBytes || (model.sizeGB ? Math.round(model.sizeGB * 1_073_741_824) : undefined)
+
+    // Route by the active chat model. If neither side has an active model yet
+    // (first launch), fall back to the old enabled-wins logic.
     let useOllamaPath: boolean
     if (isActiveOllama) useOllamaPath = true
     else if (isActiveLmStudio) useOllamaPath = false
-    else useOllamaPath = !lmStudioEnabled && ollamaEnabled // legacy fallback
+    else useOllamaPath = !lmStudioEnabled && ollamaEnabledNow // legacy fallback
 
     if (useOllamaPath) {
-      const ref = hfUrlToOllamaRef(model.downloadUrl, model.filename)
+      const ref = hfUrlToOllamaRef(realUrl, realName)
       if (!ref) {
         setInstallError(`Cannot map ${model.name} to an Ollama HF reference — try LM Studio.`)
         return
@@ -554,19 +615,14 @@ export function DiscoverModels({ category }: Props) {
       return
     }
 
-    const destDir = hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
-    if (!destDir) {
+    const targetDir = await ensureDirectDir()
+    if (!targetDir) {
       setInstallError('Could not determine model directory. Please check app permissions.')
       return
     }
-    setHfModelPath(destDir)
-
-    const subdir = hfUrlToLmStudioSubdir(model.downloadUrl)
-    const targetDir = subdir ? `${destDir}/${subdir}` : destDir
     try {
-      dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf', targetDir)
-      const expectedBytes = model.sizeGB ? Math.round(model.sizeGB * 1_073_741_824) : undefined
-      await startModelDownloadToPath(model.downloadUrl, targetDir, model.filename, expectedBytes)
+      dlStore.getState().setMeta(realName, realUrl, 'gguf', targetDir)
+      await startModelDownloadToPath(realUrl, targetDir, realName, realBytes)
       dlStore.getState().startPolling()
     } catch (e) {
       log.error('GGUF download failed', { err: e })
