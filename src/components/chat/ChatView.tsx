@@ -19,7 +19,6 @@ import { PluginsDropdown } from './PluginsDropdown'
 import { TokenCounter } from './TokenCounter'
 import { ContextDropdown } from './ContextDropdown'
 import { SmallModelModeToggle } from './SmallModelModeToggle'
-import { MemoryDebugToggle } from './MemoryDebugPanel'
 import { ABCompare } from './ABCompare'
 import { useCompareStore } from '../../stores/compareStore'
 import { exportConversation } from '../../lib/chat-export'
@@ -201,8 +200,6 @@ export function ChatView() {
                     is active; plain chat has no tool calls to lean out. */}
                 {isAgentActive && <SmallModelModeToggle />}
 
-                {/* Memory Debug */}
-                <MemoryDebugToggle />
 
                 {/* Export */}
                 <div className="relative">

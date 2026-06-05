@@ -8,7 +8,6 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 import { TokenCounter } from './TokenCounter'
 import { ContextDropdown } from './ContextDropdown'
 import { SmallModelModeToggle } from './SmallModelModeToggle'
-import { MemoryDebugToggle } from './MemoryDebugPanel'
 import { RealtimeCounter } from './RealtimeCounter'
 import { PluginsDropdown } from './PluginsDropdown'
 import { TypingIndicator } from './TypingIndicator'
@@ -173,7 +172,6 @@ export function CodexView() {
           <TokenCounter />
           <ContextDropdown />
           <SmallModelModeToggle />
-          <MemoryDebugToggle />
           <PluginsDropdown />
         </div>
 

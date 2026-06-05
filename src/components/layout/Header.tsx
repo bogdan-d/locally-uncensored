@@ -6,6 +6,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
 import { ModelSelector } from '../models/ModelSelector'
+import { MemoryDebugToggle } from '../chat/MemoryDebugPanel'
 import { UpdateBadge } from './UpdateBadge'
 import { DownloadBadge } from './DownloadBadge'
 import { CreateTopControls } from '../create/CreateTopControls'
@@ -170,6 +171,10 @@ export function Header() {
         ) : (
           <>
         <ModelSelector />
+        {/* Memory — moved here from the chat/code/agent toolbars (David
+            2026-06-06). One brain icon next to the model picker → editable
+            memory popover (view / add / delete the injected context). */}
+        <MemoryDebugToggle />
         {/* Lichtschalter (load/unload into VRAM) now lives per-row inside the
             ModelSelector dropdown — the header center stays just the picker. */}
         {isOllamaModel && staleError && (
