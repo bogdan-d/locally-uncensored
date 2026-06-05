@@ -179,7 +179,7 @@ export function ChatView() {
                     {toolsDropdownOpen && (
                       <>
                         <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
-                        <div className="absolute left-0 top-full mt-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
+                        <div className="absolute left-0 top-full mt-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
                           <PermissionOverrideBar />
                         </div>
                       </>
@@ -208,7 +208,7 @@ export function ChatView() {
                   {exportOpen && (
                     <>
                       <div className="fixed inset-0 z-40" onClick={() => setExportOpen(false)} />
-                      <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-1">
+                      <div className="absolute right-0 top-full mt-1 z-50 w-32 rounded-lg bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-1">
                         {(['markdown', 'json'] as const).map(fmt => (
                           <button
                             key={fmt}

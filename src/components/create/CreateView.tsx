@@ -693,8 +693,10 @@ export function CreateView() {
               )}
               <button
                 onClick={() => setShowParams(!showParams)}
-                className="lg:hidden p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500"
-                aria-label="Toggle settings panel"
+                title={showParams ? 'Hide advanced parameters' : 'Show advanced parameters'}
+                aria-pressed={showParams}
+                aria-label="Toggle advanced parameters"
+                className={`p-1.5 rounded-lg transition-colors ${showParams ? 'bg-gray-200 dark:bg-white/10 text-gray-800 dark:text-gray-200' : 'hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500'}`}
               >
                 <Settings size={14} />
               </button>
@@ -951,8 +953,10 @@ export function CreateView() {
           )}
         </div>
 
-        {/* Parameter sidebar — desktop (hidden during empty-state) */}
-        {!showNoModelsEmptyState && (
+        {/* Parameter sidebar — desktop. Gated on showParams so Create starts
+            with Advanced COLLAPSED (David: "Advanced bei Create immer
+            eingeklappt"); the toggle in the top controls opens it. */}
+        {!showNoModelsEmptyState && showParams && (
           <div className="w-56 border-l border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-white/[0.03] p-3 overflow-y-auto scrollbar-thin hidden lg:block">
             <p className="text-[10px] font-medium text-gray-600 uppercase tracking-widest mb-3">Parameters</p>
             <ParamPanel

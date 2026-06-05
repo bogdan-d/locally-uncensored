@@ -526,7 +526,7 @@ export function Sidebar() {
             ) : (
               <button
                 onClick={handleNewChat}
-                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.65rem] text-gray-500 hover:text-white hover:bg-white/[0.05] border border-dashed border-gray-300 dark:border-white/[0.08] hover:border-gray-400 dark:hover:border-white/15 transition-all"
+                className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-md text-[0.65rem] font-medium bg-gray-50 dark:bg-white/[0.03] hover:bg-gray-100 dark:hover:bg-white/[0.05] text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-white/[0.06] hover:border-gray-300 dark:hover:border-white/[0.1] transition-all"
               >
                 <Plus size={12} />
                 <span>New Chat</span>
@@ -552,7 +552,7 @@ export function Sidebar() {
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.92, opacity: 0 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="bg-[#363636] border border-white/10 rounded-xl p-5 max-w-[360px] w-full flex flex-col items-center gap-3 shadow-2xl"
+            className="bg-[#212121] border border-white/10 rounded-xl p-5 max-w-[360px] w-full flex flex-col items-center gap-3 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between w-full">
