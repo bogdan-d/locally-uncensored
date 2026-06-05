@@ -179,6 +179,9 @@ export class OpenAIProvider implements ProviderClient {
     // it — we handle that with a retry below.
     if (options?.thinking === true) body.reasoning_effort = 'high'
     else if (options?.thinking === false) body.reasoning_effort = 'minimal'
+    // Ask LM Studio / local openai-compat servers for REAL token usage in a
+    // final stream chunk (choices:[] + usage:{...}). Dropped on 400 below.
+    if (isLocalUrl(this.baseUrl)) body.stream_options = { include_usage: true }
 
     const fetcher = isLocalUrl(this.baseUrl) ? localFetchStream : fetch
     let res = await fetcher(`${this.baseUrl}/chat/completions`, {
@@ -189,8 +192,9 @@ export class OpenAIProvider implements ProviderClient {
     } as any)
 
     // Retry without reasoning_effort if the model/endpoint rejects it.
-    if (!res.ok && res.status === 400 && 'reasoning_effort' in body) {
+    if (!res.ok && res.status === 400 && ('reasoning_effort' in body || 'stream_options' in body)) {
       delete body.reasoning_effort
+      delete body.stream_options
       res = await fetcher(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: this.headers,
@@ -205,12 +209,22 @@ export class OpenAIProvider implements ProviderClient {
 
     // Accumulate tool call arguments across chunks (OpenAI streams them in pieces)
     const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map()
+    let promptTokens = 0
+    let completionTokens = 0
+    const doneChunk = (): ChatStreamChunk => {
+      const toolCalls = this.flushToolCalls(toolCallAccum)
+      return {
+        content: '',
+        toolCalls: toolCalls.length ? toolCalls : undefined,
+        done: true,
+        promptEvalCount: promptTokens || undefined,
+        evalCount: completionTokens || undefined,
+      }
+    }
 
     for await (const event of parseSSEStream(res)) {
       if (event.data === '[DONE]') {
-        // Flush accumulated tool calls
-        const toolCalls = this.flushToolCalls(toolCallAccum)
-        yield { content: '', toolCalls: toolCalls.length ? toolCalls : undefined, done: true }
+        yield doneChunk()
         return
       }
 
@@ -219,6 +233,14 @@ export class OpenAIProvider implements ProviderClient {
         chunk = JSON.parse(event.data)
       } catch {
         continue
+      }
+
+      // Real token usage — the include_usage final chunk carries `usage` with
+      // an empty choices[], so capture it BEFORE the choice guard below.
+      const u = (chunk as { usage?: { prompt_tokens?: number; completion_tokens?: number } }).usage
+      if (u) {
+        promptTokens = u.prompt_tokens || promptTokens
+        completionTokens = u.completion_tokens || completionTokens
       }
 
       const choice = chunk.choices?.[0]
@@ -246,16 +268,15 @@ export class OpenAIProvider implements ProviderClient {
         yield { content, done: false }
       }
 
-      if (choice.finish_reason === 'tool_calls' || choice.finish_reason === 'stop') {
-        const toolCalls = this.flushToolCalls(toolCallAccum)
-        yield { content: '', toolCalls: toolCalls.length ? toolCalls : undefined, done: true }
-        return
-      }
+      // NB: we intentionally do NOT early-return on finish_reason. With
+      // stream_options.include_usage the server sends the usage chunk AFTER
+      // the finish_reason chunk — returning early would discard it. The [DONE]
+      // sentinel (or the end-of-stream fallback below) emits the single done
+      // chunk, which now carries the captured usage.
     }
 
-    // If stream ended without explicit done
-    const toolCalls = this.flushToolCalls(toolCallAccum)
-    yield { content: '', toolCalls: toolCalls.length ? toolCalls : undefined, done: true }
+    // Stream ended without an explicit [DONE] sentinel.
+    yield doneChunk()
   }
 
   async chatWithTools(
@@ -290,8 +311,9 @@ export class OpenAIProvider implements ProviderClient {
       signal: options?.signal,
     } as any)
 
-    if (!res.ok && res.status === 400 && 'reasoning_effort' in body) {
+    if (!res.ok && res.status === 400 && ('reasoning_effort' in body || 'stream_options' in body)) {
       delete body.reasoning_effort
+      delete body.stream_options
       res = await fetcher(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: this.headers,

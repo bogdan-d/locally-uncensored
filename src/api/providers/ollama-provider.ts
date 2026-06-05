@@ -103,6 +103,10 @@ export class OllamaProvider implements ProviderClient {
     // 2026-05-27: "LU caps VRAM ~5 GB regardless of context window UI
     // setting" — the UI setting was never wired here. Setting num_ctx
     // higher than the loaded model's max is harmless (Ollama clamps).
+    // num_ctx comes from the caller (hook): the user override OR the model's
+    // real context length (capped for VRAM safety). 0/undefined → Ollama keeps
+    // its own default; the hook always passes a real value so a chat never
+    // silently sits at Ollama's 2048 default.
     if (options?.contextWindow && options.contextWindow > 0) {
       ollamaOptions.num_ctx = options.contextWindow
     }
@@ -152,6 +156,7 @@ export class OllamaProvider implements ProviderClient {
         // client-side TTFT, which WebView2 release-mode buffers into
         // uselessness for fast small models.
         evalCount: chunk.eval_count,
+        promptEvalCount: chunk.prompt_eval_count,
         evalDurationMs: chunk.eval_duration !== undefined ? chunk.eval_duration / 1_000_000 : undefined,
       }
     }
@@ -184,6 +189,10 @@ export class OllamaProvider implements ProviderClient {
     if (options?.topK !== undefined) ollamaOptions.top_k = options.topK
     if (options?.maxTokens) ollamaOptions.num_predict = options.maxTokens
     // Bug AA v2.5.0 — see chatStream() for the why.
+    // num_ctx comes from the caller (hook): the user override OR the model's
+    // real context length (capped for VRAM safety). 0/undefined → Ollama keeps
+    // its own default; the hook always passes a real value so a chat never
+    // silently sits at Ollama's 2048 default.
     if (options?.contextWindow && options.contextWindow > 0) {
       ollamaOptions.num_ctx = options.contextWindow
     }

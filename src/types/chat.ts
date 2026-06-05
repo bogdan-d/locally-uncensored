@@ -24,6 +24,11 @@ export interface Message {
   // Hidden messages are included in the API payload but not rendered.
   hidden?: boolean
   tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[]
+  // Real token usage reported by the model (Ollama prompt_eval_count/eval_count,
+  // OpenAI/LM-Studio usage.*). promptTokens = the FULL consumed context for that
+  // turn (system prompt + tools + RAG + history + input), so it powers a
+  // 100%-real context readout instead of a char/4 estimate.
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
 }
 
 export interface Conversation {

@@ -51,6 +51,18 @@ export async function getModelContext(name: string): Promise<number> {
   }
 }
 
+// Cached model-context lookup so the chat hooks can forward a correct num_ctx
+// to Ollama on EVERY send without an /api/show round-trip each time. A model's
+// trained context length doesn't change at runtime; cache lives for the session.
+const _ctxCache = new Map<string, number>()
+export async function getModelContextCached(name: string): Promise<number> {
+  const hit = _ctxCache.get(name)
+  if (hit !== undefined) return hit
+  const v = await getModelContext(name)
+  _ctxCache.set(name, v)
+  return v
+}
+
 export async function chatStream(
   model: string,
   messages: { role: string; content: string }[],

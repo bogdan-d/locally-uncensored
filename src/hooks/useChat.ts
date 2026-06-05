@@ -9,6 +9,8 @@ import { useMemoryStore } from "../stores/memoryStore"
 import { retrieveContext } from "../api/rag"
 import { speakStreaming, isSpeechSynthesisSupported, getVoicesAsync } from "../api/voice"
 import { getModelMaxTokens } from "../lib/context-compaction"
+import { getModelContextCached } from "../api/ollama"
+import { effectiveContextWindow } from "../lib/context-window"
 import { useAgentChat } from "./useAgentChat"
 import { useMemory } from "./useMemory"
 import { useAgentModeStore } from "../stores/agentModeStore"
@@ -191,15 +193,24 @@ export function useChat() {
             ? undefined
             : settings.thinkingEnabled === true)
         : undefined
+      // num_ctx must always be a real value (David: "kontext window muss immer
+      // stimmen"). For Ollama, default to the model's REAL context length
+      // (capped for VRAM safety) when there's no explicit override — otherwise
+      // Ollama silently runs at 2048 and truncates real chats/RAG. Cloud and
+      // LM-Studio ignore contextWindow (load-time config there).
+      let effectiveCtx: number | undefined = settings.contextWindowOverride || undefined
+      if (providerId === 'ollama') {
+        try {
+          effectiveCtx = effectiveContextWindow(await getModelContextCached(modelId), settings.contextWindowOverride)
+        } catch { /* keep override-or-undefined on failure */ }
+      }
       const chatOpts = {
         temperature: settings.temperature,
         topP: settings.topP,
         topK: settings.topK,
         maxTokens: settings.maxTokens || undefined,
-        // Bug AA v2.5.0 — Kj103x. 0 in settings means "let provider decide";
-        // any positive value gets forwarded as Ollama `num_ctx`. Other
-        // providers ignore the field.
-        contextWindow: settings.contextWindowOverride || undefined,
+        // num_ctx: real model context (capped) for Ollama, else override-or-none.
+        contextWindow: effectiveCtx,
         thinking: useThinking,
         signal: abort.signal,
       }
@@ -311,6 +322,20 @@ export function useChat() {
             useChatStore
               .getState()
               .updateMessageThinking(convId!, assistantMessage.id, thinkingRef.current)
+          }
+          // Real token usage from the model's final chunk — promptEvalCount is
+          // the FULL consumed context (system+tools+RAG+history+input), so the
+          // TokenCounter can show 100%-real usage instead of a char/4 estimate.
+          if (chunk.promptEvalCount || chunk.evalCount) {
+            const promptTokens = chunk.promptEvalCount || 0
+            const completionTokens = chunk.evalCount || 0
+            useChatStore
+              .getState()
+              .updateMessageUsage(convId!, assistantMessage.id, {
+                promptTokens,
+                completionTokens,
+                totalTokens: promptTokens + completionTokens,
+              })
           }
         }
       }

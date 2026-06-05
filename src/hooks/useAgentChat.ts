@@ -25,6 +25,8 @@ import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, str
 import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, canonicalToolName } from '../lib/loose-tool-parse'
 import { buildVisionFeedback } from '../api/vision-feedback'
 import { compactMessages, getModelMaxTokens } from '../lib/context-compaction'
+import { getModelContextCached } from '../api/ollama'
+import { effectiveContextWindow } from '../lib/context-window'
 import { useMemoryStore } from '../stores/memoryStore'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import { buildExtractionPrompt, parseExtractionResponse } from '../lib/memory-extraction'
@@ -516,25 +518,31 @@ export function useAgentChat() {
                 : settings.thinkingEnabled === true)
             : undefined
 
+        // num_ctx (David: "muss immer stimmen"): the override, else the model's
+        // REAL context (capped for VRAM), floored at 8192 so feeding a generated
+        // image back for vision feedback never overflows a 4096-default model.
+        let agentCtx: number = settings.contextWindowOverride || 8192
+        if (providerId === 'ollama' && !settings.contextWindowOverride) {
+          try {
+            agentCtx = Math.max(effectiveContextWindow(await getModelContextCached(modelId), 0), 8192)
+          } catch { /* keep the 8192 floor on failure */ }
+        }
         const chatOptions = {
           temperature: settings.temperature,
           topP: settings.topP,
           topK: settings.topK,
           maxTokens: settings.maxTokens || undefined,
-          // Bug AA v2.5.0 — Kj103x. Same num_ctx override flow as useChat.
-          // David 2026-06-04: default the AGENT context to 8192 (not the model's
-          // 4096 default) so feeding a generated image back for vision feedback
-          // doesn't overflow ("request 5667 > available 4096" → HTTP 400 →
-          // "Agent error: Connection failed" after gemma's image). 8192 is within
-          // both installed models' real limits.
-          contextWindow: settings.contextWindowOverride || 8192,
+          contextWindow: agentCtx,
           thinking: thinkOpt as unknown as boolean,
           signal: abort.signal,
         }
 
         // Context compaction — keep the trim target in sync with the 8192 num_ctx
         // above so a generated image fed back for vision isn't trimmed right out.
-        const maxCtx = Math.max(await getModelMaxTokens(activeModel), settings.contextWindowOverride || 8192)
+        // Keep the compaction budget == the actual num_ctx we send, so we never
+        // trim to the model's full context (e.g. 128k) while Ollama only has the
+        // capped num_ctx allocated — that mismatch caused prompt overflow.
+        const maxCtx = agentCtx
         agentMessages = compactMessages(
           agentMessages as OllamaChatMessage[],
           Math.floor(maxCtx * 0.8)
