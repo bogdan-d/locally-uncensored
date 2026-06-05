@@ -1,15 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronDown, Check, Loader2, Power, PlayCircle, X } from 'lucide-react'
+import { ChevronDown, Loader2, Power, PlayCircle, X } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useModelStore } from '../../stores/modelStore'
 import { useProviderStore } from '../../stores/providerStore'
-import { unloadAllModels } from '../../api/ollama'
+import { unloadAllModels, loadModel, unloadModel, listRunningModels } from '../../api/ollama'
 import { displayModelName } from '../../api/providers'
 import { backendCall } from '../../api/backend'
 import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from '../../api/lmstudio'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
-import { formatBytes } from '../../lib/formatters'
 import type { AIModel } from '../../types/models'
 
 // ── Bug Q (v2.4.7 — wakeywakeynow GH #41) ─────────────────────
@@ -280,6 +279,40 @@ export function shouldAutoLoadForSelect(
   return isLms && !loaded.has(lmsIdOf(model))
 }
 
+// ── Load toggle (On / Off) ────────────────────────────────────
+//
+// Per-row VRAM load indicator + control for LOCAL models (Ollama AND
+// LM Studio). Green "On" = the model is loaded in VRAM (click to unload
+// and free VRAM); gray "Off" = not loaded (click to load it). Cloud
+// models have no local VRAM state, so they get no toggle.
+//
+// This REPLACED the old active-row blue checkmark. The active/selected
+// model is still shown by the row highlight; the dropdown now shows a
+// single, unambiguous on/off LOAD state per model instead of a checkmark
+// (active) competing with a separate loaded indicator. (David 2026-06-06:
+// "keine haken mehr, nur on/off load sichtbar im dropdown".)
+function LoadToggle({ loaded, busy, disabled, onClick }: {
+  loaded: boolean; busy: boolean; disabled: boolean; onClick: () => void
+}) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+      disabled={disabled}
+      title={loaded
+        ? 'Loaded in VRAM — click to unload (Off)'
+        : 'Not loaded — click to load into VRAM (On)'}
+      className={`flex items-center gap-0.5 pl-1 pr-1.5 py-0.5 rounded text-[8px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40 ${
+        loaded
+          ? 'text-emerald-400 bg-emerald-500/[0.12] hover:bg-emerald-500/20'
+          : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'
+      }`}
+    >
+      {busy ? <Loader2 size={9} className="animate-spin" /> : <Power size={9} />}
+      <span>{busy ? '…' : loaded ? 'On' : 'Off'}</span>
+    </button>
+  )
+}
+
 // ── Component ─────────────────────────────────────────────────
 
 export function ModelSelector() {
@@ -301,6 +334,11 @@ export function ModelSelector() {
   // inline "loading…" state on the row and blocks a second click.
   const [selectingLms, setSelectingLms] = useState<string | null>(null)
   const [selectError, setSelectError] = useState<string | null>(null)
+  // VRAM load state for Ollama rows — parity with `lmsLoaded` above, so
+  // every LOCAL model shows a clear on/off load toggle (not just LM Studio).
+  // Sourced from /api/ps on dropdown open.
+  const [ollamaLoaded, setOllamaLoaded] = useState<Set<string>>(new Set())
+  const [togglingOllama, setTogglingOllama] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
   // Refresh LM Studio loaded-models snapshot whenever the dropdown
@@ -315,6 +353,11 @@ export function ModelSelector() {
       if (cancelled) return
       setLmsLoaded(new Set(list))
     })
+    // Ollama loaded set (/api/ps) — drives the on/off load toggle on Ollama rows.
+    void listRunningModels().then((list) => {
+      if (cancelled) return
+      setOllamaLoaded(new Set(list))
+    }).catch(() => { /* Ollama unreachable → no Ollama toggles, fine */ })
     return () => {
       cancelled = true
     }
@@ -348,6 +391,30 @@ export function ModelSelector() {
       // can re-open the dropdown to retry.
     } finally {
       setTogglingLms(null)
+    }
+  }
+
+  /**
+   * Flip an Ollama model between loaded / unloaded in VRAM (parity with
+   * toggleLmStudioLoad). Load = warm it into VRAM; unload = free VRAM
+   * (keep_alive:0). Refreshes /api/ps after so the toggle reflects reality.
+   */
+  const toggleOllamaLoad = async (model: AIModel) => {
+    const name = model.name
+    if (!name || togglingOllama) return
+    setTogglingOllama(name)
+    try {
+      if (ollamaLoaded.has(name)) {
+        await unloadModel(name)
+      } else {
+        await loadModel(name)
+      }
+      const list = await listRunningModels()
+      setOllamaLoaded(new Set(list))
+    } catch {
+      // best-effort; reopen the dropdown to retry
+    } finally {
+      setTogglingOllama(null)
     }
   }
 
@@ -512,6 +579,9 @@ export function ModelSelector() {
                     const isActive = model.name === activeModel
 
                     const isLmsRow = isLmStudioProvider(('providerName' in model && model.providerName) as string | undefined)
+                    // Local Ollama row (provider 'ollama' or legacy no-provider) →
+                    // gets the on/off load toggle too. Excludes LM Studio + cloud.
+                    const isOllamaRow = !isLmsRow && modelProvider === 'ollama'
                     const rowId = lmsIdOf(model)
                     const isSelectingThis = selectingLms === rowId
                     // The row carries the per-LM-Studio-model power toggle, itself
@@ -583,39 +653,28 @@ export function ModelSelector() {
                               {(model as any).details.parameter_size}
                             </span>
                           )}
-                          {/* B3/§18 — LM Studio per-row power toggle. Selecting
-                              an LM Studio row now AUTO-LOADS it first (see
-                              handleSelectModel), so this button is the explicit
-                              control: load without selecting, or UNLOAD to free
-                              VRAM. Click stops propagation so the row's
-                              select-handler doesn't also fire. Ollama rows load
-                              implicitly when chat fires, so they get no button. */}
-                          {isLmsRow && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                void toggleLmStudioLoad(model)
-                              }}
+                          {/* On/Off VRAM load toggle for LOCAL models — LM Studio
+                              AND Ollama both get it now (was LM-Studio-only). The
+                              old active-row checkmark is gone; the active model is
+                              shown by the row highlight, and the dropdown shows a
+                              single, clear on/off LOAD state per model. Cloud
+                              models have no local VRAM → no toggle. Click stops
+                              propagation so the row's select handler doesn't fire. */}
+                          {isLmsRow ? (
+                            <LoadToggle
+                              loaded={lmsLoaded.has(rowId)}
+                              busy={togglingLms === rowId}
                               disabled={togglingLms !== null || selectingLms !== null}
-                              title={
-                                lmsLoaded.has(rowId)
-                                  ? 'Loaded — click to unload from LM Studio (frees VRAM)'
-                                  : 'Load into LM Studio without selecting (selecting also loads automatically)'
-                              }
-                              className={`p-0.5 rounded transition-colors ${
-                                lmsLoaded.has(rowId)
-                                  ? 'text-emerald-500 hover:bg-emerald-500/10'
-                                  : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.06]'
-                              } disabled:opacity-40`}
-                            >
-                              {togglingLms === rowId ? (
-                                <Loader2 size={10} className="animate-spin" />
-                              ) : (
-                                <Power size={10} />
-                              )}
-                            </button>
-                          )}
-                          {isActive && <Check size={11} className="text-blue-400" />}
+                              onClick={() => void toggleLmStudioLoad(model)}
+                            />
+                          ) : isOllamaRow ? (
+                            <LoadToggle
+                              loaded={ollamaLoaded.has(model.name)}
+                              busy={togglingOllama === model.name}
+                              disabled={togglingOllama !== null}
+                              onClick={() => void toggleOllamaLoad(model)}
+                            />
+                          ) : null}
                         </div>
                       </div>
                     )
