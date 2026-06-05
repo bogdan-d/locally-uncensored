@@ -606,7 +606,7 @@ export function DiscoverModels({ category }: Props) {
 
       <p className="text-sm text-gray-500">{subtitle}</p>
 
-      <div className="relative w-1/2">
+      <div className="relative w-1/2 mx-auto">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
         <input
           value={search}
@@ -794,7 +794,7 @@ export function DiscoverModels({ category }: Props) {
       {(isImage || isVideo) && (
         <GlassCard className="p-4 space-y-3">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Search CivitAI</h3>
-          <div className="flex gap-2 w-1/2">
+          <div className="flex gap-2 w-1/2 mx-auto">
             <input
               value={civitaiQuery}
               onChange={(e) => setCivitaiQuery(e.target.value)}
