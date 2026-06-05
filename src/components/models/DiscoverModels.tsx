@@ -25,6 +25,7 @@ import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant }
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
 import { ProgressBar } from '../ui/ProgressBar'
+import { Modal } from '../ui/Modal'
 import { formatBytes } from '../../lib/formatters'
 import type { ModelCategory } from '../../types/models'
 import { proxyImageUrl } from '../../lib/privacy'
@@ -337,6 +338,21 @@ export function DiscoverModels({ category }: Props) {
 
   const [installingBundle, setInstallingBundle] = useState<string | null>(null)
   const [installError, setInstallError] = useState<string | null>(null)
+  // Confirmation gate for multi-part (sharded) downloads — these sets routinely
+  // run hundreds of GB across many files, so we never start them silently.
+  const [confirmDownload, setConfirmDownload] = useState<{ name: string; files: HfGgufFile[]; targetDir: string; totalGB: number; note?: string } | null>(null)
+
+  // Download a resolved file-set straight into one folder (llama.cpp / LM Studio
+  // merge multi-part `-NNNNN-of-NNNNN` GGUFs that share a directory).
+  const startDirectDownload = async (files: HfGgufFile[], targetDir: string, groupName: string) => {
+    const names = files.map(f => f.filename)
+    if (names.length > 1) dlStore.getState().setBundleGroup(groupName, names)
+    for (const f of files) {
+      dlStore.getState().setMeta(f.filename, f.url, 'gguf', targetDir)
+      await startModelDownloadToPath(f.url, targetDir, f.filename, f.sizeBytes || undefined)
+    }
+    dlStore.getState().startPolling()
+  }
 
   const handleBundleInstall = async (bundle: ModelBundle) => {
     if (installingBundle === bundle.name) return // Prevent duplicate installs
@@ -553,35 +569,28 @@ export function DiscoverModels({ category }: Props) {
       return subdir ? `${base}/${subdir}` : base
     }
 
-    const downloadDirect = async (files: HfGgufFile[], targetDir: string) => {
-      const names = files.map(f => f.filename)
-      // Group multi-part sets so the header badge aggregates their progress.
-      if (names.length > 1) dlStore.getState().setBundleGroup(model.name, names)
-      for (const f of files) {
-        dlStore.getState().setMeta(f.filename, f.url, 'gguf', targetDir)
-        await startModelDownloadToPath(f.url, targetDir, f.filename, f.sizeBytes || undefined)
-      }
-      dlStore.getState().startPolling()
-    }
-
     // ── Sharded / multi-part: `ollama pull` cannot load split GGUF
     // (ollama/ollama#5245), so the only sound path is a direct multi-part
-    // download into the LM Studio dir where llama.cpp merges the parts. ──
+    // download into the LM Studio dir where llama.cpp merges the parts. These
+    // sets are often hundreds of GB (e.g. GLM-5.1 UD-Q4_K_M = 11 files / 432 GB),
+    // so we CONFIRM first — showing the part count + total size — instead of
+    // silently kicking off a download the user's disk/VRAM can't sustain. ──
     if (resolution?.sharded) {
       const targetDir = await ensureDirectDir()
       if (!targetDir) {
         setInstallError('Could not determine model directory. Please check app permissions.')
         return
       }
-      if (isActiveOllama || (!isActiveLmStudio && !lmStudioEnabled && ollamaEnabledNow)) {
-        setInstallError(`${model.name} is a split, ${resolution.files.length}-part GGUF. Ollama can't load split GGUF (ollama/ollama#5245) — all ${resolution.files.length} parts are downloading to your LM Studio models folder. Load it from LM Studio, or pick a single-file quant for Ollama.`)
-      }
-      try {
-        await downloadDirect(resolution.files, targetDir)
-      } catch (e) {
-        log.error('Sharded GGUF download failed', { err: e })
-        setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
-      }
+      const ollamaCantLoad = isActiveOllama || (!isActiveLmStudio && !lmStudioEnabled && ollamaEnabledNow)
+      setConfirmDownload({
+        name: model.name,
+        files: resolution.files,
+        targetDir,
+        totalGB: +(resolution.totalBytes / 1_073_741_824).toFixed(1),
+        note: ollamaCantLoad
+          ? `Ollama can't load split GGUF (#5245) — the parts go to your LM Studio models folder. Load it from LM Studio, or pick a single-file quant for Ollama.`
+          : undefined,
+      })
       return
     }
 
@@ -943,6 +952,47 @@ export function DiscoverModels({ category }: Props) {
       {!loading && filteredBundles.length === 0 && filteredUncensored.length === 0 && filteredMainstream.length === 0 && (
         <p className="text-center text-gray-500 py-4">No models found</p>
       )}
+
+      <Modal open={!!confirmDownload} onClose={() => setConfirmDownload(null)} title="Download multi-part model">
+        {confirmDownload && (
+          <div className="space-y-3">
+            <p className="text-[0.75rem] text-gray-700 dark:text-gray-200">
+              <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.name}</span> is split into{' '}
+              <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.files.length} files</span>{' '}
+              totalling <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.totalGB} GB</span>.
+            </p>
+            <p className="text-[0.7rem] text-gray-500">
+              All parts must download into one folder to load as a single model. Make sure you have the disk space — and the RAM/VRAM to actually run it.
+            </p>
+            {confirmDownload.totalGB > 60 && (
+              <p className="text-[0.7rem] text-amber-500">
+                That is very large for a local model — most consumer GPUs can't run it.
+              </p>
+            )}
+            {confirmDownload.note && (
+              <p className="text-[0.7rem] text-amber-500">{confirmDownload.note}</p>
+            )}
+            <div className="flex gap-2 pt-1">
+              <GlowButton variant="secondary" onClick={() => setConfirmDownload(null)} className="flex-1">
+                Cancel
+              </GlowButton>
+              <GlowButton
+                onClick={() => {
+                  const c = confirmDownload
+                  setConfirmDownload(null)
+                  startDirectDownload(c.files, c.targetDir, c.name).catch((e) => {
+                    log.error('Sharded GGUF download failed', { err: e })
+                    setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
+                  })
+                }}
+                className="flex-1"
+              >
+                Download {confirmDownload.files.length} parts ({confirmDownload.totalGB} GB)
+              </GlowButton>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
