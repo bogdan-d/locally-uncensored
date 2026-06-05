@@ -204,7 +204,7 @@ export function Sidebar() {
     <AnimatePresence>
       {sidebarOpen && (
         <motion.aside
-          className="w-56 h-full border-r border-gray-200 dark:border-white/[0.04] bg-gray-50 dark:bg-[#1a1a1a] flex flex-col z-20 overflow-hidden"
+          className="w-56 h-full rounded-xl bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col z-20 overflow-hidden"
           style={{ zoom: 1.25 }}
           initial={{ width: 0, opacity: 0 }}
           animate={{ width: 224, opacity: 1 }}

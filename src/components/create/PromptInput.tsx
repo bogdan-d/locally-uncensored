@@ -10,7 +10,7 @@ interface Props {
 }
 
 export function PromptInput({ onGenerate, onCancel, disabled }: Props) {
-  const { prompt, negativePrompt, isGenerating, promptHistory, setPrompt, setNegativePrompt } = useCreateStore()
+  const { prompt, negativePrompt, isGenerating, promptHistory, mode, imageSubMode, setPrompt, setNegativePrompt, setImageSubMode } = useCreateStore()
   const [showNegative, setShowNegative] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -80,13 +80,33 @@ export function PromptInput({ onGenerate, onCancel, disabled }: Props) {
         </AnimatePresence>
 
         <div className="flex items-center justify-between px-4 py-2 border-t border-gray-100 dark:border-white/5">
-          <button
-            onClick={() => setShowNegative(!showNegative)}
-            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-          >
-            {showNegative ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            Negative prompt
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowNegative(!showNegative)}
+              className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+            >
+              {showNegative ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              Negative prompt
+            </button>
+            {/* Text-to-Image / Image-to-Image — on the main screen (next to
+                the negative-prompt toggle) so it's reachable without opening
+                the Advanced parameters. Drives the existing `imageSubMode`
+                store field that gates the I2I upload + denoise controls. */}
+            {mode === 'image' && (
+              <div className="flex items-center rounded-md border border-gray-200 dark:border-white/10 overflow-hidden text-[0.6rem]">
+                <button
+                  onClick={() => setImageSubMode('text2img')}
+                  className={`px-1.5 py-0.5 font-medium transition-colors ${imageSubMode === 'text2img' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                  title="Text to Image"
+                >T2I</button>
+                <button
+                  onClick={() => setImageSubMode('img2img')}
+                  className={`px-1.5 py-0.5 font-medium transition-colors ${imageSubMode === 'img2img' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                  title="Image to Image"
+                >I2I</button>
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {prompt.trim() && !isGenerating && (
               <button onClick={() => setPrompt('')} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" aria-label="Clear prompt">

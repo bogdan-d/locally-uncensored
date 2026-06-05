@@ -786,7 +786,7 @@ export function CreateView() {
               onDragOver={(e) => { e.preventDefault(); setI2vDragOver(true) }}
               onDragLeave={() => setI2vDragOver(false)}
               onDrop={handleI2vDrop}
-              className={`relative rounded-lg border-2 border-dashed transition-colors ${
+              className={`relative rounded-lg border-2 transition-colors ${
                 i2vDragOver
                   ? 'border-blue-400 bg-blue-500/10'
                   : i2vImage
@@ -852,7 +852,7 @@ export function CreateView() {
                 onDragOver={(e) => { e.preventDefault(); setI2iDragOver(true) }}
                 onDragLeave={() => setI2iDragOver(false)}
                 onDrop={handleI2iDrop}
-                className={`relative rounded-lg border-2 border-dashed transition-colors ${
+                className={`relative rounded-lg border-2 transition-colors ${
                   i2iDragOver
                     ? 'border-blue-400 bg-blue-500/10'
                     : i2iImage

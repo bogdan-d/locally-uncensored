@@ -909,7 +909,7 @@ export function SettingsPage() {
           )}
 
           {FEATURE_FLAGS.AGENT_MODE && (
-            <Section title="Coding Agent (v2.5.0)">
+            <Section title="Coding Agent">
               <CodexAgentSettings />
             </Section>
           )}

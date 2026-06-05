@@ -571,15 +571,15 @@ export function AppShell() {
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-white dark:bg-[#1a1a1a] text-gray-900 dark:text-gray-100">
+    <div className="h-screen w-screen overflow-hidden bg-gray-100 dark:bg-[#141414] text-gray-900 dark:text-gray-100">
       <div className="h-full flex flex-col">
         <Titlebar />
         <Header />
         <StaleModelsBanner />
         <StorageQuotaToast />
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden gap-2 p-2">
           <Sidebar />
-          <main className="flex-1 overflow-hidden">
+          <main className="flex-1 overflow-hidden rounded-xl bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05]">
             {currentView === 'chat' && <ErrorBoundary><ChatView /></ErrorBoundary>}
             {currentView === 'models' && <ErrorBoundary><ModelManager /></ErrorBoundary>}
             {currentView === 'benchmark' && <ErrorBoundary><BenchmarkView /></ErrorBoundary>}

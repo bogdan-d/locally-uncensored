@@ -127,7 +127,7 @@ export function ChatbotImporter() {
             disabled={parsing || importing}
             className="sr-only"
           />
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 border-dashed text-[0.7rem] ${
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border-2 text-[0.7rem] ${
             parsing || importing
               ? 'border-white/8 text-gray-500 cursor-not-allowed'
               : 'border-white/15 hover:border-white/30 text-gray-300 hover:bg-white/[0.03]'

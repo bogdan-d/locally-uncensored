@@ -308,7 +308,7 @@ export function ProviderSettings() {
       <div className="relative">
         <button
           onClick={() => setDropdownOpen(!dropdownOpen)}
-          className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-white/5 border border-white/8 border-dashed text-[0.65rem] text-gray-500 hover:text-gray-300 hover:border-white/15 transition-colors"
+          className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-white/5 border border-white/8 text-[0.65rem] text-gray-500 hover:text-gray-300 hover:border-white/15 transition-colors"
         >
           <Plus size={10} />
           <span>Add Provider</span>

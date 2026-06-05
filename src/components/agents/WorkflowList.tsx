@@ -110,7 +110,7 @@ export function WorkflowList({ onRun, onEdit, onCreate }: WorkflowListProps) {
       {/* Create button */}
       <button
         onClick={onCreate}
-        className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-white/10 text-[0.65rem] text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
+        className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg bg-white/[0.03] border border-white/10 text-[0.65rem] text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
       >
         <Plus size={10} /> Create Workflow
       </button>

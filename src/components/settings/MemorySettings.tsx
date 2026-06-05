@@ -278,7 +278,7 @@ export function MemorySettings() {
       ) : (
         <button
           onClick={() => setAddingNew(true)}
-          className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg border border-dashed border-gray-300 dark:border-white/10 text-[0.6rem] text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
+          className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg bg-gray-50 dark:bg-white/[0.03] border border-gray-300 dark:border-white/10 text-[0.6rem] text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
         >
           <Plus size={10} /> Add Memory
         </button>
