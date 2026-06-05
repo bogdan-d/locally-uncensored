@@ -131,7 +131,7 @@ export function ModelManager() {
 
         {tab === 'installed' && (
           <>
-            <div className="space-y-0.5">
+            <div className="space-y-1.5">
               {filteredModels.map((model, i) => (
                 <motion.div
                   key={model.name}

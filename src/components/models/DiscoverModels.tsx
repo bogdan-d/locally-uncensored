@@ -45,7 +45,6 @@ function ModelDiscoverCard({ model, index, isText, getModelDownloadState, isMode
   const dlState = getModelDownloadState(model)
   const isDownloading = dlState?.status === 'downloading' || dlState?.status === 'connecting'
   const isComplete = dlState?.status === 'complete'
-  const isError = dlState?.status === 'error'
   const canDirectDownload = (!!model.downloadUrl && !!model.filename) || !!model.ollamaModel
 
   return (
@@ -54,7 +53,7 @@ function ModelDiscoverCard({ model, index, isText, getModelDownloadState, isMode
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.03 }}
     >
-      <GlassCard className="p-3">
+      <div className="rounded-lg border border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-white/[0.03] p-3 transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.05]">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-medium text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
@@ -154,7 +153,7 @@ function ModelDiscoverCard({ model, index, isText, getModelDownloadState, isMode
             ) : null}
           </div>
         </div>
-      </GlassCard>
+      </div>
     </motion.div>
   )
 }
@@ -336,13 +335,6 @@ export function DiscoverModels({ category }: Props) {
     return false
   }
 
-  const handleDownload = async (model: DiscoverModel) => {
-    if (!model.downloadUrl || !model.filename || !model.subfolder) return
-    dlStore.getState().setMeta(model.filename, model.downloadUrl, model.subfolder)
-    await startModelDownload(model.downloadUrl, model.subfolder, model.filename)
-    dlStore.getState().startPolling()
-  }
-
   const [installingBundle, setInstallingBundle] = useState<string | null>(null)
   const [installError, setInstallError] = useState<string | null>(null)
 
@@ -431,17 +423,6 @@ export function DiscoverModels({ category }: Props) {
     return false
   }
 
-  const getBundleProgress = (bundle: ModelBundle): number => {
-    let totalBytes = 0, downloadedBytes = 0
-    for (const f of bundle.files) {
-      if (f.filename && downloads[f.filename]) {
-        totalBytes += downloads[f.filename].total
-        downloadedBytes += downloads[f.filename].progress
-      }
-    }
-    return totalBytes > 0 ? (downloadedBytes / totalBytes) * 100 : 0
-  }
-
   const getModelDownloadState = (model: DiscoverModel): DownloadProgress | null => {
     if (!model.filename) return null
     return downloads[model.filename] ?? null
@@ -487,7 +468,7 @@ export function DiscoverModels({ category }: Props) {
 
   const title = 'Discover'
   const subtitle = isText
-    ? `Download GGUF models from HuggingFace.${hfModelPath ? ` Saves to: ${hfModelPath}` : ''}`
+    ? 'Download GGUF models from HuggingFace.'
     : isImage
       ? 'Browse image generation models for ComfyUI.'
       : 'Browse video generation models for ComfyUI.'
@@ -595,16 +576,15 @@ export function DiscoverModels({ category }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="relative text-center">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2>
+        <p className="text-sm text-gray-500 mt-1">{subtitle}</p>
         {isText && (
-          <GlowButton variant="secondary" onClick={handleRefresh} disabled={loading} aria-label="Refresh">
+          <GlowButton variant="secondary" onClick={handleRefresh} disabled={loading} aria-label="Refresh" className="absolute right-0 top-0 !px-2 !py-1.5">
             <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
           </GlowButton>
         )}
       </div>
-
-      <p className="text-sm text-gray-500">{subtitle}</p>
 
       <div className="relative w-1/2 mx-auto">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
@@ -620,8 +600,8 @@ export function DiscoverModels({ category }: Props) {
       {/* All download progress is shown exclusively in the DownloadBadge (header) */}
 
       {!isText && (
-        <p className="text-[0.65rem] text-gray-500">
-          Downloads install directly into ComfyUI. Requires ComfyUI path configured in Model Manager.
+        <p className="text-[0.65rem] text-gray-500 text-center">
+          Requires ComfyUI configured in Model Manager.
         </p>
       )}
 
@@ -695,14 +675,13 @@ export function DiscoverModels({ category }: Props) {
           {filteredBundles.map((bundle, bi) => {
             const complete = isBundleComplete(bundle)
             const downloading = isBundleDownloading(bundle) || installingBundle === bundle.name
-            const bundleProgress = getBundleProgress(bundle)
             const isComingSoon = !bundle.verified && !complete
 
             return (
               <motion.div key={bundle.name} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: bi * 0.03 }}>
-                <GlassCard className={`p-3 relative overflow-hidden ${isComingSoon ? 'opacity-50' : ''}`}>
+                <div className={`rounded-lg border border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-white/[0.03] p-3 relative overflow-hidden transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.05] ${isComingSoon ? 'opacity-50' : ''}`}>
                   {isComingSoon && (
-                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-[1px] rounded-xl">
+                    <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-[1px] rounded-lg">
                       <span className="px-3 py-1.5 rounded-full bg-white/10 border border-white/20 text-white text-xs font-semibold tracking-wider">
                         COMING SOON
                       </span>
@@ -779,7 +758,7 @@ export function DiscoverModels({ category }: Props) {
                       )}
                     </div>
                   </div>
-                </GlassCard>
+                </div>
               </motion.div>
             )
           })}

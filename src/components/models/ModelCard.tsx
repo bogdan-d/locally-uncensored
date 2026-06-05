@@ -25,10 +25,10 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
   return (
     <div
       onClick={onSelect}
-      className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all group ${
+      className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg border cursor-pointer transition-all group ${
         isActive
-          ? 'bg-blue-50 dark:bg-white/[0.05] ring-1 ring-blue-400/40'
-          : 'hover:bg-gray-50 dark:hover:bg-white/[0.03]'
+          ? 'bg-blue-50 dark:bg-white/[0.05] border-blue-400/40 ring-1 ring-blue-400/40'
+          : 'bg-gray-50 dark:bg-white/[0.03] border-gray-200 dark:border-white/[0.06] hover:bg-gray-100 dark:hover:bg-white/[0.05]'
       }`}
     >
       {/* Type icon */}
