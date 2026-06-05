@@ -55,7 +55,7 @@ export function ModelManager() {
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-4">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-4xl mx-auto">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <button

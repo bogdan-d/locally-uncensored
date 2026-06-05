@@ -579,7 +579,7 @@ export function AppShell() {
         <StorageQuotaToast />
         <div className="flex-1 flex overflow-hidden gap-2 p-2">
           <Sidebar />
-          <main className="flex-1 overflow-hidden rounded-xl bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05]">
+          <main className={`overflow-hidden rounded-xl bg-white dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] ${currentView === 'models' ? 'flex-none w-[85%] mx-auto' : 'flex-1'}`}>
             {currentView === 'chat' && <ErrorBoundary><ChatView /></ErrorBoundary>}
             {currentView === 'models' && <ErrorBoundary><ModelManager /></ErrorBoundary>}
             {currentView === 'benchmark' && <ErrorBoundary><BenchmarkView /></ErrorBoundary>}
