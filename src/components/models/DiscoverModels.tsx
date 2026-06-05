@@ -499,6 +499,18 @@ export function DiscoverModels({ category }: Props) {
     detectProviderModelPath(providerName).then(path => { setHfModelPath(path); setLoading(false) })
   }
 
+  // Turn a raw Ollama pull error into actionable guidance. Sharded/split GGUF
+  // repos (model split into multiple .gguf parts) make `ollama pull` 400 —
+  // Ollama can't pull split GGUF yet (ollama/ollama#5245). Don't show the user
+  // a cryptic HTTP 400; tell them what to do.
+  const formatPullError = (modelName: string, err: unknown): string => {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (/shard|5245|split/i.test(msg)) {
+      return `${modelName} is split into multiple GGUF parts — split GGUF isn't supported yet (Ollama rejects it, ollama/ollama#5245). Pick a single-file quant of this model instead.`
+    }
+    return `Download failed: ${msg}`
+  }
+
   const handleTextDownload = async (model: DiscoverModel) => {
     // Bug Y/a v2.5.0 — Aldrich Ironhart Discord. Pre-v2.5.0 we picked the
     // download backend by "whichever is enabled" with LM Studio winning when
@@ -530,7 +542,7 @@ export function DiscoverModels({ category }: Props) {
         await pullModel(model.ollamaModel)
       } catch (e) {
         log.error('Ollama pull failed', { err: e })
-        setInstallError(`Download failed: ${e instanceof Error ? e.message : String(e)}`)
+        setInstallError(formatPullError(model.name, e))
       }
       return
     }
@@ -556,7 +568,7 @@ export function DiscoverModels({ category }: Props) {
         await pullModel(ref)
       } catch (e) {
         log.error('Ollama HF pull failed', { err: e })
-        setInstallError(`Ollama pull failed: ${e instanceof Error ? e.message : String(e)}. Is Ollama running?`)
+        setInstallError(formatPullError(model.name, e))
       }
       return
     }
@@ -594,7 +606,7 @@ export function DiscoverModels({ category }: Props) {
 
       <p className="text-sm text-gray-500">{subtitle}</p>
 
-      <div className="relative">
+      <div className="relative w-1/2">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
         <input
           value={search}
@@ -782,7 +794,7 @@ export function DiscoverModels({ category }: Props) {
       {(isImage || isVideo) && (
         <GlassCard className="p-4 space-y-3">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Search CivitAI</h3>
-          <div className="flex gap-2">
+          <div className="flex gap-2 w-1/2">
             <input
               value={civitaiQuery}
               onChange={(e) => setCivitaiQuery(e.target.value)}

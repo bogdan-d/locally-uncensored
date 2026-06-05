@@ -126,8 +126,11 @@ export function PluginsDropdown() {
                   <ChevronDown size={9} className={`text-gray-500 transition-transform ${personaOpen ? 'rotate-180' : ''}`} />
                 </button>
                 {/* On/off toggle for THIS chat — Remote already had this
-                    via `personaEnabled`; now Chat / Code / Agent match. */}
-                {activeConvId && activePersona && activePersona.id !== 'unrestricted' && (
+                    via `personaEnabled`; now Chat / Code / Agent match.
+                    Always shown when a chat is open (David: "personas hat im
+                    chat noch kein an/aus toggle" — it was hidden for the
+                    default Unrestricted persona). */}
+                {activeConvId && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
