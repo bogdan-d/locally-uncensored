@@ -25,48 +25,44 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
   return (
     <div
       onClick={onSelect}
-      className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-all group ${
+      className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg cursor-pointer transition-all group ${
         isActive
-          ? 'bg-blue-50 dark:bg-white/[0.04] border-l-2 border-l-blue-400'
-          : 'hover:bg-gray-50 dark:hover:bg-white/[0.02] border-l-2 border-l-transparent'
+          ? 'bg-blue-50 dark:bg-white/[0.05] ring-1 ring-blue-400/40'
+          : 'hover:bg-gray-50 dark:hover:bg-white/[0.03]'
       }`}
     >
       {/* Type icon */}
       <TypeIcon size={13} className={`${typeInfo.color} shrink-0`} />
 
-      {/* Name + details */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-[0.72rem] text-gray-800 dark:text-gray-200 font-medium truncate">{model.name}</span>
-          {isActive && <span className="text-[0.5rem] text-blue-400 font-medium uppercase">Active</span>}
-        </div>
-        <div className="flex items-center gap-2 text-[0.6rem] text-gray-500">
-          {model.size > 0 && <span>{formatBytes(model.size)}</span>}
-          {model.type === 'text' && 'details' in model && (
-            <>
-              {model.details?.family && <span>{model.details.family}</span>}
-              {model.details?.parameter_size && <span>{model.details.parameter_size}</span>}
-              {model.details?.quantization_level && <span>{model.details.quantization_level}</span>}
-            </>
-          )}
-          {(model.type === 'image' || model.type === 'video') && (
-            <span>{model.format || 'safetensors'}</span>
-          )}
-        </div>
-      </div>
+      {/* Name — grows to fill the row (single-line, LM-Studio style) */}
+      <span className="flex-1 min-w-0 text-[0.7rem] text-gray-800 dark:text-gray-200 font-medium truncate">{model.name}</span>
 
-      {/* Benchmark (always visible for text models) */}
-      {model.type === 'text' && (
-        <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-          <BenchmarkButton modelName={model.name} />
-        </div>
-      )}
+      {isActive && <span className="shrink-0 text-[0.5rem] text-blue-400 font-medium uppercase">Active</span>}
 
-      {/* Actions (visible on hover) */}
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+      {/* Compact meta — size · params · quant, dot-separated, mono figures */}
+      <span className="hidden md:flex items-center gap-1.5 shrink-0 text-[0.58rem] text-gray-500 lu-hud-num">
+        {model.size > 0 && <span>{formatBytes(model.size)}</span>}
+        {model.type === 'text' && 'details' in model && model.details?.parameter_size && (
+          <><span className="opacity-40">·</span><span>{model.details.parameter_size}</span></>
+        )}
+        {model.type === 'text' && 'details' in model && model.details?.quantization_level && (
+          <><span className="opacity-40">·</span><span>{model.details.quantization_level}</span></>
+        )}
+        {(model.type === 'image' || model.type === 'video') && (
+          <><span className="opacity-40">·</span><span>{model.format || 'safetensors'}</span></>
+        )}
+      </span>
+
+      {/* Actions — always visible (LM-Studio: no hover-to-reveal) */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        {model.type === 'text' && (
+          <div onClick={(e) => e.stopPropagation()}>
+            <BenchmarkButton modelName={model.name} />
+          </div>
+        )}
         <button
           onClick={(e) => { e.stopPropagation(); onInfo() }}
-          className="p-1 rounded hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+          className="p-1 rounded hover:bg-gray-100 dark:hover:bg-white/10 text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
           title="Details"
         >
           <Info size={12} />
@@ -74,7 +70,7 @@ export function ModelCard({ model, isActive, onSelect, onDelete, onInfo, canDele
         {canDelete && (
           <button
             onClick={(e) => { e.stopPropagation(); onDelete() }}
-            className="p-1 rounded hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors"
+            className="p-1 rounded hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
             title="Delete"
           >
             <Trash2 size={12} />

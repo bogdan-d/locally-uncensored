@@ -30,7 +30,15 @@ export function MessageList({ isGenerating, isLoadingModel, onRegenerate, onEdit
   const lastVisibleId = visibleMessages[visibleMessages.length - 1]?.id
 
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar-thin py-4">
+    <div
+      ref={scrollRef}
+      className="flex-1 overflow-y-auto scrollbar-thin py-4"
+      style={{
+        // Soft top fade — chat content "blurs out" under the header (David).
+        WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, #000 28px)',
+        maskImage: 'linear-gradient(to bottom, transparent 0, #000 28px)',
+      }}
+    >
       {visibleMessages
         .map((message) => (
           <MessageBubble
