@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS: Settings = {
   maxTokens: 0,
   theme: 'dark',
   onboardingDone: false,
+  personasEnabled: true,
   thinkingEnabled: true,
   cavemanMode: 'off',
   searchProvider: 'auto',

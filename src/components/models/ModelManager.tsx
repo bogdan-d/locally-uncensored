@@ -7,7 +7,6 @@ import { useProviderStore } from '../../stores/providerStore'
 import { ModelCard } from './ModelCard'
 import { PullModelDialog } from './PullModelDialog'
 import { DiscoverModels } from './DiscoverModels'
-import { BenchmarkLeaderboard } from './ModelBenchmark'
 import { Modal } from '../ui/Modal'
 import { GlowButton } from '../ui/GlowButton'
 import { showModel } from '../../api/ollama'
@@ -29,7 +28,7 @@ export function ModelManager() {
   const [infoOpen, setInfoOpen] = useState(false)
   const [modelInfo, setModelInfo] = useState<any>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  const [tab, setTab] = useState<'installed' | 'discover'>('installed')
+  const [tab, setTab] = useState<'installed' | 'discover'>('discover')
   const [comfyStatus, setComfyStatus] = useState<{ running: boolean; found: boolean; path: string | null } | null>(null)
   const [comfyPathInput, setComfyPathInput] = useState('')
   const [comfyPathError, setComfyPathError] = useState('')
@@ -212,8 +211,6 @@ export function ModelManager() {
                 </motion.div>
               ))}
             </div>
-
-            <BenchmarkLeaderboard />
 
             {filteredModels.length === 0 && (
               <div className="text-center py-10">

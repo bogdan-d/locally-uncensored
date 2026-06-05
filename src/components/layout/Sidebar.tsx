@@ -15,6 +15,7 @@ export function Sidebar() {
   const { sidebarOpen, setView } = useUIStore()
   const { activeModel } = useModelStore()
   const { getActivePersona } = useSettingsStore()
+  const personasEnabled = useSettingsStore((s) => s.settings.personasEnabled)
   const chatMode = useCodexStore((s) => s.chatMode)
   const setChatMode = useCodexStore((s) => s.setChatMode)
   const {
@@ -52,7 +53,7 @@ export function Sidebar() {
       // systemPrompt (so toggling personaEnabled later "just works"
       // without re-reading global state), but useChat / useAgentChat
       // only apply it when personaEnabled === true.
-      const persona = getActivePersona()
+      const persona = personasEnabled ? getActivePersona() : null
       createConversation(activeModel, persona?.systemPrompt || '', chatMode)
       setView('chat')
     }
@@ -121,7 +122,7 @@ export function Sidebar() {
     // clean (autonomy contract or codex prompt only). Without this, a
     // global "Devil's Advocate" persona silently hijacked every remote
     // session through `dispatchedSystemPrompt` on the mobile side.
-    const persona = getActivePersona()
+    const persona = personasEnabled ? getActivePersona() : null
     const convId = createConversation(activeModel, persona?.systemPrompt || '', 'remote')
     setView('chat')
     try {
@@ -218,13 +219,14 @@ export function Sidebar() {
               onClick={() => { setChatMode('lu'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
               title="Chat"
               aria-label="Chat"
-              className={`flex items-center justify-center px-2 py-1 rounded font-medium transition-all flex-1 ${
+              className={`flex items-center gap-1 justify-center px-2 py-1 rounded text-[0.6rem] font-medium transition-all flex-1 ${
                 !isCodingMode && !isRemoteMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
               }`}
             >
-              <MessageSquare size={11} />
+              <MessageSquare size={9} />
+              <span>Chat</span>
             </button>
 
             {/* Code tab — direct switch to the coding agent (no dropdown).
@@ -233,13 +235,14 @@ export function Sidebar() {
               onClick={() => { setChatMode('codex'); setActiveConversation(null); setView('chat'); setDispatchPicker(false) }}
               title="Code"
               aria-label="Code"
-              className={`flex items-center justify-center px-2 py-1 rounded font-medium transition-all flex-1 ${
+              className={`flex items-center gap-1 justify-center px-2 py-1 rounded text-[0.6rem] font-medium transition-all flex-1 ${
                 isCodingMode
                   ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white border border-gray-300 dark:border-white/15'
                   : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 border border-transparent'
               }`}
             >
-              <Code size={11} />
+              <Code size={9} />
+              <span>Code</span>
             </button>
 
             {/* Remote tab */}

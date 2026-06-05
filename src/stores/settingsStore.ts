@@ -8,7 +8,10 @@ import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 // version is all that's needed — the new default fills in while every existing
 // user value is preserved. Rehydration is NOT broken: a persisted v4 blob runs
 // the same merge path that has handled every prior additive field.
-const STORE_VERSION = 5
+// v6 (uselu design port): added settings.personasEnabled (master persona
+// switch, default true). Bumped so existing users get the default ON instead
+// of an undefined → falsy "personas off" surprise.
+const STORE_VERSION = 6
 
 interface SettingsState {
   settings: Settings

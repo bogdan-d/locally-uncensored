@@ -12,6 +12,9 @@ export interface Settings {
   maxTokens: number
   theme: 'light' | 'dark'
   onboardingDone: boolean
+  /** Master switch for personas. When off, new chats get no persona system
+   *  prompt (raw model). Default true. Ported from the uselu web companion. */
+  personasEnabled: boolean
   thinkingEnabled: boolean
   cavemanMode: CavemanMode
   searchProvider: SearchProvider

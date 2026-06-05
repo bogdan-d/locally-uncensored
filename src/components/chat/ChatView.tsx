@@ -144,7 +144,7 @@ export function ChatView() {
             transition={{ duration: 0.2 }}
           >
             <img src="/LU-monogram-bw.png" alt="" width={46} height={46} className="dark:invert-0 invert opacity-20 mb-3" />
-            <p className="text-[0.72rem] text-gray-600">Generate anything. Locally. Uncensored.</p>
+            <p className="text-[0.72rem] text-gray-600">Local AI, on your hardware.</p>
 
             {models.length > 0 && !activeModel && (
               <p className="text-[0.6rem] text-amber-500/60 mt-3">Select a model above.</p>
