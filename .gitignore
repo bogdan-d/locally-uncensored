@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Package manager: npm (package-lock.json) is the source of truth for CI +
+# release builds. A stray committed pnpm-lock.yaml makes tauri-action pick
+# pnpm (not installed on the runners) and breaks the release build.
+pnpm-lock.yaml
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
