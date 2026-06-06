@@ -2,15 +2,34 @@ import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, Square, ChevronDown, ChevronUp, History, X } from 'lucide-react'
 import { useCreateStore } from '../../stores/createStore'
+import { classifyModel, isI2VModel } from '../../api/comfyui'
+import type { ClassifiedModel } from '../../api/comfyui'
 
 interface Props {
   onGenerate: () => void
   onCancel: () => void
   disabled?: boolean
+  imageModels: ClassifiedModel[]
+  videoModels: ClassifiedModel[]
 }
 
-export function PromptInput({ onGenerate, onCancel, disabled }: Props) {
-  const { prompt, negativePrompt, isGenerating, promptHistory, mode, imageSubMode, setPrompt, setNegativePrompt, setImageSubMode } = useCreateStore()
+export function PromptInput({ onGenerate, onCancel, disabled, imageModels, videoModels }: Props) {
+  const {
+    prompt, negativePrompt, isGenerating, promptHistory, mode, imageSubMode, videoSubMode,
+    imageModel, videoModel, setPrompt, setNegativePrompt, setImageSubMode, setVideoSubMode,
+    setImageModel, setVideoModel,
+  } = useCreateStore()
+
+  // Model picker (lives right next to Generate). Video models are filtered by
+  // the T2V/I2V sub-mode so the list only shows compatible checkpoints.
+  const modelOptions = mode === 'video'
+    ? videoModels.filter((m) => (videoSubMode === 'i2v' ? isI2VModel(m.name) : !isI2VModel(m.name)))
+    : imageModels
+  const activeModelValue = mode === 'video' ? videoModel : imageModel
+  const onModelChange = (name: string) => {
+    if (mode === 'video') setVideoModel(name)
+    else setImageModel(name, classifyModel(name))
+  }
   const [showNegative, setShowNegative] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -106,12 +125,47 @@ export function PromptInput({ onGenerate, onCancel, disabled }: Props) {
                 >I2I</button>
               </div>
             )}
+            {/* Text-to-Video / Image-to-Video — mirrors the image T2I/I2I switch
+                so the video mode is fully selectable from the main screen
+                (drives `videoSubMode`, which filters the model list + gates the
+                I2V image upload in CreateView). */}
+            {mode === 'video' && (
+              <div className="flex items-center rounded-md border border-gray-200 dark:border-white/10 overflow-hidden text-[0.6rem]">
+                <button
+                  onClick={() => setVideoSubMode('t2v')}
+                  className={`px-1.5 py-0.5 font-medium transition-colors ${videoSubMode === 't2v' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                  title="Text to Video"
+                >T2V</button>
+                <button
+                  onClick={() => setVideoSubMode('i2v')}
+                  className={`px-1.5 py-0.5 font-medium transition-colors ${videoSubMode === 'i2v' ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                  title="Image to Video"
+                >I2V</button>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {prompt.trim() && !isGenerating && (
               <button onClick={() => setPrompt('')} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" aria-label="Clear prompt">
                 <X size={14} />
               </button>
+            )}
+            {/* Model picker — sits directly left of Generate so the active
+                image / video model is always visible + switchable without
+                opening Advanced. Hidden until models are discovered. */}
+            {modelOptions.length > 0 && (
+              <select
+                value={activeModelValue}
+                onChange={(e) => onModelChange(e.target.value)}
+                disabled={isGenerating || disabled}
+                title={activeModelValue || `Select ${mode} model`}
+                aria-label={`${mode} model`}
+                className="max-w-[160px] px-2 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200 text-xs focus:outline-none focus:border-gray-400 dark:focus:border-white/20 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {modelOptions.map((m) => (
+                  <option key={m.name} value={m.name}>{m.name.replace(/\.[^.]+$/, '')}</option>
+                ))}
+              </select>
             )}
             {isGenerating ? (
               <motion.button

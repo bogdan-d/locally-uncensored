@@ -264,6 +264,10 @@ export function useCreate() {
       setError('Please upload a source image for Image-to-Image.')
       return
     }
+    if (mode === 'video' && state.videoSubMode === 'i2v' && !i2vImage) {
+      setError('Please upload an input image for Image-to-Video.')
+      return
+    }
     if (!activeModel) {
       setError(mode === 'image'
         ? 'No image model selected. Add checkpoints or FLUX models to ComfyUI.'

@@ -65,24 +65,17 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
   const store = useCreateStore()
   const isVideo = store.mode === 'video'
   const isI2I = store.mode === 'image' && store.imageSubMode === 'img2img'
-  const [videoSubTab, setVideoSubTab] = useState<'t2v' | 'i2v'>('t2v')
+  // Sub-mode now lives in the store (shared with the main-screen T2V/I2V
+  // switch). CreateView owns the always-mounted effect that re-points
+  // store.videoModel to a valid entry when the sub-mode changes.
+  const videoSubMode = store.videoSubMode
   const sizePresets = isVideo ? VID_SIZE_PRESETS : getImageSizePresets(store.imageModelType)
 
-  // Filter video models by sub-tab
+  // Filter video models by sub-mode
   const filteredVideoModels = isVideo
-    ? videoModels.filter(m => videoSubTab === 'i2v' ? isI2VModel(m.name) : !isI2VModel(m.name))
+    ? videoModels.filter(m => videoSubMode === 'i2v' ? isI2VModel(m.name) : !isI2VModel(m.name))
     : videoModels
   const models = isVideo ? filteredVideoModels : imageModels  // i2i also uses imageModels
-
-  // Auto-select first model in filtered list when switching video sub-tabs
-  useEffect(() => {
-    if (!isVideo || filteredVideoModels.length === 0) return
-    const currentModel = store.videoModel
-    const isCurrentInList = filteredVideoModels.some(m => m.name === currentModel)
-    if (!isCurrentInList) {
-      store.setVideoModel(filteredVideoModels[0].name)
-    }
-  }, [videoSubTab, isVideo])
 
   const sel = 'w-full px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/8 text-gray-900 dark:text-white text-[11px] focus:outline-none focus:border-gray-400 dark:focus:border-white/20 cursor-pointer'
   const lbl = 'text-[10px] font-medium text-gray-500 dark:text-gray-600 uppercase tracking-widest mb-1 block'
@@ -104,9 +97,9 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
       {isVideo && (
         <div className="flex rounded-lg bg-gray-100 dark:bg-white/5 p-0.5 gap-0.5">
           <button
-            onClick={() => setVideoSubTab('t2v')}
+            onClick={() => store.setVideoSubMode('t2v')}
             className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[10px] font-medium transition-all ${
-              videoSubTab === 't2v'
+              videoSubMode === 't2v'
                 ? 'bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm'
                 : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
@@ -115,9 +108,9 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
             Text to Video
           </button>
           <button
-            onClick={() => setVideoSubTab('i2v')}
+            onClick={() => store.setVideoSubMode('i2v')}
             className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-[10px] font-medium transition-all ${
-              videoSubTab === 'i2v'
+              videoSubMode === 'i2v'
                 ? 'bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm'
                 : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
@@ -158,7 +151,7 @@ export function ParamPanel({ imageModels, videoModels, samplerList, schedulerLis
 
       {/* Model */}
       <div>
-        <label className={lbl}>{isVideo ? (videoSubTab === 'i2v' ? 'I2V Model' : 'Video Model') : 'Image Model'}</label>
+        <label className={lbl}>{isVideo ? (videoSubMode === 'i2v' ? 'I2V Model' : 'Video Model') : 'Image Model'}</label>
         {modelLoadError ? (
           <div className="space-y-1">
             <div className="px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-[10px]">

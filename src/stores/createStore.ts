@@ -50,6 +50,10 @@ export interface GalleryItem {
 interface CreateState {
   mode: 'image' | 'video'
   imageSubMode: 'text2img' | 'img2img'
+  // Video sub-mode mirrors imageSubMode so the main Create screen can offer a
+  // Text-to-Video / Image-to-Video switch (the I2V upload + model filter key
+  // off this). Session-only (not persisted), defaults to 't2v' each launch.
+  videoSubMode: 't2v' | 'i2v'
   prompt: string
   negativePrompt: string
   imageModel: string
@@ -104,6 +108,7 @@ interface CreateState {
   setPreflightStatus: (ready: boolean | null, errors: PreflightError[], warnings: string[]) => void
   setMode: (mode: 'image' | 'video') => void
   setImageSubMode: (subMode: 'text2img' | 'img2img') => void
+  setVideoSubMode: (subMode: 't2v' | 'i2v') => void
   setPrompt: (prompt: string) => void
   setNegativePrompt: (negativePrompt: string) => void
   setImageModel: (model: string, type: ModelType) => void
@@ -145,6 +150,7 @@ export const useCreateStore = create<CreateState>()(
     (set) => ({
       mode: 'image',
       imageSubMode: 'text2img' as 'text2img' | 'img2img',
+      videoSubMode: 't2v' as 't2v' | 'i2v',
       prompt: '',
       negativePrompt: '',
       imageModel: '',
@@ -212,6 +218,10 @@ export const useCreateStore = create<CreateState>()(
         return { mode }
       }),
       setImageSubMode: (subMode) => set({ imageSubMode: subMode }),
+      // Plain setter — CreateView owns an always-mounted effect that re-points
+      // videoModel to a valid entry for the chosen sub-mode (so toggling works
+      // whether or not the Advanced panel is open).
+      setVideoSubMode: (subMode: 't2v' | 'i2v') => set({ videoSubMode: subMode }),
       setPrompt: (prompt) => set({ prompt }),
       setNegativePrompt: (negativePrompt) => set({ negativePrompt }),
       setImageModel: (model, type) => {

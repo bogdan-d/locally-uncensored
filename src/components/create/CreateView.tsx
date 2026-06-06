@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { Image, Video, WifiOff, Loader2, AlertTriangle, RefreshCw, Settings, FolderOpen, HardDriveDownload, CheckCircle2, XCircle, Download, Pause, Play, X as XIcon, Upload, ImagePlus, PackageOpen, FileVideo } from 'lucide-react'
+import { Image, Video, WifiOff, Loader2, AlertTriangle, RefreshCw, ChevronDown, FolderOpen, HardDriveDownload, CheckCircle2, XCircle, Download, Pause, Play, X as XIcon, Upload, ImagePlus, PackageOpen, FileVideo } from 'lucide-react'
 import { backendCall } from '../../api/backend'
-import { freeMemory, uploadImage, classifyModel } from '../../api/comfyui'
+import { freeMemory, uploadImage, isI2VModel } from '../../api/comfyui'
 import { startModelDownload, getDownloadProgress, pauseDownload, cancelDownload, resumeDownload } from '../../api/discover'
 import { useCreate } from '../../hooks/useCreate'
 import { useCreateStore } from '../../stores/createStore'
@@ -184,7 +184,7 @@ export function CreateView() {
     connected, imageModels, videoModels, samplerList, schedulerList,
     videoBackend, modelsLoaded, modelLoadError, checkConnection, fetchModels, runPreflight, generate, cancel,
   } = useCreate()
-  const { mode, setMode, imageSubMode, error, preflightReady, preflightErrors, preflightWarnings, videoModel, i2vImage, setI2vImage, i2iImage, setI2iImage, denoise, setDenoise } = useCreateStore()
+  const { mode, setMode, imageSubMode, videoSubMode, error, preflightReady, preflightErrors, preflightWarnings, videoModel, setVideoModel, i2vImage, setI2vImage, i2iImage, setI2iImage, denoise, setDenoise } = useCreateStore()
 
   const [status, setStatus] = useState<ComfyStatus | null>(null)
   const [startupLogs, setStartupLogs] = useState<string[]>([])
@@ -334,9 +334,23 @@ export function CreateView() {
     }
   }, [mode, videoModel, connected, modelsLoaded, runPreflight])
 
-  // Detect I2V model (SVD, FramePack need an input image)
-  const videoModelType = videoModel ? classifyModel(videoModel) : null
-  const isI2V = mode === 'video' && (videoModelType === 'svd' || videoModelType === 'framepack')
+  // Image-to-Video is now an explicit sub-mode (set from the main screen),
+  // mirroring the image T2I/I2I switch. When the user is in I2V we show the
+  // input-image dropzone below.
+  const isI2V = mode === 'video' && videoSubMode === 'i2v'
+
+  // Keep the selected video model valid for the chosen T2V/I2V sub-mode. Runs
+  // on sub-mode toggle AND when the model list finishes loading, so the
+  // main-screen switch works without the Advanced panel being mounted.
+  useEffect(() => {
+    if (mode !== 'video' || videoModels.length === 0) return
+    const wantI2V = videoSubMode === 'i2v'
+    const filtered = videoModels.filter((m) => (wantI2V ? isI2VModel(m.name) : !isI2VModel(m.name)))
+    if (filtered.length === 0) return
+    if (!filtered.some((m) => m.name === videoModel)) {
+      setVideoModel(filtered[0].name)
+    }
+  }, [mode, videoSubMode, videoModels, videoModel, setVideoModel])
 
   const handleI2vUpload = async (file: File) => {
     if (!file.type.startsWith('image/')) return
@@ -693,12 +707,13 @@ export function CreateView() {
               )}
               <button
                 onClick={() => setShowParams(!showParams)}
-                title={showParams ? 'Hide advanced parameters' : 'Show advanced parameters'}
-                aria-pressed={showParams}
-                aria-label="Toggle advanced parameters"
-                className={`p-1.5 rounded-lg transition-colors ${showParams ? 'bg-gray-200 dark:bg-white/10 text-gray-800 dark:text-gray-200' : 'hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500'}`}
+                title={showParams ? 'Hide advanced settings' : 'Show advanced settings'}
+                aria-expanded={showParams}
+                aria-label="Toggle advanced settings"
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${showParams ? 'bg-gray-200 dark:bg-white/10 text-gray-800 dark:text-gray-200' : 'hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500'}`}
               >
-                <Settings size={14} />
+                Advanced Settings
+                <ChevronDown size={14} className={`transition-transform ${showParams ? 'rotate-180' : ''}`} />
               </button>
             </div>
           </div>
@@ -832,7 +847,7 @@ export function CreateView() {
                     {i2vUploading ? 'Uploading...' : 'Drop or click to upload input image'}
                   </span>
                   <span className="text-[9px] text-gray-600">
-                    {videoModelType === 'svd' ? 'SVD' : 'FramePack'} generates video from an image
+                    Image-to-Video: animates your input image guided by the prompt
                   </span>
                 </button>
               )}
@@ -949,7 +964,7 @@ export function CreateView() {
 
           {/* Prompt */}
           {!showNoModelsEmptyState && (
-            <PromptInput onGenerate={generate} onCancel={cancel} disabled={!connected || !modelsLoaded} />
+            <PromptInput onGenerate={generate} onCancel={cancel} disabled={!connected || !modelsLoaded} imageModels={imageModels} videoModels={videoModels} />
           )}
         </div>
 
@@ -980,7 +995,7 @@ export function CreateView() {
               <div className="flex items-center justify-between mb-3">
                 <p className="text-[10px] font-medium text-gray-600 uppercase tracking-widest">Parameters</p>
                 <button onClick={() => setShowParams(false)} className="p-1 text-gray-500 hover:text-gray-300" aria-label="Close settings panel">
-                  <Settings size={12} />
+                  <XIcon size={12} />
                 </button>
               </div>
               <ParamPanel
