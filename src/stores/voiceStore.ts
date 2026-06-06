@@ -7,6 +7,11 @@ interface VoiceState {
   isTranscribing: boolean;
   isSpeaking: boolean;
   transcript: string;
+  // Whether local Whisper STT is actually available. Probed at startup and
+  // after the in-app install — transient (re-probed every launch) so a stale
+  // "available" can never light up the mic on a machine where Whisper is gone,
+  // and a fresh install lights it up without a restart.
+  sttAvailable: boolean;
 
   // Persisted settings
   sttEnabled: boolean;
@@ -14,13 +19,13 @@ interface VoiceState {
   ttsVoice: string;
   ttsRate: number;
   ttsPitch: number;
-  autoSendOnTranscribe: boolean;
 
   // Actions
   setRecording: (recording: boolean) => void;
   setTranscribing: (transcribing: boolean) => void;
   setSpeaking: (speaking: boolean) => void;
   setTranscript: (transcript: string) => void;
+  setSttAvailable: (available: boolean) => void;
   updateVoiceSettings: (
     settings: Partial<{
       sttEnabled: boolean;
@@ -28,7 +33,6 @@ interface VoiceState {
       ttsVoice: string;
       ttsRate: number;
       ttsPitch: number;
-      autoSendOnTranscribe: boolean;
     }>
   ) => void;
   resetTransient: () => void;
@@ -42,6 +46,7 @@ export const useVoiceStore = create<VoiceState>()(
       isTranscribing: false,
       isSpeaking: false,
       transcript: "",
+      sttAvailable: false,
 
       // Persisted settings
       sttEnabled: true,
@@ -49,13 +54,13 @@ export const useVoiceStore = create<VoiceState>()(
       ttsVoice: "",
       ttsRate: 1.0,
       ttsPitch: 1.0,
-      autoSendOnTranscribe: true,
 
       // Actions
       setRecording: (recording) => set({ isRecording: recording }),
       setTranscribing: (transcribing) => set({ isTranscribing: transcribing }),
       setSpeaking: (speaking) => set({ isSpeaking: speaking }),
       setTranscript: (transcript) => set({ transcript }),
+      setSttAvailable: (available) => set({ sttAvailable: available }),
 
       updateVoiceSettings: (settings) => set((state) => ({ ...state, ...settings })),
 
@@ -75,7 +80,6 @@ export const useVoiceStore = create<VoiceState>()(
         ttsVoice: state.ttsVoice,
         ttsRate: state.ttsRate,
         ttsPitch: state.ttsPitch,
-        autoSendOnTranscribe: state.autoSendOnTranscribe,
       }),
     }
   )

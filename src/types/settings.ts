@@ -150,6 +150,6 @@ export interface Persona {
   isBuiltIn: boolean
 }
 
-// Voice settings (sttEnabled, ttsEnabled, ttsVoice, ttsRate, ttsPitch,
-// autoSendOnTranscribe) are managed in src/stores/voiceStore.ts via
-// the dedicated Zustand voice store with persistence.
+// Voice settings (sttEnabled, ttsEnabled, ttsVoice, ttsRate, ttsPitch) are
+// managed in src/stores/voiceStore.ts via the dedicated Zustand voice store
+// with persistence.

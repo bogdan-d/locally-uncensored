@@ -176,7 +176,10 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           />
 
           <VoiceButton
-            onTranscript={(text) => { setInput(text); requestAnimationFrame(() => { if (textareaRef.current) { textareaRef.current.style.height = 'auto'; textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px' } }) }}
+            // Dictation fills the input and NEVER auto-sends — the user reviews
+            // and presses Send (David 2026-06-06). Append to any text already
+            // typed instead of replacing it, so a transcript can't wipe input.
+            onTranscript={(text) => { setInput((prev) => (prev.trim() ? prev.replace(/\s+$/, '') + ' ' + text : text)); requestAnimationFrame(() => { if (textareaRef.current) { textareaRef.current.style.height = 'auto'; textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px' } }) }}
             onRecordingChange={(r) => setIsVoiceRecording(r)}
             disabled={isGenerating}
           />

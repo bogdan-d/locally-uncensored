@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { AppShell } from './components/layout/AppShell'
 import { useSettingsStore } from './stores/settingsStore'
+import { useVoiceStore } from './stores/voiceStore'
 
 function App() {
   useEffect(() => {
@@ -10,6 +11,17 @@ function App() {
         invoke('show_window').catch(() => {})
       })
     }
+
+    // Probe local Whisper (STT) once at boot and push the result into the voice
+    // store so the mic button reflects real availability. initWhisperCheck() was
+    // previously never called anywhere → isSpeechRecognitionSupported() stayed
+    // false forever → the mic was permanently disabled even with faster-whisper
+    // installed and running. Fire-and-forget; never blocks first render.
+    import('./api/voice').then(({ initWhisperCheck }) => {
+      initWhisperCheck()
+        .then((ok) => useVoiceStore.getState().setSttAvailable(ok))
+        .catch(() => {})
+    })
 
     // Bug BB v2.5.0 — push persisted GPU selection from localStorage into
     // AppState at app boot so the next Ollama / ComfyUI spawn picks it up

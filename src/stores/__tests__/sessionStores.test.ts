@@ -139,12 +139,12 @@ describe('voiceStore', () => {
       isTranscribing: false,
       isSpeaking: false,
       transcript: '',
+      sttAvailable: false,
       sttEnabled: true,
       ttsEnabled: false,
       ttsVoice: '',
       ttsRate: 1.0,
       ttsPitch: 1.0,
-      autoSendOnTranscribe: true,
     })
   })
 
@@ -163,9 +163,14 @@ describe('voiceStore', () => {
       expect(useVoiceStore.getState().ttsPitch).toBe(0.8)
     })
 
-    it('can disable autoSendOnTranscribe', () => {
-      useVoiceStore.getState().updateVoiceSettings({ autoSendOnTranscribe: false })
-      expect(useVoiceStore.getState().autoSendOnTranscribe).toBe(false)
+  })
+
+  describe('setSttAvailable', () => {
+    it('toggles transient STT availability', () => {
+      useVoiceStore.getState().setSttAvailable(true)
+      expect(useVoiceStore.getState().sttAvailable).toBe(true)
+      useVoiceStore.getState().setSttAvailable(false)
+      expect(useVoiceStore.getState().sttAvailable).toBe(false)
     })
   })
 

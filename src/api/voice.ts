@@ -26,6 +26,15 @@ export async function initWhisperCheck(): Promise<boolean> {
   return whisperAvailable
 }
 
+// Force a fresh availability probe, bypassing the one-shot cache. Used after
+// the in-app faster-whisper install finishes, and when the mic button mounts
+// while STT shows unavailable — the persistent Whisper server can take a while
+// to load its model after boot, so the first startup probe may have been early.
+export async function recheckWhisperAvailable(): Promise<boolean> {
+  whisperChecked = false
+  return initWhisperCheck()
+}
+
 export function isSpeechSynthesisSupported(): boolean {
   return !!window.speechSynthesis;
 }

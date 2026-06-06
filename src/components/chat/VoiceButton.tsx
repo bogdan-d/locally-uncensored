@@ -1,3 +1,4 @@
+import { useEffect } from "react"
 import { motion } from "framer-motion"
 import { Mic, MicOff, Loader2 } from "lucide-react"
 import { useVoice } from "../../hooks/useVoice"
@@ -9,7 +10,15 @@ interface Props {
 }
 
 export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props) {
-  const { isRecording, isTranscribing, sttSupported, startRecording, stopRecording } = useVoice()
+  const { isRecording, isTranscribing, sttSupported, startRecording, stopRecording, recheckStt } = useVoice()
+
+  useEffect(() => {
+    // The startup probe (App.tsx) can run before the persistent Whisper server
+    // has finished loading its model. If STT still reads unavailable when the
+    // mic mounts, do one fresh probe so a late-ready server lights it up.
+    if (!sttSupported) void recheckStt()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleClick = async () => {
     if (disabled || isTranscribing) return
@@ -37,7 +46,7 @@ export function VoiceButton({ onTranscript, onRecordingChange, disabled }: Props
           <MicOff size={14} />
         </button>
         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 dark:bg-gray-700 text-white text-[0.6rem] rounded whitespace-nowrap opacity-0 group-hover/mic:opacity-100 transition-opacity pointer-events-none">
-          Speech recognition not available
+          Speech-to-text off — enable it in Settings → Voice &amp; Remote
         </div>
       </div>
     )

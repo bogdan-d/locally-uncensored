@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
-import { ArrowLeft, RotateCcw, Sun, Moon, Mic, Volume2, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User } from 'lucide-react'
+import { ArrowLeft, RotateCcw, Sun, Moon, Volume2, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -703,7 +703,12 @@ export function SettingsPage() {
   const refreshWhisper = () => {
     setWhisperLoading(true)
     return checkWhisperAvailable()
-      .then(setWhisperStatus)
+      .then((s) => {
+        setWhisperStatus(s)
+        // Drive the mic button's availability from the same probe so it lights
+        // up immediately after the in-app install — no restart needed.
+        voiceSettings.setSttAvailable(!!s.available)
+      })
       .finally(() => setWhisperLoading(false))
   }
 
@@ -1085,7 +1090,6 @@ export function SettingsPage() {
             </div>
             <SliderControl label="Rate" value={voiceSettings.ttsRate} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsRate: v })} />
             <SliderControl label="Pitch" value={voiceSettings.ttsPitch} min={0.5} max={2} step={0.1} onChange={(v) => voiceSettings.updateVoiceSettings({ ttsPitch: v })} />
-            <InlineToggle label="Auto-send on Transcribe" enabled={voiceSettings.autoSendOnTranscribe} onChange={() => voiceSettings.updateVoiceSettings({ autoSendOnTranscribe: !voiceSettings.autoSendOnTranscribe })} icon={<Mic size={11} className="text-gray-500" />} />
           </Section>
 
           <Section title="Remote Access">
