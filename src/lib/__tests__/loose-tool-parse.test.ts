@@ -164,3 +164,79 @@ describe('stripToolCallText — keep raw tool-call JSON out of the visible bubbl
     expect(stripToolCallText('{ "name": "video_generate", "arguments": { "seconds": 4 } }', KNOWN)).toBe('')
   })
 })
+
+// ── New small-model formats (2026-06-06): Phi-4 et al. emit calls the original
+// three patterns missed. Each case below is grounded in a live observation or a
+// known small-model tool-call template, so the parser is the safety net that
+// makes them work without a model swap. ────────────────────────────────────
+describe('parseLooseToolCalls — bracket / space-brace form (Phi-4 live)', () => {
+  const KN = ['file_read', 'file_write', 'file_list', 'image_generate']
+
+  it('extracts the EXACT bracket call Phi-4-mini wrote live: [file_read {"path":"/package.json"}]', () => {
+    const r = parseLooseToolCalls('[file_read {"path": "/package.json"}]', KN)
+    expect(r.calls).toEqual([{ name: 'file_read', arguments: { path: '/package.json' } }])
+    expect(r.matched.length).toBe(1)
+  })
+
+  it('extracts a space-brace call without brackets: file_list {"path":"."}', () => {
+    const r = parseLooseToolCalls('I will list files. file_list {"path": "."}', KN)
+    expect(r.calls[0]).toEqual({ name: 'file_list', arguments: { path: '.' } })
+  })
+
+  it('unwraps an arguments wrapper inside the brace', () => {
+    const r = parseLooseToolCalls('[image_generate {"arguments": {"prompt": "a cat"}}]', KN)
+    expect(r.calls[0]).toEqual({ name: 'image_generate', arguments: { prompt: 'a cat' } })
+  })
+
+  it('ignores an empty brace (file_read {}) — not a usable call', () => {
+    expect(parseLooseToolCalls('file_read {}', KN).calls).toEqual([])
+  })
+
+  it('ignores a non-JSON brace in prose (file_list {the current folder})', () => {
+    expect(parseLooseToolCalls('use file_list {the current folder}', KN).calls).toEqual([])
+  })
+
+  it('ignores an unknown tool in bracket form ([calculate {…}] — LU has no calculate)', () => {
+    expect(parseLooseToolCalls('[calculate {"a": 1}]', KN).calls).toEqual([])
+  })
+})
+
+describe('parseLooseToolCalls — Phi-4 special-token wrapper', () => {
+  const KN = ['file_list', 'file_read']
+
+  it('extracts the JSON object inside <|tool_call|>…<|/tool_call|>', () => {
+    const txt = '<|tool_call|>{"name": "file_list", "arguments": {"path": "."}}<|/tool_call|>'
+    const r = parseLooseToolCalls(txt, KN)
+    expect(r.calls[0]).toEqual({ name: 'file_list', arguments: { path: '.' } })
+  })
+
+  it('stripToolCallText removes the <|tool_call|> tokens from the visible bubble', () => {
+    const txt = 'Listing now.<|tool_call|>{"name":"file_list","arguments":{"path":"."}}<|/tool_call|>'
+    const out = stripToolCallText(txt, KN)
+    expect(out).not.toContain('<|tool_call|>')
+    expect(out).not.toContain('file_list')
+    expect(out.toLowerCase()).toContain('listing now')
+  })
+})
+
+describe('parseLooseToolCalls — nested function object + string args (OpenAI/Phi shapes)', () => {
+  const KN = ['file_write', 'image_generate']
+
+  it('unwraps {"function":{"name","arguments"}}', () => {
+    const txt = '{"function": {"name": "image_generate", "arguments": {"prompt": "x"}}}'
+    const r = parseLooseToolCalls(txt, KN)
+    expect(r.calls[0]).toEqual({ name: 'image_generate', arguments: { prompt: 'x' } })
+  })
+
+  it('repairs args that arrive as a JSON STRING', () => {
+    const txt = '{"name": "file_write", "arguments": "{\\"path\\": \\"a.txt\\", \\"content\\": \\"hi\\"}"}'
+    const r = parseLooseToolCalls(txt, KN)
+    expect(r.calls[0]).toEqual({ name: 'file_write', arguments: { path: 'a.txt', content: 'hi' } })
+  })
+
+  it('accepts the name carried by a tool_call key', () => {
+    const txt = '{"tool_call": "image_generate", "arguments": {"prompt": "y"}}'
+    const r = parseLooseToolCalls(txt, KN)
+    expect(r.calls[0]).toEqual({ name: 'image_generate', arguments: { prompt: 'y' } })
+  })
+})

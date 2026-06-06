@@ -97,15 +97,27 @@ function parseJsonObjectCalls(text: string, known: Set<string>): { call: LooseTo
     }
   }
   for (const cand of candidates) {
-    if (!/["']?(?:name|tool|tool_name|function)["']?\s*[:=]/.test(cand)) continue
+    if (!/["']?(?:name|tool|tool_name|tool_call|function)["']?\s*[:=]/.test(cand)) continue
     const parsed = repairJson(cand) as Record<string, any> | null
     if (!parsed) continue
-    const name = parsed.name || parsed.tool || parsed.tool_name || parsed.function
-    if (typeof name === 'string' && known.has(name)) {
-      const a = parsed.arguments || parsed.parameters || parsed.args || parsed.params || {}
+    // Name + args may arrive in three shapes, all seen from small local models:
+    //   flat     {"name":"file_list","arguments":{…}}
+    //   nested   {"function":{"name":"file_list","arguments":{…}}}  (OpenAI/Phi)
+    //   wrapped  {"tool_call":{"name":…}} or {"tool_call":"file_list","arguments":{…}}
+    // Unwrap an object-valued name carrier so the nested forms resolve too.
+    let nameField: any = parsed.name || parsed.tool || parsed.tool_name || parsed.tool_call || parsed.function
+    let argsField: any = parsed.arguments ?? parsed.parameters ?? parsed.args ?? parsed.params
+    if (nameField && typeof nameField === 'object') {
+      argsField = argsField ?? nameField.arguments ?? nameField.parameters ?? nameField.args
+      nameField = nameField.name || nameField.tool || nameField.tool_name
+    }
+    if (typeof nameField === 'string' && known.has(nameField)) {
+      // Arguments can arrive as a JSON STRING (OpenAI serializes them) — repair it.
+      let a: any = argsField ?? {}
+      if (typeof a === 'string') { const p2 = repairJson(a); a = p2 && typeof p2 === 'object' ? p2 : {} }
       // Report the source snippet so the caller can strip the raw JSON object
       // from the visible prose (otherwise it leaks as a "notes"/JSON block).
-      calls.push({ call: { name, arguments: (a && typeof a === 'object') ? a : {} }, snippet: cand })
+      calls.push({ call: { name: nameField, arguments: (a && typeof a === 'object') ? a : {} }, snippet: cand })
     }
   }
   return calls
@@ -155,6 +167,27 @@ export function parseLooseToolCalls(text: string, known: string[]): LooseParseRe
       // Require at least one arg — `image_generate()` with nothing is not a
       // usable call (and is more likely the model naming the tool in prose).
       if (Object.keys(args).length > 0) push({ name, arguments: args }, m[0])
+    }
+  }
+
+  // 4) Brace / bracket form  name {json}  or  [name {json}]  — only known names.
+  //    Phi-4-mini (and other non-Hermes small models) emit the args as a JSON
+  //    object placed AFTER the bare name, sometimes wrapped in [ ], with NO
+  //    `name` key inside the brace (so patterns 2/3 miss it). Observed live:
+  //    `[file_read {"path": "/package.json"}]`. Require a non-empty object so a
+  //    stray `tool {}` or prose brace isn't misread as a call.
+  for (const name of knownSet) {
+    const re = new RegExp(`\\[?\\s*\\b${escapeRe(name)}\\b\\s*(\\{(?:[^{}]|\\{[^{}]*\\})*\\})\\s*\\]?`, 'g')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(text)) !== null) {
+      const parsed = repairJson(m[1]) as Record<string, any> | null
+      if (!parsed || typeof parsed !== 'object') continue
+      // The brace may BE the args, or wrap them under arguments/parameters.
+      const inner = parsed.arguments ?? parsed.parameters ?? parsed.args ?? parsed.params
+      const args = inner && typeof inner === 'object' ? inner : parsed
+      if (args && typeof args === 'object' && Object.keys(args).length > 0) {
+        push({ name, arguments: args as Record<string, unknown> }, m[0])
+      }
     }
   }
 
@@ -229,6 +262,11 @@ export function stripToolCallText(text: string, known: string[]): string {
     return looksLikeCall ? '' : m
   })
   return out
+    // Strip special-token tool-call wrappers some models leave in the prose
+    // (Phi-4: <|tool_call|>/<|tool|>; Mistral: [TOOL_CALLS]) so they don't show
+    // in the bubble. Detection/parsing above already handled the JSON inside.
+    .replace(/<\|\/?tool(?:_call)?(?:_start|_end)?\|>/gi, '')
+    .replace(/\[\/?TOOL_CALLS?\]/gi, '')
     .replace(/```(?:json|tool_code)?\s*```/gi, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()

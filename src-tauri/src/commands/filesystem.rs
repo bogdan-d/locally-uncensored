@@ -56,6 +56,15 @@ fn resolve_path(path: &str, chat_id: Option<&str>) -> PathBuf {
     }
 }
 
+/// True when `path` addresses the workspace ROOT itself ("", ".", "./",
+/// trailing slashes) rather than a named subpath. Used to decide whether a
+/// missing directory should be auto-created as the per-chat sandbox root.
+fn is_workspace_root_path(path: &str) -> bool {
+    let t = path.trim().replace('\\', "/");
+    let t = t.trim_end_matches('/');
+    t.is_empty() || t == "."
+}
+
 fn file_meta(path: &Path) -> serde_json::Value {
     let meta = fs::metadata(path);
     let (size, modified, is_dir) = match meta {
@@ -119,7 +128,19 @@ pub fn fs_list(
 ) -> Result<serde_json::Value, String> {
     let dir = resolve_path(&path, chatId.as_deref());
     if !dir.is_dir() {
-        return Err(format!("Not a directory: {}", dir.display()));
+        // A fresh per-chat agent sandbox (~/agent-workspace/<chat_id>) may not
+        // exist yet. When the model lists the workspace ROOT with a relative
+        // "." / "" path, create it so `file_list .` returns an empty listing
+        // instead of "Not a directory" — small models otherwise climb to an
+        // absolute drive-root path. Mirrors shell.rs (create_dir_all on cwd).
+        // ONLY the sandbox root is auto-created; absolute or sub paths error.
+        let cleaned = normalize_duplicate_drive_prefix(&path);
+        if is_workspace_root_path(&cleaned) && !Path::new(&cleaned).is_absolute() {
+            let _ = fs::create_dir_all(&dir);
+        }
+        if !dir.is_dir() {
+            return Err(format!("Not a directory: {}", dir.display()));
+        }
     }
 
     let mut entries: Vec<serde_json::Value> = Vec::new();
@@ -320,5 +341,24 @@ pub async fn save_binary_file_dialog(
             Ok(Some(path.to_string_lossy().into_owned()))
         }
         None => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_workspace_root_path;
+
+    #[test]
+    fn workspace_root_paths_match() {
+        for p in ["", ".", "./", ".\\", "  .  ", "/", "\\"] {
+            assert!(is_workspace_root_path(p), "expected root-ish: {:?}", p);
+        }
+    }
+
+    #[test]
+    fn named_subpaths_are_not_root() {
+        for p in ["src", "./src", "package.json", "a/b", ".git", ".."] {
+            assert!(!is_workspace_root_path(p), "expected NOT root-ish: {:?}", p);
+        }
     }
 }
