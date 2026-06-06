@@ -263,21 +263,25 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
             })()
           )}
 
-          {!isEditing && (
-            <div className="absolute top-1 right-1 flex items-center gap-0.5">
-              {isUser && onEdit && (
-                <button onClick={startEdit} className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-500 hover:text-white transition-all" aria-label="Edit message"><Pencil size={10} /></button>
-              )}
-              {!isUser && onRegenerate && (
-                <button onClick={onRegenerate} className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-500 hover:text-white transition-all" aria-label="Regenerate response"><RefreshCw size={10} /></button>
-              )}
-              <button onClick={handleCopy} className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 text-gray-500 hover:text-white transition-all" aria-label="Copy message">
-                {copied ? <Check size={10} /> : <Copy size={10} />}
-              </button>
-              {!isUser && <SpeakerButton text={message.content} />}
-            </div>
-          )}
         </div>
+
+        {/* Action bar UNDER the message (David 2026-06-06: "eigene Leiste unter
+            der Nachricht" instead of cramped hover-icons in the corner). Bigger
+            targets, always visible but subtle; assistant left, user right. */}
+        {!isEditing && (
+          <div className={'flex items-center gap-0.5 ' + (isUser ? 'justify-end pr-0.5' : 'justify-start pl-0.5')}>
+            {isUser && onEdit && (
+              <button onClick={startEdit} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Edit message" title="Edit"><Pencil size={12} /></button>
+            )}
+            {!isUser && onRegenerate && (
+              <button onClick={onRegenerate} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Regenerate response" title="Regenerate"><RefreshCw size={12} /></button>
+            )}
+            <button onClick={handleCopy} className="p-1 rounded-md text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors" aria-label="Copy message" title={copied ? 'Copied' : 'Copy'}>
+              {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+            </button>
+            {!isUser && <SpeakerButton text={message.content} />}
+          </div>
+        )}
 
         {/* RAG sources */}
         {!isUser && message.sources && message.sources.length > 0 && (
