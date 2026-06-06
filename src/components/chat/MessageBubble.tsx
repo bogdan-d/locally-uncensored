@@ -104,9 +104,8 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
       <div
         className={
           'w-6 h-6 rounded-md overflow-hidden flex items-center justify-center shrink-0 ' +
-          (isUser
-            ? 'bg-gray-100 dark:bg-white/8 border border-gray-200 dark:border-white/10'
-            : 'bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/[0.06]')
+          // User avatar keeps a framed chip; the AI monogram stands alone (no box).
+          (isUser ? 'bg-gray-100 dark:bg-white/8 border border-gray-200 dark:border-white/10' : '')
         }
       >
         {isUser ? (
@@ -114,8 +113,8 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
             ? <img src={userAvatarDataUrl} alt="" className="w-full h-full object-cover" />
             : <User size={11} className="text-gray-400" />
         ) : (
-          // AI avatar is ALWAYS the LU black/white monogram (theme-inverted).
-          <img src="/LU-monogram-bw.png" alt="" className="w-4 h-4 object-contain dark:invert-0 invert opacity-80" />
+          // AI avatar = the LU monogram ALONE, filling the slot — no box/border/bg.
+          <img src="/LU-monogram-bw.png" alt="" className="w-full h-full object-contain dark:invert-0 invert opacity-80" />
         )}
       </div>
 

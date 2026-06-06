@@ -235,13 +235,13 @@ export function CodexView() {
                     <div className={`w-5 h-5 rounded overflow-hidden flex items-center justify-center shrink-0 ${
                       msg.role === 'user'
                         ? 'bg-gray-100 dark:bg-white/8'
-                        : 'bg-gray-50 dark:bg-white/5'
+                        : ''
                     }`}>
                       {msg.role === 'user'
                         ? (userAvatarDataUrl
                             ? <img src={userAvatarDataUrl} alt="" className="w-full h-full object-cover" />
                             : <User size={9} className="text-gray-400" />)
-                        : <img src="/LU-monogram-bw.png" alt="" className="w-3 h-3 object-contain dark:invert-0 invert opacity-80" />
+                        : <img src="/LU-monogram-bw.png" alt="" className="w-full h-full object-contain dark:invert-0 invert opacity-80" />
                       }
                     </div>
                     <div className="max-w-[85%] space-y-0.5">
