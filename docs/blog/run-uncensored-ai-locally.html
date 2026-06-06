@@ -9,7 +9,7 @@
 <meta property="og:title" content="How to Run Uncensored AI Locally: Chat, Images & Video in One App">
 <meta property="og:description" content="Generate anything — text, images, video. Locally. Uncensored. Practical guide to running AI on your own hardware.">
 <meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
-<meta property="og:url" content="https://purpledoubled.github.io/locally-uncensored/blog/run-uncensored-ai-locally">
+<meta property="og:url" content="https://locallyuncensored.com/blog/run-uncensored-ai-locally">
 <meta property="og:type" content="article">
 <meta property="article:published_time" content="2025-03-29">
 <meta property="article:author" content="PurpleDoubleD">
@@ -21,14 +21,16 @@
 <meta name="twitter:title" content="How to Run Uncensored AI Locally: Chat, Images & Video in One App">
 <meta name="twitter:description" content="Run uncensored AI locally — chat, images, and video in one open-source app.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
-<link rel="canonical" href="https://purpledoubled.github.io/locally-uncensored/blog/run-uncensored-ai-locally">
+<link rel="canonical" href="https://locallyuncensored.com/blog/run-uncensored-ai-locally">
 <meta name="robots" content="index, follow">
 <meta name="theme-color" content="#0a0a0a">
 <link rel="icon" href="../favicon.png">
 <!-- Privacy: No external fonts loaded. Using system fonts. -->
-<script defer data-domain="YOUR-DOMAIN.com" src="https://plausible.YOUR-DOMAIN.com/js/script.js"></script>
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"How to Run Uncensored AI Locally: Chat, Images & Video in One App","description":"A practical guide to running uncensored AI on your own hardware. Learn about abliterated models, set up Locally Uncensored with Ollama and ComfyUI, and generate text, images, and video — all offline.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2025-03-29","dateModified":"2025-03-29","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://purpledoubled.github.io/locally-uncensored/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://purpledoubled.github.io/locally-uncensored/blog/run-uncensored-ai-locally"},"keywords":"run uncensored AI locally, local AI app, ollama comfyui combined, uncensored local AI, abliterated models"}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"How to Run Uncensored AI Locally: Chat, Images & Video in One App","description":"A practical guide to running uncensored AI on your own hardware. Learn about abliterated models, set up Locally Uncensored with Ollama and ComfyUI, and generate text, images, and video — all offline.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-03-29","dateModified":"2026-03-29","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/run-uncensored-ai-locally"},"keywords":"run uncensored AI locally, local AI app, ollama comfyui combined, uncensored local AI, abliterated models"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What does \"uncensored\" actually mean in this context?","acceptedAnswer":{"@type":"Answer","text":"It means the AI models used don't have artificial content restrictions. They respond to all requests without refusals or disclaimers. This is achieved through abliterated model weights, not through prompt injection or jailbreaking. The models are structurally modified to remove refusal behavior."}},{"@type":"Question","name":"Is this legal?","acceptedAnswer":{"@type":"Answer","text":"Yes. Running open-weight AI models locally is completely legal. The models used (Llama 3.1, Mistral, Qwen, etc.) are released under permissive licenses that allow local use. You're responsible for what you do with the outputs, just like with any tool."}},{"@type":"Question","name":"Can I run this without an NVIDIA GPU?","acceptedAnswer":{"@type":"Answer","text":"For chat: absolutely. Ollama supports CPU inference, and Apple Silicon Macs get GPU acceleration via Metal. Chat models run fine on CPU, just slower. For image and video generation: you need an NVIDIA GPU with CUDA support (or an AMD GPU with ROCm on Linux). ComfyUI doesn't support CPU-only generation in any practical way."}},{"@type":"Question","name":"How much disk space do I need?","acceptedAnswer":{"@type":"Answer","text":"A minimal setup (one chat model) needs about 6 GB. If you add image generation models, plan for 15-25 GB depending on which checkpoints you download. Video models add another 8-10 GB. Everything is downloaded incrementally — start with chat and add generation models later."}},{"@type":"Question","name":"Can I use my own custom Ollama models or ComfyUI checkpoints?","acceptedAnswer":{"@type":"Answer","text":"Yes. The app auto-detects any model installed in Ollama and any checkpoint placed in ComfyUI's model directory. There's no lock-in to specific model sources."}},{"@type":"Question","name":"Does it phone home or collect telemetry?","acceptedAnswer":{"@type":"Answer","text":"No. Zero telemetry, zero analytics, zero network requests beyond what Ollama and ComfyUI need for their initial installation. Once set up, the entire stack runs on localhost. The code is AGPL-3.0 licensed and fully auditable on GitHub."}},{"@type":"Question","name":"How is this different from just running Ollama + ComfyUI separately?","acceptedAnswer":{"@type":"Answer","text":"You absolutely can run them separately — many people do. Locally Uncensored saves you the hassle of maintaining two separate tools, switching between browser tabs, and manually configuring ComfyUI workflows. It's a convenience layer that ties everything together with a unified UI, built-in personas, and one-click model management."}}]}
 </script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -141,7 +143,7 @@ footer a:hover{color:var(--text);text-decoration:none}
 
     <p>There's a better way. You can <strong>run uncensored AI locally</strong> on your own hardware — chat, image generation, and video creation — without sending a single byte to the cloud.</p>
 
-    <p>This guide walks through how to do exactly that using <a href="https://purpledoubled.github.io/locally-uncensored/">Locally Uncensored</a>, an open-source desktop app that combines Ollama and ComfyUI into a single interface.</p>
+    <p>This guide walks through how to do exactly that using <a href="https://locallyuncensored.com/">Locally Uncensored</a>, an open-source desktop app that combines Ollama and ComfyUI into a single interface.</p>
 
     <h2>Why Run AI Locally?</h2>
 
@@ -288,7 +290,7 @@ cd locally-uncensored</code></pre>
     <p>Yes. The app auto-detects any model installed in Ollama and any checkpoint placed in ComfyUI's model directory. There's no lock-in to specific model sources.</p>
 
     <h3>Does it phone home or collect telemetry?</h3>
-    <p>No. Zero telemetry, zero analytics, zero network requests beyond what Ollama and ComfyUI need for their initial installation. Once set up, the entire stack runs on localhost. The code is MIT licensed and fully auditable on <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>.</p>
+    <p>No. Zero telemetry, zero analytics, zero network requests beyond what Ollama and ComfyUI need for their initial installation. Once set up, the entire stack runs on localhost. The code is AGPL-3.0 licensed and fully auditable on <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>.</p>
 
     <h3>How is this different from just running Ollama + ComfyUI separately?</h3>
     <p>You absolutely can run them separately — many people do. Locally Uncensored saves you the hassle of maintaining two separate tools, switching between browser tabs, and manually configuring ComfyUI workflows. It's a convenience layer that ties everything together with a unified UI, built-in personas, and one-click model management.</p>
@@ -303,13 +305,13 @@ cd locally-uncensored
 
     <p>That's it. The setup script handles everything else.</p>
 
-    <p>Check out the <a href="https://purpledoubled.github.io/locally-uncensored/">landing page</a> for screenshots and feature details, or go straight to the <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub repo</a> to browse the source.</p>
+    <p>Check out the <a href="https://locallyuncensored.com/">landing page</a> for screenshots and feature details, or go straight to the <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub repo</a> to browse the source.</p>
 
     <p>If you run into issues or have feature requests, the <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">GitHub Discussions</a> page is the place.</p>
 
     <hr>
 
-    <p><em>Locally Uncensored is MIT licensed and free to use. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
+    <p><em>Locally Uncensored is AGPL-3.0 licensed and free to use. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
   </article>
 
   <div class="post-footer">
@@ -322,7 +324,7 @@ cd locally-uncensored
 </div>
 
 <footer>
-  <span>MIT License. Built by <a href="https://github.com/PurpleDoubleD" target="_blank">PurpleDoubleD</a>.</span>
+  <span>AGPL-3.0 License. Built by <a href="https://github.com/PurpleDoubleD" target="_blank">PurpleDoubleD</a>.</span>
   <div class="footer-links">
     <a href="https://github.com/PurpleDoubleD/locally-uncensored" target="_blank">GitHub</a>
     <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions" target="_blank">Discussions</a>
