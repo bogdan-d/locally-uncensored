@@ -398,6 +398,43 @@ describe('memoryStore', () => {
     })
   })
 
+  // konata-session 2026-06-07 (Aldrich Ironhart "memory import issue"): the
+  // single Import button only opened the .md picker, so JSON import was dead;
+  // importFromJSON also accepted ONLY {entries:[...]} and reported nothing.
+  describe('import (tolerant shapes + count)', () => {
+    it("imports LU's own {entries:[...]} export and returns the count", () => {
+      const n = useMemoryStore.getState().importFromJSON(JSON.stringify({ entries: [
+        { type: 'user', title: 'A', content: 'alpha' },
+        { type: 'project', title: 'B', content: 'beta' },
+      ] }))
+      expect(n).toBe(2)
+      expect(useMemoryStore.getState().entries).toHaveLength(2)
+    })
+    it('tolerates a bare array', () => {
+      expect(useMemoryStore.getState().importFromJSON(JSON.stringify([{ content: 'x' }, { content: 'y' }]))).toBe(2)
+    })
+    it('tolerates a {memories:[...]} shape', () => {
+      expect(useMemoryStore.getState().importFromJSON(JSON.stringify({ memories: [{ content: 'z' }] }))).toBe(1)
+    })
+    it('returns 0 for invalid JSON and for entries without content', () => {
+      expect(useMemoryStore.getState().importFromJSON('not json')).toBe(0)
+      expect(useMemoryStore.getState().importFromJSON(JSON.stringify({ entries: [{ title: 'no content' }] }))).toBe(0)
+      expect(useMemoryStore.getState().entries).toHaveLength(0)
+    })
+    it('regenerates ids so a re-imported export never collides', () => {
+      const json = JSON.stringify({ entries: [{ id: 'fixed-id', type: 'user', title: 'T', content: 'c' }] })
+      useMemoryStore.getState().importFromJSON(json)
+      useMemoryStore.getState().importFromJSON(json)
+      const ids = useMemoryStore.getState().entries.map(e => e.id)
+      expect(new Set(ids).size).toBe(2)
+    })
+    it('importFromMarkdown returns the number of parsed entries', () => {
+      const md = '# Memory\n\n## User\n\n- **Likes** — coffee [drinks] *(import)*\n'
+      expect(useMemoryStore.getState().importFromMarkdown(md)).toBe(1)
+      expect(useMemoryStore.getState().entries[0].content).toBe('coffee')
+    })
+  })
+
   describe('addMemory', () => {
     it('adds a MemoryFile to the store', () => {
       useMemoryStore.getState().addMemory({

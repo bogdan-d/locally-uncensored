@@ -202,11 +202,12 @@ interface MemoryState {
   // Settings
   updateMemorySettings: (updates: Partial<MemorySettings>) => void
 
-  // Export / Import
+  // Export / Import — importers return the number of entries actually added
+  // so the UI can give feedback (konata-session 2026-06-07: silent 0-import).
   exportAsMarkdown: () => string
-  importFromMarkdown: (markdown: string) => void
+  importFromMarkdown: (markdown: string) => number
   exportAsJSON: () => string
-  importFromJSON: (json: string) => void
+  importFromJSON: (json: string) => number
 
   // Legacy compat (used by old code paths during transition)
   addEntry: (category: MemoryCategory, content: string, source?: string) => void
@@ -627,6 +628,7 @@ export const useMemoryStore = create<MemoryState>()(
             lastSynced: Date.now(),
           }))
         }
+        return newEntries.length
       },
 
       exportAsJSON: () => {
@@ -635,17 +637,47 @@ export const useMemoryStore = create<MemoryState>()(
       },
 
       importFromJSON: (json) => {
+        let raw: any
         try {
-          const data = JSON.parse(json)
-          if (Array.isArray(data.entries)) {
-            set((state) => ({
-              entries: [...state.entries, ...data.entries],
-              lastSynced: Date.now(),
-            }))
-          }
+          raw = JSON.parse(json)
         } catch {
           log.error('Failed to parse memory JSON import')
+          return 0
         }
+        // Tolerant shape handling: accept LU's own {entries:[...]} export, a
+        // bare [...] array, or {memories:[...]} (konata-session 2026-06-07 —
+        // imports silently produced 0 entries on any other shape).
+        const arr: any[] = Array.isArray(raw) ? raw
+          : Array.isArray(raw?.entries) ? raw.entries
+          : Array.isArray(raw?.memories) ? raw.memories
+          : []
+        const VALID: MemoryType[] = ['user', 'feedback', 'project', 'reference']
+        const now = Date.now()
+        const newEntries: MemoryFile[] = []
+        for (const e of arr) {
+          const content = String(e?.content ?? e?.text ?? e?.value ?? '').trim()
+          if (!content) continue
+          newEntries.push({
+            // Always mint a fresh id so a re-imported export can never collide
+            // with an existing entry's id (which broke edit/remove-by-id).
+            id: uuid(),
+            type: VALID.includes(e?.type) ? e.type : 'user',
+            title: String(e?.title ?? content).slice(0, 60).replace(/\n/g, ' '),
+            description: String(e?.description ?? content).slice(0, 120),
+            content,
+            tags: Array.isArray(e?.tags) ? e.tags.map((t: any) => String(t)) : [],
+            createdAt: typeof e?.createdAt === 'number' ? e.createdAt : now,
+            updatedAt: now,
+            source: String(e?.source ?? 'import'),
+          })
+        }
+        if (newEntries.length > 0) {
+          set((state) => ({
+            entries: [...state.entries, ...newEntries],
+            lastSynced: now,
+          }))
+        }
+        return newEntries.length
       },
 
       // ── Legacy Compat ───────────────────────────────────────

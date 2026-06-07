@@ -42,10 +42,27 @@ export function parseHfUrl(url: string): HfRef | null {
  * given on `hf.co/<repo>` references).
  */
 export function extractGgufQuant(filename: string): string | undefined {
+  // Recognise unsloth "UD" dynamic quants (Q4_K_XL / Q4_K_XS) and bare K-quants
+  // (Q6_K) in addition to the classic Q*_K_{M,S,L}. Without the XL/XS arm,
+  // unsloth files like `...-UD-Q4_K_XL.gguf` produced NO quant tag, so the
+  // Ollama HF ref fell back to a tag-less `hf.co/<repo>` pull (Aldrich Ironhart,
+  // Discord 2026-06-07 — "Gemma 4 26B MoE" → ollama 400).
   const m = filename.match(
-    /[-._](Q\d_K_[MSL]|Q\d_[01]|IQ\d_[A-Z0-9_]+|F16|BF16|F32)\.gguf$/i
+    /[-._](Q\d_K_(?:XL|XS|[MSL])|Q\d_K|Q\d_[01]|IQ\d_[A-Z0-9_]+|F16|BF16|F32)\.gguf$/i
   )
   return m?.[1].toUpperCase()
+}
+
+/**
+ * True when an Ollama pull error names a HuggingFace repo Ollama can't ingest
+ * as a flat single-file GGUF — split into shards or "not compatible with
+ * llama.cpp" (ollama/ollama#5245). Such models download fine via LM Studio.
+ * A bare HTTP 400 is handled separately by the caller (it's more often an
+ * out-of-date Ollama than a bad repo — Aldrich Ironhart, Discord 2026-06-07:
+ * "Gemma 4 26B MoE → ollama: 400", yet the same pull succeeds on current Ollama).
+ */
+export function isShardedOrIncompatibleGguf(errMsg: string): boolean {
+  return /shard|split|5245|not\s*gguf|not\s*compatible|repository is not/i.test(errMsg)
 }
 
 /**

@@ -27,8 +27,10 @@ export function MemorySettings() {
   // Feature FF: reveal outdated (stale/superseded) entries, read-only.
   const [showOutdated, setShowOutdated] = useState(false)
   const [reembedState, setReembedState] = useState<'idle' | 'running' | 'done'>('idle')
+  // Import feedback (konata-session 2026-06-07): report how many memories were
+  // imported — or why none were. The import used to fail silently.
+  const [importMsg, setImportMsg] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const jsonInputRef = useRef<HTMLInputElement>(null)
 
   // ── New memory form state ───────────────────────────────────
   const [newTitle, setNewTitle] = useState('')
@@ -92,28 +94,30 @@ export function MemorySettings() {
     URL.revokeObjectURL(url)
   }
 
-  const handleImportMd = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // One Import button for BOTH .md and .json. The old UI wired the single
+  // button only to the markdown picker, so the JSON path (jsonInputRef /
+  // handleImportJSON) was unreachable — a user who imported a .json export saw
+  // nothing happen (konata-session 2026-06-07). Route by extension, fall back
+  // to sniffing the content, and always report the result.
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
+    e.target.value = '' // allow re-picking the same file
     if (!file) return
     const reader = new FileReader()
     reader.onload = (ev) => {
       const content = ev.target?.result as string
-      if (content) importFromMarkdown(content)
+      if (!content) { setImportMsg('Could not read that file.'); return }
+      const trimmed = content.trimStart()
+      const isJson = /\.json$/i.test(file.name) || trimmed.startsWith('{') || trimmed.startsWith('[')
+      const count = isJson ? importFromJSON(content) : importFromMarkdown(content)
+      setImportMsg(
+        count > 0
+          ? `Imported ${count} ${count === 1 ? 'memory' : 'memories'}.`
+          : 'No memories found in that file. Use a Locally Uncensored .md or .json export (JSON needs an "entries" or "memories" array).',
+      )
     }
+    reader.onerror = () => setImportMsg('Could not read that file.')
     reader.readAsText(file)
-    e.target.value = ''
-  }
-
-  const handleImportJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const content = ev.target?.result as string
-      if (content) importFromJSON(content)
-    }
-    reader.readAsText(file)
-    e.target.value = ''
   }
 
   const handleClear = () => {
@@ -388,9 +392,12 @@ export function MemorySettings() {
         >
           <Trash2 size={10} /> {confirmClear ? 'Sure?' : 'Clear'}
         </GlowButton>
-        <input ref={fileInputRef} type="file" accept=".md,.txt" onChange={handleImportMd} className="hidden" />
-        <input ref={jsonInputRef} type="file" accept=".json" onChange={handleImportJSON} className="hidden" />
+        <input ref={fileInputRef} type="file" accept=".md,.txt,.json" onChange={handleImport} className="hidden" />
       </div>
+
+      {importMsg && (
+        <p className="text-[0.6rem] text-gray-500 dark:text-gray-400 px-0.5">{importMsg}</p>
+      )}
     </div>
   )
 }

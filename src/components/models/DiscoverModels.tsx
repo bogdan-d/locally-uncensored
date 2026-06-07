@@ -21,7 +21,7 @@ import { useModelStore } from '../../stores/modelStore'
 import { useWorkflowStore } from '../../stores/workflowStore'
 import { getProviderIdFromModel } from '../../api/providers'
 import { matchesLmStudioInstalled, type InstalledModelLike } from '../../lib/lmstudio-match'
-import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant } from '../../lib/hf-to-provider'
+import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir, parseHfUrl, extractGgufQuant, isShardedOrIncompatibleGguf } from '../../lib/hf-to-provider'
 import { GlassCard } from '../ui/GlassCard'
 import { GlowButton } from '../ui/GlowButton'
 import { ProgressBar } from '../ui/ProgressBar'
@@ -505,8 +505,17 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // a cryptic HTTP 400; tell them what to do.
   const formatPullError = (modelName: string, err: unknown): string => {
     const msg = err instanceof Error ? err.message : String(err)
-    if (/shard|5245|split/i.test(msg)) {
-      return `${modelName} is split into multiple GGUF parts — split GGUF isn't supported yet (Ollama rejects it, ollama/ollama#5245). Pick a single-file quant of this model instead.`
+    // Sharded / "not compatible with llama.cpp" repos genuinely can't go via
+    // Ollama (ollama/ollama#5245) — point at LM Studio.
+    if (isShardedOrIncompatibleGguf(msg)) {
+      return `${modelName} can't be pulled into Ollama — its HuggingFace repo is split into parts or isn't a flat single-file GGUF. Download it via LM Studio instead (it loads sharded GGUF fine), or pick a single-file quant.`
+    }
+    // A bare HTTP 400 from `ollama pull hf.co/...` is usually an OUT-OF-DATE
+    // Ollama (HF-pull support is version-gated) — the same ref succeeds on
+    // current Ollama. Tell the user instead of surfacing "ollama: 400"
+    // (Aldrich Ironhart, Discord 2026-06-07: "Gemma 4 26B MoE → ollama: 400").
+    if (/\b400\b/.test(msg)) {
+      return `Ollama rejected the download of ${modelName} (HTTP 400). This is almost always an out-of-date Ollama — update it from ollama.com/download and retry. Otherwise download via LM Studio, or pick a single-file quant.`
     }
     return `Download failed: ${msg}`
   }
