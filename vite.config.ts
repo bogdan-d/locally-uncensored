@@ -218,14 +218,32 @@ function comfyLauncher(): Plugin {
   let comfyProcess: ChildProcess | null = null
   let comfyLogs: string[] = []
 
+  // Mirror the Rust launcher (process.rs): prefer a venv python so ComfyUI runs
+  // inside the env pip installed torch into. Checks both the classic `venv` and
+  // the modern `.venv` (issue #51, adhney). Dev-mode only.
+  const getComfyPython = (comfyPath: string): string => {
+    const isWin = process.platform === 'win32'
+    for (const v of ['venv', '.venv']) {
+      const vp = isWin
+        ? join(comfyPath, v, 'Scripts', 'python.exe')
+        : join(comfyPath, v, 'bin', 'python')
+      if (existsSync(vp)) {
+        console.log(`[ComfyUI] Using venv python: ${vp}`)
+        return vp
+      }
+    }
+    return pythonBin
+  }
+
   const startComfy = (comfyPath: string): { status: string; path: string } => {
     if (comfyProcess && !comfyProcess.killed) {
       return { status: 'already_running', path: comfyPath }
     }
 
     comfyLogs = []
-    console.log(`[ComfyUI] Spawning ${pythonBin} in: ${comfyPath}`)
-    comfyProcess = spawn(pythonBin, ['main.py', '--listen', '127.0.0.1', '--port', '8188'], {
+    const executable = getComfyPython(comfyPath)
+    console.log(`[ComfyUI] Spawning ${executable} in: ${comfyPath}`)
+    comfyProcess = spawn(executable, ['main.py', '--listen', '127.0.0.1', '--port', '8188', '--enable-cors-header', '*'], {
       cwd: comfyPath,
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
@@ -293,8 +311,14 @@ function comfyLauncher(): Plugin {
         // 3. Strict Origin Validation (Defense in Depth)
         const origin = req.headers.origin;
         if (origin) {
-            const allowedOrigins = ['http://localhost:5173', 'http://127.0.0.1:5173', 'tauri://localhost', 'http://tauri.localhost'];
-            if (!allowedOrigins.includes(origin)) {
+            // Allow any loopback origin on any port — Vite may bind 5174+ when
+            // 5173 is busy, which previously 403'd ComfyUI-path setup (issue
+            // #51, adhney). Also accept the request's own host header.
+            const host = req.headers.host;
+            const allowedOrigins = ['tauri://localhost', 'http://tauri.localhost'];
+            if (host) allowedOrigins.push(`http://${host}`, `https://${host}`);
+            const isLoopback = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+            if (!allowedOrigins.includes(origin) && !isLoopback) {
                 res.writeHead(403, { 'Content-Type': 'text/plain' });
                 res.end('Forbidden: Invalid Origin (CSRF Protection)');
                 return;
@@ -527,28 +551,44 @@ function comfyLauncher(): Plugin {
 
           const doRequest = (requestUrl: string, redirectCount = 0) => {
             if (redirectCount > 5) { promiseReject(new Error('Too many redirects')); return }
+
+            // Resume support (issue #51, adhney): if a partial file exists, ask
+            // the server for the remaining bytes via Range instead of restarting
+            // from 0. Packaged mode (download.rs) already does this; this is the
+            // dev-server parity.
+            let existingSize = 0
+            const headers: Record<string, string> = { 'User-Agent': 'LocallyUncensored/1.1' }
+            if (existsSync(destPath)) {
+              try {
+                existingSize = statSync(destPath).size
+                if (existingSize > 0) headers['Range'] = `bytes=${existingSize}-`
+              } catch { /* ignore — fall back to a full download */ }
+            }
+
             const proto = requestUrl.startsWith('https') ? https : http
-            proto.get(requestUrl, { headers: { 'User-Agent': 'LocallyUncensored/1.1' } }, (response) => {
+            proto.get(requestUrl, { headers }, (response) => {
               if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
                 doRequest(response.headers.location, redirectCount + 1)
                 return
               }
-              if (response.statusCode !== 200) {
+              const isPartial = response.statusCode === 206
+              if (response.statusCode !== 200 && !isPartial) {
                 activeDownloads.set(id, { ...activeDownloads.get(id)!, status: 'error', error: `HTTP ${response.statusCode}` })
                 promiseReject(new Error(`HTTP ${response.statusCode}`))
                 return
               }
 
-              const total = parseInt(response.headers['content-length'] || '0', 10)
-              let downloaded = 0
+              const contentLength = parseInt(response.headers['content-length'] || '0', 10)
+              const total = isPartial ? contentLength + existingSize : contentLength
+              let downloaded = isPartial ? existingSize : 0
               let lastTime = Date.now()
-              let lastBytes = 0
+              let lastBytes = downloaded
 
               const dir = dirname(destPath)
               if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-              const file = createWriteStream(destPath)
+              const file = createWriteStream(destPath, { flags: isPartial ? 'a' : 'w' })
 
-              activeDownloads.set(id, { progress: 0, total, speed: 0, filename, status: 'downloading' })
+              activeDownloads.set(id, { progress: downloaded, total, speed: 0, filename, status: 'downloading' })
 
               response.on('data', (chunk: Buffer) => {
                 downloaded += chunk.length
@@ -628,6 +668,14 @@ function comfyLauncher(): Plugin {
             }
 
             const id = filename
+            // Don't restart an in-flight download from 0 if the UI re-fires the
+            // start (issue #51, adhney).
+            const active = activeDownloads.get(id)
+            if (active && (active.status === 'downloading' || active.status === 'connecting')) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ status: 'started', id }))
+              return
+            }
             console.log(`[Download] Starting: ${filename} → ${destDir}`)
             downloadFile(url, destPath, id).catch(err => console.error(`[Download] Failed: ${err.message}`))
 
@@ -780,6 +828,12 @@ function comfyLauncher(): Plugin {
               }
             }
             const id = filename
+            const active = activeDownloads.get(id)
+            if (active && (active.status === 'downloading' || active.status === 'connecting')) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ status: 'started', id }))
+              return
+            }
             console.log(`[Download] Starting to path: ${filename} → ${destDir}`)
             downloadFile(url, destPath, id).catch(err => console.error(`[Download] Failed: ${err.message}`))
             res.writeHead(200, { 'Content-Type': 'application/json' })

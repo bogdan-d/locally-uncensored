@@ -77,6 +77,10 @@ export interface PullProgress {
   digest?: string
   total?: number
   completed?: number
+  // Ollama can stream an `{"error": "..."}` line mid-pull (e.g. HTTP 400 on an
+  // incompatible repo). Surfaced so the pull card shows why it failed instead
+  // of falsely completing (adhney).
+  error?: string
 }
 
 

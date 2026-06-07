@@ -13,8 +13,10 @@ import { log } from '../../lib/logger'
  * Deliberately NOT naggy (the adversarial call): no pulsing/animation on the
  * dot, the network call fires ONLY on the explicit "Notify me" click (never on
  * render or launch), and there is honest microcopy that this is the one thing
- * LU sends off-device. The badge only ever disappears via the explicit
- * "Don't show me again" — closing the popover or clicking outside leaves it.
+ * LU sends off-device. The badge disappears for good once the user clicks
+ * "Don't show me again", or on the next launch after they join the waitlist
+ * (a fresh submit still shows the "you're on the list" confirmation first).
+ * Closing the popover or clicking outside leaves it.
  *
  * The popover is a self-contained dark gradient card (black → dark-grey) in
  * both themes — David 2026-06-06 wanted it distinct from the flat grey panels,
@@ -25,6 +27,13 @@ export function CloudWaitlistBadge() {
   const submitted = useCloudTeaserStore((s) => s.submitted)
   const setDismissed = useCloudTeaserStore((s) => s.setDismissed)
   const setSubmitted = useCloudTeaserStore((s) => s.setSubmitted)
+
+  // A user who joined the waitlist in a PREVIOUS session (incl. v2.5.0) should
+  // not see the badge again (David 2026-06-07: gone for people who already
+  // submitted OR dismissed). `submitted` persists in lu_cloud_teaser (a
+  // STORE_KEY, so it survives updates). Snapshot it once at mount so a fresh
+  // same-session submit still shows the confirmation before it's gone next launch.
+  const [submittedBeforeThisSession] = useState(() => useCloudTeaserStore.getState().submitted)
 
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
@@ -41,8 +50,9 @@ export function CloudWaitlistBadge() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  // The badge is gone for good only once the user explicitly opts out.
-  if (dismissed) return null
+  // Gone for good once the user opts out, or if they already joined the
+  // waitlist in an earlier session (see snapshot above).
+  if (dismissed || submittedBeforeThisSession) return null
 
   const handleSubmit = async () => {
     if (busy) return

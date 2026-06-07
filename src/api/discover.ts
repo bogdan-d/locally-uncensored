@@ -1,5 +1,5 @@
 import { backendCall, fetchExternal } from "./backend"
-import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels } from "./comfyui"
+import { getCheckpoints, getDiffusionModels, getVAEModels, getCLIPModels, filterPartialFiles } from "./comfyui"
 import type { ProviderId } from "./providers/types"
 import { log } from "../lib/logger"
 
@@ -129,8 +129,17 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
   const undetected = bundles.filter(b => !result[b.name])
   if (undetected.length > 0) {
     try {
-      const [checkpoints, diffModels, vaes, clips] = await Promise.all([
+      const [rawCheckpoints, rawDiffModels, rawVaes, rawClips] = await Promise.all([
         getCheckpoints(), getDiffusionModels(), getVAEModels(), getCLIPModels(),
+      ])
+      // Issue #51 (adhney): ComfyUI lists partially-downloaded files too, so the
+      // fuzzy fallback below would mark an incomplete download as INSTALLED. Drop
+      // any file check_model_sizes confirms is partial before matching.
+      const [checkpoints, diffModels, vaes, clips] = await Promise.all([
+        filterPartialFiles(rawCheckpoints).then(s => Array.from(s)),
+        filterPartialFiles(rawDiffModels).then(s => Array.from(s)),
+        filterPartialFiles(rawVaes).then(s => Array.from(s)),
+        filterPartialFiles(rawClips).then(s => Array.from(s)),
       ])
       const modelsBySubfolder: Record<string, string[]> = {
         checkpoints, diffusion_models: diffModels, vae: vaes, text_encoders: clips,

@@ -18,7 +18,15 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// process launcher (so `start_comfyui` runs ComfyUI inside the same
 /// isolated env that pip installed PyTorch into).
 pub fn venv_python_path(comfyui_dir: &Path) -> PathBuf {
-    let venv = comfyui_dir.join("venv");
+    venv_python_path_named(comfyui_dir, "venv")
+}
+
+/// Same as [`venv_python_path`] but for an arbitrary venv directory name.
+/// ComfyUI installs in the wild use either the classic `venv` (LU's own
+/// PEP 668 installer — Bug E) or the modern `.venv` (`uv`,
+/// `python -m venv .venv`). The file is NOT guaranteed to exist.
+pub fn venv_python_path_named(comfyui_dir: &Path, venv_name: &str) -> PathBuf {
+    let venv = comfyui_dir.join(venv_name);
     if cfg!(target_os = "windows") {
         venv.join("Scripts").join("python.exe")
     } else {
@@ -29,14 +37,21 @@ pub fn venv_python_path(comfyui_dir: &Path) -> PathBuf {
 /// Resolve the venv Python for `comfyui_dir` iff it exists. Returns the
 /// path as a String (matching the API that `process::start_comfyui` already
 /// uses for its `bundled_python` / `system_python` slots), or None when
-/// the venv has not been created — caller falls back to the system Python.
+/// no venv has been created — caller falls back to the system Python.
+///
+/// Checks both the classic `venv` and the modern `.venv` directory (issue #51,
+/// adhney): a macOS/Linux ComfyUI installed into `.venv` was previously missed,
+/// so `start_comfyui` fell back to the system Python and crashed with
+/// `ModuleNotFoundError: torch`. `venv` is checked first to preserve the exact
+/// behavior for users whose env LU's own installer created.
 pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
-    let candidate = venv_python_path(comfyui_dir);
-    if candidate.exists() {
-        Some(candidate.to_string_lossy().to_string())
-    } else {
-        None
+    for venv_name in ["venv", ".venv"] {
+        let candidate = venv_python_path_named(comfyui_dir, venv_name);
+        if candidate.exists() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
     }
+    None
 }
 
 /// Resolve the real Python binary path, filtering out the Microsoft Store stub
@@ -229,6 +244,30 @@ mod tests {
         let resolved = resolve_comfyui_venv_python(&tmp);
         assert!(resolved.is_some(), "expected resolver to find {}", py.display());
         assert!(resolved.unwrap().contains("venv"));
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_finds_dot_venv_layout() {
+        // Issue #51 (adhney): ComfyUI installed into `.venv` (uv / modern
+        // `python -m venv .venv`) must also be picked up, not just `venv`.
+        let tmp = std::env::temp_dir().join("lu-dotvenv-test-present");
+        let _ = fs::remove_dir_all(&tmp);
+        let inner = if cfg!(target_os = "windows") {
+            tmp.join(".venv").join("Scripts")
+        } else {
+            tmp.join(".venv").join("bin")
+        };
+        fs::create_dir_all(&inner).unwrap();
+        let py = if cfg!(target_os = "windows") {
+            inner.join("python.exe")
+        } else {
+            inner.join("python")
+        };
+        fs::write(&py, "stub").unwrap();
+        let resolved = resolve_comfyui_venv_python(&tmp);
+        assert!(resolved.is_some(), "expected resolver to find {}", py.display());
+        assert!(resolved.unwrap().contains(".venv"));
         let _ = fs::remove_dir_all(&tmp);
     }
 

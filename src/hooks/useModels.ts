@@ -144,12 +144,21 @@ export function useModels() {
       // Dev mode: streaming fetch
       try {
         const response = await pullModelApi(name, controller.signal)
+        let streamError: string | null = null
         for await (const chunk of parseNDJSONStream<PullProgress>(response)) {
           updatePullProgress(name, chunk)
+          // Surface an error the NDJSON stream reports mid-pull instead of
+          // falsely flipping the card to "complete" (adhney; mirrors the
+          // Tauri-path Bug Z/a handling above).
+          if (chunk.error) { streamError = chunk.error; break }
         }
-        completePull(name)
-        try { await fetchModels() } catch { /* non-critical */ }
-        setTimeout(() => dismissPull(name), 5000)
+        if (streamError) {
+          updatePullProgress(name, { status: `Error: ${streamError}` })
+        } else {
+          completePull(name)
+          try { await fetchModels() } catch { /* non-critical */ }
+          setTimeout(() => dismissPull(name), 5000)
+        }
       } catch (err) {
         if ((err as Error).name !== 'AbortError') {
           updatePullProgress(name, { status: `Error: ${(err as Error).message}` })
