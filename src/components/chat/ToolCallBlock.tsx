@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, Globe, FileText, FileEdit, Terminal, Image, Film, Loader2, Check, X, Clock, AlertCircle, FolderOpen, Cpu, Monitor, GitBranch, Database } from 'lucide-react'
 import type { AgentToolCall } from '../../types/agent-mode'
-import { getComfyHost } from '../../api/backend'
+import { getComfyHost, getComfyPort } from '../../api/backend'
 
 // F1 (konata3602 commitment 2026-05-23) + render fix (konata3602 bug 2026-06-07)
 // — when image_generate / video_generate / screenshot produce a ComfyUI output,
@@ -98,6 +98,24 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
   // without the user having to expand the block — konata's "and no image".
   const previewUrl = comfyViewUrlFromResult(toolCall.result)
 
+  // Proxy-independent loading (konata 2026-06-08). In browser/dev the tool
+  // result carries the RELATIVE `/comfyui/view?…` Vite-proxy path, which loads
+  // fine under `npm run dev` (verified E2E). But a built frontend served
+  // WITHOUT that dev proxy (e.g. `vite preview` or a static host) would 404 the
+  // relative path → no image. If the primary src errors, retry with an ABSOLUTE
+  // URL straight to the ComfyUI host: <img>/<video> display is not CORS-gated,
+  // so it loads with no server-side proxy. Tauri results are already absolute
+  // (they never start with '/') and are unaffected.
+  const [imgFailed, setImgFailed] = useState(false)
+  const effectivePreviewUrl = (() => {
+    if (!previewUrl) return null
+    if (imgFailed && previewUrl.startsWith('/')) {
+      const path = previewUrl.startsWith('/comfyui/') ? previewUrl.slice('/comfyui'.length) : previewUrl
+      return `http://${getComfyHost()}:${getComfyPort()}${path}`
+    }
+    return previewUrl
+  })()
+
   return (
     <div className="mb-0.5">
       {/* Header line — monochrome, only status icon has subtle color */}
@@ -127,20 +145,22 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
           and no picture. A .mp4/.webm output renders in a <video>; everything
           else — including animated .webp — in an <img>. URL is bounded to OUR
           ComfyUI by comfyViewUrlFromResult (never auto-loads arbitrary URLs). */}
-      {previewUrl && (
+      {previewUrl && effectivePreviewUrl && (
         <div className="pl-5 pt-0.5">
-          {isInlineVideoUrl(previewUrl) ? (
+          {isInlineVideoUrl(effectivePreviewUrl) ? (
             <video
-              src={previewUrl}
+              src={effectivePreviewUrl}
               controls
               loop
+              onError={() => { if (!imgFailed) setImgFailed(true) }}
               className="block max-w-full max-h-[320px] rounded border border-gray-200 dark:border-white/[0.06]"
             />
           ) : (
-            <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="block">
+            <a href={effectivePreviewUrl} target="_blank" rel="noopener noreferrer" className="block">
               <img
-                src={previewUrl}
+                src={effectivePreviewUrl}
                 alt="Generated image"
+                onError={() => { if (!imgFailed) setImgFailed(true) }}
                 className="max-w-full max-h-[320px] rounded border border-gray-200 dark:border-white/[0.06]"
                 loading="lazy"
               />

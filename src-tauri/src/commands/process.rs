@@ -799,6 +799,17 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
         .current_dir(&comfy_path)
         .env("TQDM_DISABLE", "1")
         .env("PYTHONUNBUFFERED", "1")
+        // Windows fix (plum133, Discord 2026-06-07): ComfyUI / its nodes print
+        // Unicode progress glyphs (e.g. '▍' U+258D) to stdout. On a non-UTF-8
+        // Windows console codepage (cp1252) Python's *piped* stdout defaults to
+        // the locale codec and raises UnicodeEncodeError ("'charmap' codec
+        // can't encode character '▍' …"), which propagates out of the
+        // KSampler progress callback and aborts generation ("Generation
+        // failed: … (KSampler)"). Force UTF-8 I/O so any Unicode output is
+        // encodable on every locale — also keeps the Rust-side line reader's
+        // UTF-8 assumption valid.
+        .env("PYTHONIOENCODING", "utf-8")
+        .env("PYTHONUTF8", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1319,6 +1330,11 @@ pub fn auto_start_comfyui(state: &AppState) {
                 .current_dir(&path)
                 .env("TQDM_DISABLE", "1")
                 .env("PYTHONUNBUFFERED", "1")
+                // Windows UTF-8 fix — see start_comfyui (plum133 2026-06-07):
+                // prevents the cp1252 'charmap' UnicodeEncodeError crash when
+                // ComfyUI prints Unicode progress glyphs to the piped stdout.
+                .env("PYTHONIOENCODING", "utf-8")
+                .env("PYTHONUTF8", "1")
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());

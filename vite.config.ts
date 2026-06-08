@@ -248,6 +248,10 @@ function comfyLauncher(): Plugin {
       stdio: ['ignore', 'pipe', 'pipe'],
       shell: false,
       windowsHide: true,
+      // Mirror the Rust launcher (process.rs): force UTF-8 I/O so ComfyUI's
+      // Unicode progress glyphs don't crash on a non-UTF-8 Windows codepage
+      // (plum133 'charmap' codec UnicodeEncodeError, Discord 2026-06-07).
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
     })
 
     comfyProcess.stdout?.on('data', (d) => {

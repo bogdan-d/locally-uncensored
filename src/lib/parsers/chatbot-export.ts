@@ -92,6 +92,48 @@ function slugify(s: string, fallback: string): string {
 //       }
 //     }
 //   ]
+// Pull readable text out of a ChatGPT message `content` object. Real exports
+// use several content_type shapes:
+//   { content_type: 'text', parts: ['...'] }
+//   { content_type: 'multimodal_text', parts: ['...', { content_type:'image_asset_pointer', ... }] }
+//   { content_type: 'code' | 'execution_output', text: '...' }
+//   { content_type: 'tether_*' , result: '...' }
+// Strings in `parts` are kept; non-text parts (image/audio pointers) are
+// skipped gracefully; falls back to `content.text` / `content.result`.
+function extractChatGptText(content: any): string {
+  if (!content || typeof content !== 'object') return ''
+  const chunks: string[] = []
+  if (Array.isArray(content.parts)) {
+    for (const p of content.parts) {
+      if (typeof p === 'string') { if (p.trim()) chunks.push(p) }
+      else if (p && typeof p === 'object' && typeof p.text === 'string') { if (p.text.trim()) chunks.push(p.text) }
+      // image_asset_pointer / audio_asset_pointer / etc. carry no readable text → skip
+    }
+  }
+  if (chunks.length === 0 && typeof content.text === 'string' && content.text.trim()) chunks.push(content.text)
+  if (chunks.length === 0 && typeof content.result === 'string' && content.result.trim()) chunks.push(content.result)
+  return chunks.join('\n').trim()
+}
+
+// Turn an ordered list of mapping nodes (root → leaf) into markdown lines.
+function linearizeChatGptNodes(nodes: any[]): { lines: string[]; count: number } {
+  const lines: string[] = []
+  let count = 0
+  for (const node of nodes) {
+    const msg = node?.message
+    if (msg && msg.author && msg.content) {
+      const role = String(msg.author.role || 'unknown')
+      const text = extractChatGptText(msg.content)
+      if (text && role !== 'tool' && role !== 'system') {
+        const heading = role === 'user' ? '**You**' : (role === 'assistant' ? '**Assistant**' : `**${role}**`)
+        lines.push(heading, '', text, '')
+        count++
+      }
+    }
+  }
+  return { lines, count }
+}
+
 function parseChatGpt(raw: unknown): NormalisedConversation[] {
   if (!Array.isArray(raw)) return []
   const out: NormalisedConversation[] = []
@@ -105,41 +147,72 @@ function parseChatGpt(raw: unknown): NormalisedConversation[] {
     const isoTimestamp = timestamp ? new Date(timestamp * 1000).toISOString() : null
 
     const mapping = c.mapping as Record<string, any> | undefined
-    if (!mapping) continue
+    if (!mapping || typeof mapping !== 'object') continue
 
-    // Linearise the message tree by walking from root following the first
-    // child each time. That matches what the user actually saw in the UI
-    // (alternative branches were never visible in the rendered conversation).
-    const root = Object.values(mapping).find(n => n && n.parent == null) as any
-    if (!root) continue
+    // Linearise the message tree into the single thread the user actually saw.
+    // Real exports have a synthetic root (message == null) and, after edits or
+    // regenerations, multiple sibling branches — the old "first node with
+    // parent==null, then children[0] forever" walk lands on the ORIGINAL
+    // (often abandoned) branch and frequently dead-ends at 0 messages, which
+    // is why mikes_pp's import produced "no conversations". Two strategies,
+    // best first:
+    //   1. `current_node` is the leaf of the visible thread — walk PARENT
+    //      links up to the root and reverse. Exactly what the user saw.
+    //   2. Fallback: from each parent-less node walk forward following the
+    //      LAST (newest) child; keep whichever walk yields the most messages.
+    const collectUp = (leafId: string): any[] => {
+      const chain: any[] = []
+      const seen = new Set<string>()
+      let node: any = mapping[leafId]
+      while (node && node.id && !seen.has(node.id)) {
+        seen.add(node.id)
+        chain.push(node)
+        node = (node.parent != null) ? mapping[node.parent] : null
+      }
+      chain.reverse()
+      return chain
+    }
+    const collectDown = (rootId: string): any[] => {
+      const chain: any[] = []
+      const seen = new Set<string>()
+      let node: any = mapping[rootId]
+      while (node && node.id && !seen.has(node.id)) {
+        seen.add(node.id)
+        chain.push(node)
+        const children = Array.isArray(node.children) ? node.children : []
+        const nextId = children.length > 0 ? children[children.length - 1] : null
+        node = nextId ? mapping[nextId] : null
+      }
+      return chain
+    }
+
+    let best: { lines: string[]; count: number } | null = null
+    const currentNodeId = typeof c.current_node === 'string' ? c.current_node : null
+    if (currentNodeId && mapping[currentNodeId]) {
+      best = linearizeChatGptNodes(collectUp(currentNodeId))
+    }
+    if (!best || best.count === 0) {
+      const rootIds = Object.values(mapping)
+        .filter((n: any) => n && n.parent == null && n.id)
+        .map((n: any) => n.id as string)
+      const candidates = rootIds.length > 0 ? rootIds : Object.keys(mapping)
+      for (const rid of candidates) {
+        const r = linearizeChatGptNodes(collectDown(rid))
+        if (!best || r.count > best.count) best = r
+      }
+    }
+    if (!best || best.count === 0) continue
+
     const lines: string[] = [`# ${title}`, '']
     if (isoTimestamp) lines.push(`_Created: ${isoTimestamp}_`, '')
-    let node = root
-    let messageCount = 0
-    while (node) {
-      const msg = node.message
-      if (msg && msg.author && msg.content) {
-        const role = String(msg.author.role || 'unknown')
-        const parts = Array.isArray(msg.content.parts) ? msg.content.parts : []
-        const text = parts.map((p: any) => typeof p === 'string' ? p : (p?.text || '')).join('\n').trim()
-        if (text && role !== 'tool' && role !== 'system') {
-          const heading = role === 'user' ? '**You**' : (role === 'assistant' ? '**Assistant**' : `**${role}**`)
-          lines.push(heading, '', text, '')
-          messageCount++
-        }
-      }
-      const children = Array.isArray(node.children) ? node.children : []
-      const next = children[0]
-      node = next ? mapping[next] : null
-    }
-    if (messageCount === 0) continue
+    lines.push(...best.lines)
     out.push({
       id: slugify(title, `chatgpt_${createTime || out.length}`),
       title,
       markdown: lines.join('\n').trim(),
       platform: 'chatgpt',
       timestamp: isoTimestamp,
-      messageCount,
+      messageCount: best.count,
     })
   }
   return out
@@ -283,30 +356,38 @@ export async function parseExportFile(file: File): Promise<ParseResult> {
   const name = file.name.toLowerCase()
   if (name.endsWith('.zip')) {
     const zip = await JSZip.loadAsync(file)
-    // Try common filenames in priority order.
-    const candidates = ['conversations.json', 'data/conversations.json']
-    for (const path of candidates) {
-      const entry = zip.file(path)
-      if (entry) {
-        const text = await entry.async('string')
-        return parseJsonText(text)
+    // Collect every file entry. Depth-independent on purpose: current ChatGPT
+    // exports nest everything under a dated top-level folder, e.g.
+    // "1716800000-ab12cd…/conversations.json", so the old exact-path lookup of
+    // "conversations.json" / "data/conversations.json" missed entirely and the
+    // user saw "no conversation file found" (mikes_pp, Discord 2026-06-07).
+    const entries: Array<{ path: string; entry: JSZip.JSZipObject }> = []
+    zip.forEach((path, entry) => { if (!entry.dir) entries.push({ path, entry }) })
+    const basename = (p: string) => (p.split('/').pop() || '').toLowerCase()
+    const isJson = (p: string) => p.toLowerCase().endsWith('.json')
+
+    // 1) Prefer any file whose basename is exactly conversations.json, wherever
+    //    it sits in the tree (handles the dated-folder nesting). Return the
+    //    first that yields at least one conversation.
+    for (const e of entries.filter(e => basename(e.path) === 'conversations.json')) {
+      const text = await e.entry.async('string')
+      const res = parseJsonText(text)
+      if (res.conversations.length > 0) return res
+    }
+    // 2) Parse-and-pick: try every JSON file and keep whichever produces the
+    //    most conversations. We deliberately do NOT rank by file size via
+    //    JSZip's private `_data.uncompressedSize` — it is 0/undefined for many
+    //    entries, which previously made the fallback grab user.json /
+    //    message_feedback.json (→ 0 conversations) instead of the real export.
+    let best: ParseResult | null = null
+    for (const e of entries.filter(e => isJson(e.path))) {
+      const text = await e.entry.async('string')
+      const res = parseJsonText(text)
+      if (res.conversations.length > 0 && (!best || res.conversations.length > best.conversations.length)) {
+        best = res
       }
     }
-    // Fallback: pick the largest .json file inside the zip.
-    let best: { path: string; size: number } | null = null
-    zip.forEach((path, entry) => {
-      if (!entry.dir && path.toLowerCase().endsWith('.json')) {
-        const size = (entry as any)._data?.uncompressedSize || 0
-        if (!best || size > best.size) best = { path, size }
-      }
-    })
-    if (best) {
-      const e = zip.file((best as { path: string; size: number }).path)
-      if (e) {
-        const text = await e.async('string')
-        return parseJsonText(text)
-      }
-    }
+    if (best) return best
     return { conversations: [], skipped: 0, detectedPlatform: 'unknown' }
   }
   // JSON path
