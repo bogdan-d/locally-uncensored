@@ -114,24 +114,84 @@ fn configured_host(url_or_host: &str) -> String {
     url_or_host.trim().to_lowercase()
 }
 
+/// Fold an address to its IPv4 form, collapsing IPv4-mapped (`::ffff:a.b.c.d`)
+/// and IPv4-compatible (`::a.b.c.d`) IPv6 down to v4 — so the metadata/LAN checks
+/// can't be bypassed by encoding the address as IPv6 (e.g.
+/// `::ffff:169.254.169.254` resolves on the v4 stack). `host` must be already
+/// bracket-stripped + lowercased.
+fn as_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
+    match host.parse::<std::net::IpAddr>().ok()? {
+        std::net::IpAddr::V4(v4) => Some(v4),
+        std::net::IpAddr::V6(v6) => v6.to_ipv4_mapped().or_else(|| v6.to_ipv4()),
+    }
+}
+
 /// Cloud-metadata / link-local addresses that must NEVER be proxied, even if a
-/// host somehow lands in an allow-list. These are the classic SSRF targets
-/// (AWS/GCP/Azure 169.254.169.254, Alibaba 100.100.100.200, GCP IPv6 IMDS
-/// fd00:ec2::254) plus the whole IPv4 link-local block — a real LAN LLM backend
-/// never lives there. Defense-in-depth on top of host registration (Bug A).
+/// host somehow lands in an allow-list. The classic SSRF targets (AWS/GCP/Azure
+/// 169.254.169.254, Alibaba 100.100.100.200, GCP IPv6 IMDS fd00:ec2::254) plus
+/// the whole IPv4 link-local block — a real LAN LLM backend never lives there.
+/// Defense-in-depth on top of host registration (Bug A; hardened for
+/// IPv4-mapped-IPv6 bypass M1).
 fn is_blocked_proxy_host(host: &str) -> bool {
     let h = host.trim_matches(|c| c == '[' || c == ']').to_lowercase();
-    if matches!(h.as_str(), "169.254.169.254" | "100.100.100.200" | "fd00:ec2::254") {
+    // GCP IPv6 IMDS literal (a genuine IPv6 address, not a mapped-v4 form).
+    if h == "fd00:ec2::254" {
         return true;
     }
-    // Entire IPv4 link-local 169.254.0.0/16 — never a legitimate backend.
-    if let Ok(ip) = h.parse::<std::net::Ipv4Addr>() {
-        let o = ip.octets();
-        if o[0] == 169 && o[1] == 254 {
+    // Fold v4 + IPv4-mapped/compatible v6 to v4, then block link-local + the
+    // known metadata IPs (so ::ffff:169.254.169.254 / ::ffff:6464:64c8 etc. can't
+    // slip past the v4 string/parse checks).
+    if let Some(v4) = as_ipv4(&h) {
+        let o = v4.octets();
+        if o[0] == 169 && o[1] == 254 {     // 169.254.0.0/16 incl. AWS/GCP/Azure IMDS
+            return true;
+        }
+        if o == [100, 100, 100, 200] {       // Alibaba IMDS
             return true;
         }
     }
     false
+}
+
+/// True only for private/LAN hosts a user could legitimately point a local
+/// backend at. `register_openai_host` requires this so the RUST boundary — not
+/// the JS caller — enforces the LAN-only intent and can't be tricked into
+/// allow-listing arbitrary public/intranet hosts (SSRF hardening M2). Mirrors
+/// the frontend `isPrivateOrLanHost`. Input must be bracket-stripped+lowercased.
+fn is_registerable_lan_host(host: &str) -> bool {
+    let h = host.trim_matches(|c| c == '[' || c == ']').to_lowercase();
+    if h.is_empty() {
+        return false;
+    }
+    if matches!(h.as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0")
+        || h.ends_with(".localhost")
+    {
+        return true;
+    }
+    if h.ends_with(".local") || h.ends_with(".lan") || h.ends_with(".internal")
+        || h.ends_with(".intra") || h.ends_with(".home") || h.ends_with(".home.arpa")
+    {
+        return true;
+    }
+    if let Ok(ip) = h.parse::<std::net::IpAddr>() {
+        if let Some(v4) = as_ipv4(&h) {
+            let o = v4.octets();
+            // 169.254/16 (link-local) + public ranges → false; RFC1918 + CGNAT → true.
+            return (o[0] == 10)
+                || (o[0] == 172 && (16..=31).contains(&o[1]))
+                || (o[0] == 192 && o[1] == 168)
+                || (o[0] == 127)
+                || (o[0] == 100 && (64..=127).contains(&o[1]));
+        }
+        if let std::net::IpAddr::V6(v6) = ip {
+            let s = v6.segments();
+            return (s[0] & 0xfe00) == 0xfc00   // fc00::/7 ULA
+                || (s[0] & 0xffc0) == 0xfe80;   // fe80::/10 link-local
+        }
+        return false;
+    }
+    // Bare single-label machine name (no dots, no stray ':') = LAN host.
+    !h.contains('.') && !h.contains(':')
 }
 
 /// Validate that a URL targets either localhost or one of the user-configured
@@ -222,7 +282,17 @@ pub fn register_openai_host(
     if is_blocked_proxy_host(&h) {
         return Err(format!("refused: '{}' is a metadata/link-local address", h));
     }
+    // SSRF hardening (M2): only allow-list private/LAN hosts. The Rust boundary
+    // enforces the LAN-only intent rather than trusting the JS caller — public
+    // endpoints don't need the proxy (they use a direct fetch).
+    if !is_registerable_lan_host(&h) {
+        return Err(format!("refused: '{}' is not a private/LAN host", h));
+    }
     if let Ok(mut hosts) = state.openai_hosts.lock() {
+        // Bound the set (m1) — defend against a runaway registration loop.
+        if hosts.len() >= 64 && !hosts.contains(&h) {
+            return Err("too many registered hosts".to_string());
+        }
         hosts.insert(h);
     }
     Ok(())
@@ -602,6 +672,34 @@ mod tests {
         for h in ["192.168.1.50", "10.0.0.5", "172.16.4.4", "localhost",
                   "127.0.0.1", "100.64.0.1" /* Tailscale CGNAT, not metadata */] {
             assert!(!is_blocked_proxy_host(h), "{} should not be blocked", h);
+        }
+    }
+
+    #[test]
+    fn blocks_ipv4_mapped_ipv6_metadata() {
+        // M1: encoding the metadata IP as IPv4-mapped/compatible IPv6 must NOT
+        // bypass the block.
+        assert!(is_blocked_proxy_host("::ffff:169.254.169.254"));
+        assert!(is_blocked_proxy_host("[::ffff:169.254.169.254]"));
+        assert!(is_blocked_proxy_host("::ffff:a9fe:a9fe"));   // hex form of 169.254.169.254
+        assert!(is_blocked_proxy_host("::ffff:6464:64c8"));   // 100.100.100.200 mapped
+        assert!(is_blocked_proxy_host("fd00:ec2::254"));
+        // Real LAN/global addresses are not metadata.
+        assert!(!is_blocked_proxy_host("192.168.0.74"));
+        assert!(!is_blocked_proxy_host("2606:4700::1111"));
+    }
+
+    #[test]
+    fn register_only_private_lan_hosts() {
+        // M2: public + junk hosts must NOT be registerable; private/LAN are.
+        for ok in ["192.168.0.74", "10.0.0.5", "172.16.4.4", "localhost",
+                   "127.0.0.1", "100.64.0.1", "nas", "box.lan", "fd00::1"] {
+            assert!(is_registerable_lan_host(ok), "{} should be registerable", ok);
+        }
+        for bad in ["8.8.8.8", "api.openai.com", "attacker.com", "169.254.169.254",
+                    "::ffff:169.254.169.254", "javascript:alert(1)", "2606:4700::1111",
+                    "192.168.0.74:1234"] {
+            assert!(!is_registerable_lan_host(bad), "{} should NOT be registerable", bad);
         }
     }
 
