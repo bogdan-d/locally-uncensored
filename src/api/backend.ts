@@ -247,6 +247,11 @@ export async function backendCall<T = any>(
     whisper_status: { path: "/local-api/transcribe-status" },
     install_whisper: { path: "/local-api/install-whisper", method: "POST" },
     install_whisper_status: { path: "/local-api/install-whisper" },
+    // Bug B10: TTS install has no real dev-server backend (Piper pip + voice
+    // download run only in the packaged app). Mapped so the browser surface gets
+    // an honest "desktop-only" status instead of "Unknown backend command".
+    install_tts: { path: "/local-api/install-tts", method: "POST" },
+    install_tts_status: { path: "/local-api/install-tts" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
     execute_code: { path: "/local-api/execute-code", method: "POST" },
     file_read: { path: "/local-api/file-read", method: "POST" },

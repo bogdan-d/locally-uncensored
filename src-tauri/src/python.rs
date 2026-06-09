@@ -62,107 +62,181 @@ pub fn resolve_comfyui_venv_python(comfyui_dir: &Path) -> Option<String> {
 /// "Python not installed". Falling back to the bare `"python"` string the way
 /// older versions did re-introduces the Store-stub trap on a fresh Windows
 /// box, which is exactly the bug P14 fixes.
+/// Non-Windows: prefer python3, then python.
+#[cfg(not(target_os = "windows"))]
 pub fn get_python_bin() -> String {
-    if cfg!(not(target_os = "windows")) {
-        // On Linux/macOS, try python3 first, then python
-        for bin in &["python3", "python"] {
-            if let Ok(output) = Command::new(bin).arg("--version").output() {
-                if output.status.success() {
-                    return bin.to_string();
-                }
+    for bin in &["python3", "python"] {
+        if let Ok(output) = Command::new(bin).arg("--version").output() {
+            if output.status.success() {
+                return bin.to_string();
             }
         }
-        // Nothing usable — empty string sentinel.
-        return String::new();
     }
+    String::new()
+}
 
-    // Windows: use `where python` and filter out WindowsApps alias
+/// Windows: probe in order of reliability. Crucially this now tries the `py -3`
+/// launcher and C:\Program Files\Python* — without them, an all-users python.org
+/// install that skipped the "Add to PATH" checkbox (the aldrich "python not
+/// installed" Discord report) was invisible to LU even though Python WAS
+/// installed: `where python` returned nothing (or only the Store stub) and the
+/// fixed-path scan only looked at the bare `C:\PythonXX` drive-root layout.
+#[cfg(target_os = "windows")]
+pub fn get_python_bin() -> String {
+    if let Some(p) = python_via_where() { return p; }
+    if let Some(p) = python_via_py_launcher() { return p; }
+    if let Some(p) = python_in_fixed_paths() { return p; }
+    if let Some(p) = python_in_program_files() { return p; }
+    if let Some(p) = python_in_appdata() { return p; }
+    if let Some(p) = python_in_conda() { return p; }
+    println!("[Python] No real Python found on PATH or known locations — returning empty sentinel");
+    String::new()
+}
+
+/// Run a candidate interpreter and confirm it's real (exits 0, not the MS Store
+/// stub which prints an install nag and exits 1).
+#[cfg(target_os = "windows")]
+fn verify_python_path(path: &str) -> bool {
+    if path.is_empty() || path.contains("WindowsApps") {
+        return false;
+    }
+    let mut cmd = Command::new(path);
+    cmd.arg("--version");
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// `where python` on PATH, skipping the WindowsApps Store-stub alias.
+#[cfg(target_os = "windows")]
+fn python_via_where() -> Option<String> {
     let mut where_cmd = Command::new("where");
     where_cmd.arg("python");
-    #[cfg(target_os = "windows")]
     where_cmd.creation_flags(CREATE_NO_WINDOW);
-    if let Ok(output) = where_cmd.output() {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                let path = line.trim();
-                if !path.is_empty() && !path.contains("WindowsApps") {
-                    // Verify it actually runs
-                    let mut check_cmd = Command::new(path);
-                    check_cmd.arg("--version");
-                    #[cfg(target_os = "windows")]
-                    check_cmd.creation_flags(CREATE_NO_WINDOW);
-                    if let Ok(check) = check_cmd.output() {
-                        if check.status.success() {
-                            println!("[Python] Found via `where`: {}", path);
-                            return path.to_string();
-                        }
-                    }
-                }
-            }
+    let output = where_cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        let path = line.trim();
+        if !path.is_empty() && !path.contains("WindowsApps") && verify_python_path(path) {
+            println!("[Python] Found via `where`: {}", path);
+            return Some(path.to_string());
         }
     }
+    None
+}
 
-    // Check common Windows Python install locations
-    let common_paths = [
-        // Standard Python.org installers
+/// The Windows `py -3` launcher (C:\Windows\py.exe) is installed system-wide by
+/// the python.org installer regardless of the "Add to PATH" checkbox and the
+/// install dir, so it finds Pythons that `where` + fixed-path scans miss. We ask
+/// Python for its own sys.executable so we cache the concrete python.exe (needed
+/// for venv creation / pip), not the launcher shim.
+#[cfg(target_os = "windows")]
+fn python_via_py_launcher() -> Option<String> {
+    let mut cmd = Command::new("py");
+    cmd.args(["-3", "-c", "import sys; print(sys.executable)"]);
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if verify_python_path(&path) {
+        println!("[Python] Found via `py -3` launcher: {}", path);
+        Some(path)
+    } else {
+        None
+    }
+}
+
+/// Standard single-version python.org install dirs at the drive root.
+#[cfg(target_os = "windows")]
+fn python_in_fixed_paths() -> Option<String> {
+    const COMMON: [&str; 5] = [
         "C:\\Python313\\python.exe",
         "C:\\Python312\\python.exe",
         "C:\\Python311\\python.exe",
         "C:\\Python310\\python.exe",
         "C:\\Python39\\python.exe",
     ];
-
-    for p in &common_paths {
-        if Path::new(p).exists() {
+    for p in COMMON {
+        if Path::new(p).exists() && verify_python_path(p) {
             println!("[Python] Found at fixed path: {}", p);
-            return p.to_string();
+            return Some(p.to_string());
         }
     }
+    None
+}
 
-    // Check user-local Python (AppData\Local\Programs\Python)
-    if let Ok(localappdata) = std::env::var("LOCALAPPDATA") {
-        let programs_python = Path::new(&localappdata).join("Programs").join("Python");
-        if programs_python.exists() {
-            // Scan for Python3xx directories, newest first
-            if let Ok(entries) = std::fs::read_dir(&programs_python) {
-                let mut dirs: Vec<_> = entries
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.file_type().ok().map_or(false, |ft| ft.is_dir()))
-                    .collect();
-                dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
-
-                for dir in dirs {
-                    let python_exe = dir.path().join("python.exe");
-                    if python_exe.exists() {
-                        let path = python_exe.to_string_lossy().to_string();
-                        println!("[Python] Found in AppData: {}", path);
-                        return path;
-                    }
-                }
+/// All-users python.org installs land in C:\Program Files\PythonXX (and the
+/// 32-bit build under Program Files (x86)) — neither was scanned before, the
+/// other half of the aldrich report.
+#[cfg(target_os = "windows")]
+fn python_in_program_files() -> Option<String> {
+    for env_key in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+        if let Ok(base) = std::env::var(env_key) {
+            if let Some(p) = scan_python_subdirs(Path::new(&base), "Program Files") {
+                return Some(p);
             }
         }
     }
+    None
+}
 
-    // Check Conda environments
-    if let Ok(userprofile) = std::env::var("USERPROFILE") {
-        let conda_paths = [
-            Path::new(&userprofile).join("miniconda3").join("python.exe"),
-            Path::new(&userprofile).join("anaconda3").join("python.exe"),
-            Path::new(&userprofile).join("miniconda3").join("Scripts").join("python.exe"),
-            Path::new(&userprofile).join("anaconda3").join("Scripts").join("python.exe"),
-        ];
-        for p in &conda_paths {
-            if p.exists() {
-                let path = p.to_string_lossy().to_string();
+/// Per-user python.org installs: %LOCALAPPDATA%\Programs\Python\Python3xx.
+#[cfg(target_os = "windows")]
+fn python_in_appdata() -> Option<String> {
+    let localappdata = std::env::var("LOCALAPPDATA").ok()?;
+    let base = Path::new(&localappdata).join("Programs").join("Python");
+    scan_python_subdirs(&base, "AppData")
+}
+
+/// Scan `base` for `Python3xx\python.exe`, newest version first.
+#[cfg(target_os = "windows")]
+fn scan_python_subdirs(base: &Path, label: &str) -> Option<String> {
+    let entries = std::fs::read_dir(base).ok()?;
+    let mut dirs: Vec<_> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().ok().map_or(false, |ft| ft.is_dir())
+                && e.file_name().to_string_lossy().to_lowercase().starts_with("python")
+        })
+        .collect();
+    dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    for dir in dirs {
+        let exe = dir.path().join("python.exe");
+        if exe.exists() {
+            let path = exe.to_string_lossy().to_string();
+            if verify_python_path(&path) {
+                println!("[Python] Found in {}: {}", label, path);
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+/// Miniconda / Anaconda base env in the user profile.
+#[cfg(target_os = "windows")]
+fn python_in_conda() -> Option<String> {
+    let userprofile = std::env::var("USERPROFILE").ok()?;
+    let candidates = [
+        Path::new(&userprofile).join("miniconda3").join("python.exe"),
+        Path::new(&userprofile).join("anaconda3").join("python.exe"),
+        Path::new(&userprofile).join("miniconda3").join("Scripts").join("python.exe"),
+        Path::new(&userprofile).join("anaconda3").join("Scripts").join("python.exe"),
+    ];
+    for p in candidates {
+        if p.exists() {
+            let path = p.to_string_lossy().to_string();
+            if verify_python_path(&path) {
                 println!("[Python] Found Conda: {}", path);
-                return path;
+                return Some(path);
             }
         }
     }
-
-    println!("[Python] No real Python found on PATH or known locations — returning empty sentinel");
-    String::new()
+    None
 }
 
 /// True iff `bin` looks like a real, runnable Python binary (not the empty
@@ -287,5 +361,35 @@ mod tests {
     fn real_python_accepts_real_path() {
         assert!(is_real_python("/usr/bin/python3"));
         assert!(is_real_python("C:\\Python312\\python.exe"));
+    }
+
+    // ── Windows resolver helpers (Bug B — aldrich "python not installed") ────
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn verify_rejects_stub_and_empty() {
+        assert!(!verify_python_path(""));
+        assert!(!verify_python_path(
+            "C:\\Users\\u\\AppData\\Local\\Microsoft\\WindowsApps\\python.exe"
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn scan_python_subdirs_none_for_missing_dir() {
+        let missing = std::env::temp_dir().join("lu-no-such-python-dir-zzz");
+        let _ = fs::remove_dir_all(&missing);
+        assert!(scan_python_subdirs(&missing, "test").is_none());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn scan_python_subdirs_skips_non_python_dirs() {
+        // A dir with no Python3xx subfolder yields None (doesn't pick garbage).
+        let tmp = std::env::temp_dir().join("lu-pf-scan-test");
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("NotPython").join("nested")).unwrap();
+        assert!(scan_python_subdirs(&tmp, "test").is_none());
+        let _ = fs::remove_dir_all(&tmp);
     }
 }

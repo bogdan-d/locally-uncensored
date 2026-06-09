@@ -2293,17 +2293,9 @@ pub fn install_whisper(
 
     info!("whisper install start");
 
-    // Resolve the target Python: ComfyUI venv (if present) → system Python.
-    let comfy_dir: Option<PathBuf> = {
-        let p = state.comfy_path.lock().unwrap().clone();
-        p.map(PathBuf::from).or_else(|| {
-            crate::commands::process::find_comfyui_path().map(PathBuf::from)
-        })
-    };
-    let venv_python = comfy_dir
-        .as_deref()
-        .and_then(crate::python::resolve_comfyui_venv_python);
-    let target_python = venv_python.unwrap_or_else(|| state.python_bin.lock().unwrap().clone());
+    // Resolve the target Python: ComfyUI venv (if present) → system Python,
+    // re-resolving a stale cache (Bug B8 — Python installed after launch).
+    let target_python = resolve_lu_python(state.inner());
 
     if target_python.is_empty() || !crate::python::is_real_python(&target_python) {
         let mut install = state.whisper_install.lock().unwrap();
@@ -2397,7 +2389,24 @@ pub fn resolve_lu_python(state: &AppState) -> String {
     let venv_python = comfy_dir
         .as_deref()
         .and_then(crate::python::resolve_comfyui_venv_python);
-    venv_python.unwrap_or_else(|| state.python_bin.lock().unwrap().clone())
+    if let Some(v) = venv_python {
+        return v;
+    }
+    // System Python: use the cached resolution, but if it's empty/stale —
+    // Python may have been installed AFTER launch (Bug B8) — re-resolve once and
+    // refresh the cache so install_tts/install_whisper don't wrongly report "no
+    // Python found" until the next restart.
+    let cached = state.python_bin.lock().map(|g| g.clone()).unwrap_or_default();
+    if crate::python::is_real_python(&cached) {
+        return cached;
+    }
+    let resolved = crate::python::get_python_bin();
+    if crate::python::is_real_python(&resolved) {
+        if let Ok(mut slot) = state.python_bin.lock() {
+            *slot = resolved.clone();
+        }
+    }
+    resolved
 }
 
 /// pip args to install Piper TTS. `piper-tts` ships the `piper` CLI + the
