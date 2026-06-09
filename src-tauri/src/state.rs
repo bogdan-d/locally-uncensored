@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Child;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -141,6 +141,13 @@ pub struct AppState {
     /// `set_ollama_host` command. Every call that proxies Ollama reads this
     /// value so GUI changes reflect everywhere without a restart.
     pub ollama_base: Mutex<String>,
+    /// Hosts of user-configured OpenAI-compatible backends reachable over the
+    /// LAN (LM Studio / vLLM / etc. bound to 0.0.0.0 on another machine).
+    /// Registered at runtime via `register_openai_host` so `validate_proxy_url`
+    /// forwards to them — same allow-list model as `ollama_base`/`comfy_host`.
+    /// In-memory only; rebuilt lazily from the persisted provider config the
+    /// first time a LAN endpoint is used after launch (Bug A / GH #49).
+    pub openai_hosts: Mutex<HashSet<String>>,
     pub whisper: Arc<Mutex<WhisperServer>>,
     pub downloads: Arc<Mutex<HashMap<String, DownloadProgress>>>,
     pub download_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
@@ -226,6 +233,7 @@ impl AppState {
             comfy_port: Mutex::new(initial_port),
             comfy_host: Mutex::new(initial_host),
             ollama_base: Mutex::new(initial_ollama_base),
+            openai_hosts: Mutex::new(HashSet::new()),
             whisper: Arc::new(Mutex::new(WhisperServer::new())),
             downloads: Arc::new(Mutex::new(HashMap::new())),
             download_tokens: Arc::new(Mutex::new(HashMap::new())),

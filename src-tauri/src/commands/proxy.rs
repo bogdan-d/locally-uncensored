@@ -114,6 +114,26 @@ fn configured_host(url_or_host: &str) -> String {
     url_or_host.trim().to_lowercase()
 }
 
+/// Cloud-metadata / link-local addresses that must NEVER be proxied, even if a
+/// host somehow lands in an allow-list. These are the classic SSRF targets
+/// (AWS/GCP/Azure 169.254.169.254, Alibaba 100.100.100.200, GCP IPv6 IMDS
+/// fd00:ec2::254) plus the whole IPv4 link-local block — a real LAN LLM backend
+/// never lives there. Defense-in-depth on top of host registration (Bug A).
+fn is_blocked_proxy_host(host: &str) -> bool {
+    let h = host.trim_matches(|c| c == '[' || c == ']').to_lowercase();
+    if matches!(h.as_str(), "169.254.169.254" | "100.100.100.200" | "fd00:ec2::254") {
+        return true;
+    }
+    // Entire IPv4 link-local 169.254.0.0/16 — never a legitimate backend.
+    if let Ok(ip) = h.parse::<std::net::Ipv4Addr>() {
+        let o = ip.octets();
+        if o[0] == 169 && o[1] == 254 {
+            return true;
+        }
+    }
+    false
+}
+
 /// Validate that a URL targets either localhost or one of the user-configured
 /// backend hosts (Ollama via `ollama_base`, ComfyUI via `comfy_host`).
 ///
@@ -130,6 +150,14 @@ fn validate_proxy_url(raw: &str, state: &crate::state::AppState) -> Result<(), S
     }
 
     let host = parsed.host_str().unwrap_or("").to_lowercase();
+
+    // Hard block: cloud-metadata / link-local — never proxied, even if a host
+    // somehow got allow-listed (SSRF defense-in-depth, Bug A).
+    if is_blocked_proxy_host(&host) {
+        return Err(format!(
+            "Blocked: '{}' is a metadata/link-local address and is never proxied", host
+        ));
+    }
 
     // Always-allowed: localhost variants. Covers the common case + any
     // backend bound to 0.0.0.0 on the same machine.
@@ -158,10 +186,46 @@ fn validate_proxy_url(raw: &str, state: &crate::state::AppState) -> Result<(), S
         return Ok(());
     }
 
+    // Configured OpenAI-compatible LAN backends (Bug A / GH #49). Registered
+    // via `register_openai_host` when the provider points at a non-localhost
+    // host. Only these specific user-configured hosts are forwarded.
+    if let Ok(hosts) = state.openai_hosts.lock() {
+        if hosts.contains(&host) {
+            return Ok(());
+        }
+    }
+
     Err(format!(
-        "proxy_localhost: host '{}' not allowed. Configure remote backends via Settings → Providers (Ollama) or Settings → ComfyUI (Host).",
+        "proxy_localhost: host '{}' not allowed. Configure remote backends via Settings → Providers or Settings → ComfyUI (Host).",
         host
     ))
+}
+
+/// Register a user-configured OpenAI-compatible backend host (LAN LM Studio,
+/// vLLM, …) into the proxy allow-list so `proxy_localhost` will forward to it.
+/// Mirrors the Ollama/ComfyUI host-registration model (Bug A / GH #49): the
+/// webview CSP + the backend's CORS block a direct LAN fetch, so these requests
+/// are proxied through Rust instead.
+///
+/// SSRF policy: only the host the user explicitly pointed LU at is added, and
+/// metadata/link-local addresses are refused outright (defense-in-depth on top
+/// of validate_proxy_url's hard block). Accepts a bare host or a full URL.
+#[tauri::command]
+pub fn register_openai_host(
+    host: String,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<(), String> {
+    let h = configured_host(&host);
+    if h.is_empty() || h.contains('/') || h.contains(' ') {
+        return Err("invalid host".to_string());
+    }
+    if is_blocked_proxy_host(&h) {
+        return Err(format!("refused: '{}' is a metadata/link-local address", h));
+    }
+    if let Ok(mut hosts) = state.openai_hosts.lock() {
+        hosts.insert(h);
+    }
+    Ok(())
 }
 
 /// Generic localhost proxy — fetch any localhost or configured-backend URL
@@ -514,5 +578,38 @@ pub async fn ollama_search(query: String) -> Result<serde_json::Value, String> {
     match serde_json::from_str::<serde_json::Value>(&text) {
         Ok(json) => Ok(json),
         Err(_) => Ok(serde_json::json!({"models": []})),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocks_cloud_metadata_and_link_local() {
+        // Classic SSRF metadata targets — must be blocked even if registered.
+        assert!(is_blocked_proxy_host("169.254.169.254")); // AWS/GCP/Azure IMDS
+        assert!(is_blocked_proxy_host("100.100.100.200")); // Alibaba
+        assert!(is_blocked_proxy_host("fd00:ec2::254"));   // GCP IPv6 IMDS
+        assert!(is_blocked_proxy_host("[fd00:ec2::254]")); // bracketed form
+        // Whole IPv4 link-local 169.254.0.0/16.
+        assert!(is_blocked_proxy_host("169.254.0.1"));
+        assert!(is_blocked_proxy_host("169.254.255.255"));
+    }
+
+    #[test]
+    fn allows_real_lan_and_localhost() {
+        for h in ["192.168.1.50", "10.0.0.5", "172.16.4.4", "localhost",
+                  "127.0.0.1", "100.64.0.1" /* Tailscale CGNAT, not metadata */] {
+            assert!(!is_blocked_proxy_host(h), "{} should not be blocked", h);
+        }
+    }
+
+    #[test]
+    fn configured_host_extracts_from_url_or_bare() {
+        assert_eq!(configured_host("http://192.168.1.50:1234/v1"), "192.168.1.50");
+        assert_eq!(configured_host("192.168.1.50"), "192.168.1.50");
+        assert_eq!(configured_host("HTTP://Host.LAN:8080"), "host.lan");
+        assert_eq!(configured_host("  nas  "), "nas");
     }
 }

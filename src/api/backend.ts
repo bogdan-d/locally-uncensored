@@ -534,3 +534,89 @@ export async function checkGitInstalled(): Promise<GitStatus> {
   const invoke = await getInvoke()
   return (await invoke('check_git_installed')) as GitStatus
 }
+
+// ── LAN / private-host detection + proxy registration (Bug A / GH #49) ──────
+//
+// A LAN OpenAI-compat endpoint (LM Studio / vLLM bound to 0.0.0.0 and reached
+// over the network as e.g. http://192.168.1.50:1234) cannot be fetched directly
+// from the Tauri webview: the CSP `connect-src` only whitelists localhost +
+// 127.0.0.1, and the backend doesn't send CORS headers for the tauri.localhost
+// origin. So those requests must go through the Rust proxy, exactly like
+// Ollama/ComfyUI. These helpers classify a host (proxy vs direct fetch) and
+// register the host with the proxy's allow-list (validate_proxy_url).
+
+/** Strip IPv6 brackets and lowercase. */
+function _canonHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '')
+}
+
+/** localhost / loopback — always proxy-allowed, no registration needed. */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = _canonHost(hostname)
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1'
+    || h === '0.0.0.0' || h.endsWith('.localhost')
+}
+
+/**
+ * True for localhost AND private/LAN addresses: RFC1918 (10/8, 172.16/12,
+ * 192.168/16), CGNAT/Tailscale (100.64/10), IPv6 ULA (fc00::/7) + link-local
+ * (fe80::/10), the common LAN DNS suffixes, and bare machine names (no dots).
+ *
+ * Deliberately NOT treated as LAN: IPv4 link-local 169.254/16. It is never a
+ * real LLM backend and 169.254.169.254 is the classic cloud-metadata SSRF
+ * target — the Rust proxy hard-blocks it regardless.
+ */
+export function isPrivateOrLanHost(hostname: string): boolean {
+  const h = _canonHost(hostname)
+  if (!h) return false
+  if (isLoopbackHost(h)) return true
+  if (/\.(local|lan|internal|intra|home|home\.arpa)$/.test(h)) return true
+  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (v4) {
+    const a = +v4[1], b = +v4[2]
+    if (a > 255 || b > 255 || +v4[3] > 255 || +v4[4] > 255) return false
+    if (a === 169 && b === 254) return false        // link-local / metadata: not LAN
+    if (a === 10) return true                        // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12
+    if (a === 192 && b === 168) return true          // 192.168.0.0/16
+    if (a === 127) return true                       // loopback
+    if (a === 100 && b >= 64 && b <= 127) return true // 100.64.0.0/10 CGNAT (Tailscale)
+    return false                                     // public IPv4
+  }
+  if (h.includes(':')) {                             // IPv6 literal
+    if (/^f[cd]/.test(h)) return true                // fc00::/7 unique-local
+    if (/^fe[89ab]/.test(h)) return true             // fe80::/10 link-local
+    return false                                     // public IPv6
+  }
+  if (!h.includes('.')) return true                  // bare LAN machine name (nas, mypc)
+  return false                                       // FQDN → public/cloud
+}
+
+/** Lowercase hostname from a URL, or '' if unparseable. */
+export function hostnameOf(url: string): string {
+  try { return _canonHost(new URL(url).hostname) } catch { return '' }
+}
+
+// Hosts already registered with the proxy this session (avoid duplicate IPC).
+const _registeredProxyHosts = new Set<string>()
+
+/**
+ * Ensure the Rust proxy's allow-list contains this endpoint's host so
+ * `proxy_localhost` will forward to a user-configured LAN backend. No-op for
+ * loopback (already allowed), in browser dev mode (no Rust proxy), and for
+ * hosts already registered this session. Best-effort: a failure (e.g. an older
+ * build without the command) is swallowed — the direct-fetch fallback applies.
+ */
+export async function ensureProxyAllowsHost(baseUrl: string): Promise<void> {
+  if (!isTauri()) return
+  const host = hostnameOf(baseUrl)
+  if (!host || isLoopbackHost(host)) return
+  if (_registeredProxyHosts.has(host)) return
+  try {
+    const invoke = await getInvoke()
+    await invoke('register_openai_host', { host })
+    _registeredProxyHosts.add(host)
+  } catch (err) {
+    log.warn('[ensureProxyAllowsHost] proxy host registration failed', { host, err: String(err) })
+  }
+}
