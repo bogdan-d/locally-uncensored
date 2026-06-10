@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, type ReactNode, type ChangeEvent } from 'react'
 import { ArrowLeft, RotateCcw, Sun, Moon, Volume2, Check, X, Loader2, Shield, ChevronRight, GraduationCap, Lock, Sliders, Plug, Bot, Phone, User, Download, Mic } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { SETTINGS_TAB_RESET_KEYS, type SettingsTab } from '../../lib/settings-reset'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { usePermissionStore } from '../../stores/permissionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
 import { PersonaPanel } from '../personas/PersonaPanel'
@@ -664,7 +666,6 @@ function CodexAgentSettings() {
 //
 // Tab choice is persisted in localStorage so the user's last-used view
 // survives reloads.
-type SettingsTab = 'general' | 'backends' | 'agent' | 'voice-remote'
 const SETTINGS_TAB_KEY = 'lu-settings-tab'
 const SETTINGS_TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
   { id: 'general',      label: 'General',      icon: <Sliders size={11} /> },
@@ -673,8 +674,89 @@ const SETTINGS_TABS: { id: SettingsTab; label: string; icon: ReactNode }[] = [
   { id: 'voice-remote', label: 'Voice & Remote', icon: <Phone size={11} /> },
 ]
 
+// GitHub #59 — the old single "Reset to Defaults" button fired silently with
+// no confirm and no feedback, so users reported it as "does nothing". Now:
+// arm-then-confirm (second click within 4s), per-tab scope, and an explicit
+// success line after the reset.
+function ResetSection({ tab }: { tab: SettingsTab }) {
+  const resetSettingsKeys = useSettingsStore((s) => s.resetSettingsKeys)
+  const resetSettings = useSettingsStore((s) => s.resetSettings)
+  const resetVoiceDefaults = useVoiceStore((s) => s.resetVoiceDefaults)
+  const resetPermissions = usePermissionStore((s) => s.resetToDefaults)
+  const [armed, setArmed] = useState<'section' | 'all' | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+  const armTimer = useRef<number | null>(null)
+  const doneTimer = useRef<number | null>(null)
+
+  const tabLabel = SETTINGS_TABS.find((t) => t.id === tab)?.label ?? 'section'
+
+  // Switching tabs while armed must disarm — otherwise a click armed on
+  // General would confirm-fire on Agent.
+  useEffect(() => { setArmed(null) }, [tab])
+  useEffect(() => () => {
+    if (armTimer.current) window.clearTimeout(armTimer.current)
+    if (doneTimer.current) window.clearTimeout(doneTimer.current)
+  }, [])
+
+  const handleClick = (which: 'section' | 'all') => {
+    if (armed !== which) {
+      setArmed(which)
+      if (armTimer.current) window.clearTimeout(armTimer.current)
+      armTimer.current = window.setTimeout(() => setArmed(null), 4000)
+      return
+    }
+    if (armTimer.current) window.clearTimeout(armTimer.current)
+    setArmed(null)
+    if (which === 'all') {
+      resetSettings()
+      resetVoiceDefaults()
+      resetPermissions()
+      setDone('All settings restored to defaults')
+    } else {
+      resetSettingsKeys(SETTINGS_TAB_RESET_KEYS[tab])
+      if (tab === 'agent') resetPermissions()
+      if (tab === 'voice-remote') resetVoiceDefaults()
+      setDone(`${tabLabel} settings restored to defaults`)
+    }
+    if (doneTimer.current) window.clearTimeout(doneTimer.current)
+    doneTimer.current = window.setTimeout(() => setDone(null), 3000)
+  }
+
+  return (
+    <div className="pt-3 pb-6 space-y-1.5">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={() => handleClick('section')}
+          className={`flex items-center gap-1.5 text-[0.65rem] transition-colors ${
+            armed === 'section' ? 'text-red-400 font-medium' : 'text-gray-500 hover:text-red-400'
+          }`}
+        >
+          <RotateCcw size={11} />
+          {armed === 'section' ? `Click again to reset ${tabLabel}` : `Reset ${tabLabel} to defaults`}
+        </button>
+        <button
+          onClick={() => handleClick('all')}
+          className={`flex items-center gap-1.5 text-[0.6rem] transition-colors ${
+            armed === 'all' ? 'text-red-400 font-medium' : 'text-gray-600 dark:text-gray-600 hover:text-red-400'
+          }`}
+        >
+          {armed === 'all' ? 'Click again to reset everything' : 'Reset all settings'}
+        </button>
+      </div>
+      {done && (
+        <div className="flex items-center gap-1.5 text-[0.6rem] text-emerald-500">
+          <Check size={11} /> {done}
+        </div>
+      )}
+      <div className="text-[0.55rem] text-gray-500 dark:text-gray-600 leading-snug">
+        Personas, memories, conversations, workflows and MCP servers are kept.
+      </div>
+    </div>
+  )
+}
+
 export function SettingsPage() {
-  const { settings, updateSettings, resetSettings } = useSettingsStore()
+  const { settings, updateSettings } = useSettingsStore()
   const { setView } = useUIStore()
   const voiceSettings = useVoiceStore()
   const [whisperStatus, setWhisperStatus] = useState<{ available: boolean; backend: string | null; error?: string } | null>(null)
@@ -1220,15 +1302,8 @@ export function SettingsPage() {
           </Section>
         </>)}
 
-        {/* ── Reset ──────────────────────────────────── */}
-        <div className="pt-3 pb-6">
-          <button
-            onClick={resetSettings}
-            className="flex items-center gap-1.5 text-[0.65rem] text-gray-500 hover:text-red-400 transition-colors"
-          >
-            <RotateCcw size={11} /> Reset to Defaults
-          </button>
-        </div>
+        {/* ── Reset (GitHub #59: per-tab scope + confirm + feedback) ── */}
+        <ResetSection tab={tab} />
       </div>
     </div>
   )

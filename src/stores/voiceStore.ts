@@ -44,6 +44,10 @@ interface VoiceState {
     }>
   ) => void;
   resetTransient: () => void;
+  /** GitHub #59 — restore the persisted voice settings to factory defaults.
+   *  Transient probe state (sttAvailable/ttsAvailable) is left alone: it
+   *  reflects what is installed on disk, not a preference. */
+  resetVoiceDefaults: () => void;
 }
 
 export const useVoiceStore = create<VoiceState>()(
@@ -87,6 +91,16 @@ export const useVoiceStore = create<VoiceState>()(
           isTranscribing: false,
           isSpeaking: false,
           transcript: "",
+        }),
+
+      resetVoiceDefaults: () =>
+        set({
+          sttEnabled: false,
+          ttsEnabled: false,
+          piperVoice: "en_US-lessac-medium",
+          ttsVoice: "",
+          ttsRate: 1.0,
+          ttsPitch: 1.0,
         }),
     }),
     {

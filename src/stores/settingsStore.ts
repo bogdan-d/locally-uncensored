@@ -26,6 +26,9 @@ interface SettingsState {
   _version: number
   updateSettings: (partial: Partial<Settings>) => void
   resetSettings: () => void
+  /** GitHub #59 — reset only the given settings keys to their defaults
+   *  (per-section reset; leaves everything else untouched). */
+  resetSettingsKeys: (keys: (keyof Settings)[]) => void
   addPersona: (persona: Persona) => void
   removePersona: (id: string) => void
   updatePersona: (id: string, partial: Partial<Persona>) => void
@@ -45,6 +48,18 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ settings: { ...state.settings, ...partial } })),
 
       resetSettings: () => set((state) => ({ settings: { ...DEFAULT_SETTINGS, onboardingDone: state.settings.onboardingDone } })),
+
+      resetSettingsKeys: (keys) =>
+        set((state) => {
+          const next = { ...state.settings }
+          for (const k of keys) {
+            // onboardingDone is a lifecycle marker, not a preference — never
+            // reset it (same guard the full resetSettings applies).
+            if (k === 'onboardingDone') continue
+            ;(next as Record<string, unknown>)[k] = DEFAULT_SETTINGS[k]
+          }
+          return { settings: next }
+        }),
 
       addPersona: (persona) =>
         set((state) => ({ personas: [...state.personas, persona] })),
