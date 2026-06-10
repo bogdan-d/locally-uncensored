@@ -362,6 +362,51 @@ async function ensureComfyRunning(timeoutMs = 90_000): Promise<boolean> {
  * released the VRAM defeats the whole point — the two would briefly co-exist
  * and OOM. 15 s is generous; a `keep_alive:0` evict is usually sub-second.
  */
+// ── LM Studio text-model juggling (v2.5.3) ───────────────────────
+
+export interface LmsTextModel {
+  /** Bare LM Studio model id (no `openai::` routing prefix). */
+  id: string
+  /** Context length it was loaded with — restored on reload via `lms load -c`. */
+  contextLength: number | null
+}
+
+/** Empirically detect whether the active 'openai' provider model is a LOCAL
+ *  LM Studio model currently holding VRAM. Asks the local LM Studio REST
+ *  (lmstudio_model_context → state === 'loaded'); anything else — cloud
+ *  OpenAI, other openai-compat endpoints, LM Studio not running — returns
+ *  null and the orchestrator skips juggling exactly as before. */
+export async function detectLmsTextModel(
+  active: { name: string; providerId: string } | null,
+): Promise<LmsTextModel | null> {
+  if (!active || active.providerId !== 'openai' || !active.name) return null
+  const bare = active.name.startsWith('openai::')
+    ? active.name.slice('openai::'.length)
+    : active.name
+  try {
+    const info = await backendCall<{ loaded: number | null; state: string | null }>(
+      'lmstudio_model_context',
+      { model: bare },
+    )
+    if (info && info.state === 'loaded') {
+      return { id: bare, contextLength: typeof info.loaded === 'number' ? info.loaded : null }
+    }
+  } catch { /* LM Studio absent → no local VRAM held */ }
+  return null
+}
+
+/** Rough VRAM estimate for an LM Studio text model from its id's parameter
+ *  count ("…-7b…" → ~5.3 GB at Q4 + context overhead). LM Studio's REST has
+ *  no VRAM figure, so this feeds decideUnload the same way Ollama's
+ *  sizeVram does; no parseable size → undefined → safe no-evict in 'auto'. */
+export function estimateLmsTextVramBytes(id: string): number | undefined {
+  const m = id.toLowerCase().match(/(\d+(?:\.\d+)?)\s*b\b/)
+  if (!m) return undefined
+  const params = parseFloat(m[1])
+  if (!Number.isFinite(params) || params <= 0) return undefined
+  return Math.round(params * 0.75 * 1e9)
+}
+
 export async function pollGone(modelName: string, timeoutMs = 15_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   // Check immediately first (cheap) before sleeping.
@@ -542,6 +587,14 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
     !!active && active.providerId === 'ollama' && active.remote === false && isOllamaLocal()
   const textModel = textIsLocalOllama ? active!.name : null
 
+  // LM Studio (v2.5.3, live E2E 2026-06-10): an 'openai' provider can be a
+  // LOCAL LM Studio holding real VRAM. Pre-fix the orchestrator skipped all
+  // juggling for it — on a 12 GB card qwen2.5-vl-7b (~5 GB) stayed resident
+  // and an SDXL generation thrashed at 11.9/12 GB. Detection is empirical,
+  // not metadata-based: the model id reports state==='loaded' on the local
+  // LM Studio REST (lmstudio_model_context) → it holds local VRAM.
+  const lmsTarget = textModel ? null : await detectLmsTextModel(active)
+
   // ── Decide unload (only relevant for a local Ollama text model) ──
   let willUnload = false
   if (textModel) {
@@ -568,9 +621,36 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
     }
   }
 
+  // ── Decide unload for a local LM Studio text model — same decideUnload
+  // math, same exclusiveVramMode setting. LM Studio's REST reports no VRAM
+  // figure, so the resident size is a parameter-count heuristic from the id
+  // (estimateLmsTextVramBytes); unknown sizes keep the safe no-evict default.
+  let willUnloadLms = false
+  if (lmsTarget) {
+    try {
+      const [footprint, systemVram, mode] = await Promise.all([
+        Promise.resolve(estimateModelFootprintGB(targetModel)),
+        getSystemVRAM(),
+        Promise.resolve(getExclusiveVramMode()),
+      ])
+      const decision = decideUnload({
+        textVramBytes: estimateLmsTextVramBytes(lmsTarget.id),
+        modelFootprintGB: footprint,
+        systemVramGB: systemVram,
+        mode,
+      })
+      willUnloadLms = decision.unload
+      log.info('vram_handoff.decision_lms', { kind, targetModel, lmsModel: lmsTarget.id, ...decision })
+    } catch (e) {
+      log.warn('vram_handoff.decision_lms_failed', { err: String(e) })
+      willUnloadLms = false
+    }
+  }
+
   // Capture resident text models BEFORE unload so the reload target is honest
   // even if `active` was somehow stale.
   let evictedModel: string | null = null
+  let evictedLms: LmsTextModel | null = null
 
   try {
     // ── (b) HANDOFF-OUT — only if we decided to unload ─────────────
@@ -602,6 +682,29 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
       }
     }
 
+    // ── (b2) HANDOFF-OUT for a local LM Studio text model ──────────
+    if (willUnloadLms && lmsTarget) {
+      emitHandoff('freeing_vram', { kind, detail: lmsTarget.id })
+      try {
+        await backendCall('lmstudio_unload_model', { model: lmsTarget.id })
+        evictedLms = lmsTarget
+        // Race guard, mirroring pollGone: wait until the REST stops reporting
+        // 'loaded' before ComfyUI starts grabbing VRAM.
+        for (let i = 0; i < 10; i++) {
+          const info = await backendCall<{ state: string | null }>(
+            'lmstudio_model_context',
+            { model: lmsTarget.id },
+          ).catch(() => null)
+          if (!info || info.state !== 'loaded') break
+          await new Promise((r) => setTimeout(r, 1000))
+        }
+      } catch (e) {
+        // Same policy as the Ollama path: never block the generation on a
+        // failed unload — ComfyUI may still OOM and that surfaces verbatim.
+        log.warn('vram_handoff.lms_unload_failed', { lmsModel: lmsTarget.id, err: String(e) })
+      }
+    }
+
     // ── (c) GENERATE ───────────────────────────────────────────────
     emitHandoff('loading_image_model', { kind, detail: targetModel })
     const up = await ensureComfyRunning()
@@ -622,7 +725,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
     // Free ComfyUI's VRAM first (so the text model has room to reload), then
     // best-effort reload the text model. The reload is non-fatal: if it throws,
     // Ollama will lazy-load on the user's next message anyway.
-    emitHandoff('restoring_text', { kind, detail: evictedModel ?? undefined })
+    emitHandoff('restoring_text', { kind, detail: evictedModel ?? evictedLms?.id ?? undefined })
     try {
       await freeMemory()
     } catch { /* best effort */ }
@@ -631,6 +734,19 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
         await loadModel(evictedModel)
       } catch (e) {
         log.warn('vram_handoff.reload_failed', { textModel: evictedModel, err: String(e) })
+      }
+    }
+    if (evictedLms) {
+      try {
+        // Restore with the SAME context length it was loaded with (the REST
+        // reported it at detect time) — `lms load` without -c would fall back
+        // to the model default and silently shrink long chats.
+        await backendCall('lmstudio_load_model', {
+          model: evictedLms.id,
+          ...(evictedLms.contextLength ? { contextLength: evictedLms.contextLength } : {}),
+        })
+      } catch (e) {
+        log.warn('vram_handoff.lms_reload_failed', { lmsModel: evictedLms.id, err: String(e) })
       }
     }
     emitHandoff('done', { kind })
