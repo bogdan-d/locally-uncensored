@@ -1039,14 +1039,27 @@ export function useCodex() {
           // (David 2026-06-04). For those, set the JS race ceiling just ABOVE
           // the tool's own timeout so the backend always wins; everything else
           // keeps the original 60s guard.
+          //
+          // Same bug class hit the generation tools when they joined Codex in
+          // v2.5.3 (live E2E 2026-06-10: five video_generate attempts all died
+          // at "timed out (60s)" mid-VRAM-handoff). image/video generation has
+          // its own settings-driven deadline (imageGen/videoGenTimeoutMinutes,
+          // enforced in vram-handoff's poll) — set the JS ceiling above it so
+          // the generation pipeline's own timeout always wins, exactly like
+          // the shell tools.
           const longRunning =
             name === 'shell_execute' || name === 'code_execute' ||
             name === 'shell_execute_background' || name === 'run_tests' ||
             name === 'git_commit' || name === 'git_push'
           const own = Number(args?.timeout)
-          const capMs = longRunning
-            ? (Number.isFinite(own) && own > 0 ? own + 15000 : 615000)
-            : 60000
+          const capMs =
+            name === 'image_generate'
+              ? (Math.max(1, Number(settings.imageGenTimeoutMinutes) || 20) * 60_000 + 120_000)
+              : name === 'video_generate'
+                ? (Math.max(1, Number(settings.videoGenTimeoutMinutes) || 60) * 60_000 + 120_000)
+                : longRunning
+                  ? (Number.isFinite(own) && own > 0 ? own + 15000 : 615000)
+                  : 60000
           return Promise.race([
             toolRegistry.execute(name, args),
             new Promise<string>((_, reject) =>
