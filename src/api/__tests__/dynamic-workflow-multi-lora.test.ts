@@ -91,6 +91,12 @@ describe('resolveLoraNames', () => {
   it('unique substring resolves', () => {
     expect(resolveLoraNames(['detail'], INSTALLED)).toEqual(['detail-tweaker.safetensors'])
   })
+  it('separator-insensitive: "pixel art" (spaces) finds pixel-art-xl (dashes)', () => {
+    // Live E2E 2026-06-10 found this gap: a natural-language "use the pixel
+    // art lora" arrives as 'pixel art' and the dash-only substring missed it.
+    expect(resolveLoraNames(['pixel art'], INSTALLED)).toEqual(['pixel-art-xl.safetensors'])
+    expect(resolveLoraNames(['pixel_art_xl'], INSTALLED)).toEqual(['pixel-art-xl.safetensors'])
+  })
   it('a miss throws an actionable error listing installed LoRAs', () => {
     expect(() => resolveLoraNames(['does-not-exist'], INSTALLED)).toThrow(/not installed/i)
     expect(() => resolveLoraNames(['does-not-exist'], INSTALLED)).toThrow(/pixel-art-xl\.safetensors/)

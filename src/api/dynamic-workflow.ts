@@ -289,6 +289,9 @@ function resolveOneLora(req: string, installed: string[]): string | null {
   if (installed.includes(req)) return req
   const norm = (s: string) =>
     s.toLowerCase().replace(/\.(safetensors|pt|ckpt|bin)$/i, '').replace(/\\/g, '/')
+  // Separator-insensitive form: users/LLMs say "pixel art" for
+  // "pixel-art-xl.safetensors" — spaces, dashes and underscores all collapse.
+  const loose = (s: string) => norm(s).replace(/[-_\s]+/g, '')
   const rq = norm(req)
   let hits = installed.filter((c) => norm(c) === rq)
   if (hits.length === 1) return hits[0]
@@ -296,8 +299,9 @@ function resolveOneLora(req: string, installed: string[]): string | null {
   const rqBase = rq.split('/').pop() || rq
   hits = installed.filter((c) => (norm(c).split('/').pop() || '') === rqBase)
   if (hits.length === 1) return hits[0]
-  // Last resort: unique substring either way round.
-  hits = installed.filter((c) => norm(c).includes(rq) || rq.includes(norm(c)))
+  // Unique substring either way round (separator-insensitive).
+  const rqLoose = loose(req)
+  hits = installed.filter((c) => loose(c).includes(rqLoose) || rqLoose.includes(loose(c)))
   if (hits.length === 1) return hits[0]
   return null
 }
