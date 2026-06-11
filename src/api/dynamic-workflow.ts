@@ -952,12 +952,23 @@ function buildFramePackWorkflow(params: VideoParams, seed: number, nodes: Catego
   workflow[clipVisionId] = { class_type: 'CLIPVisionLoader', inputs: { clip_name: 'sigclip_vision_patch14_384.safetensors' } }
   workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: 'hunyuanvideo15_vae_fp16.safetensors' } }
   workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.inputImage || 'input_image.png' } }
+  // Scale the source to the resolved generation size before encoding (David
+  // 2026-06-11). FramePack otherwise samples at the full source resolution
+  // (a 1024×1024 still → very slow + heavy on a 12 GB card). resolveI2VResolution
+  // already picked an aspect-preserving size capped at 768 / snapped to 16;
+  // crop:'center' fills it without distortion. Feeds BOTH the CLIP-vision and
+  // VAE encoders so the embeds and latent agree on the framing.
+  const fpScaleId = String(n++)
+  workflow[fpScaleId] = {
+    class_type: 'ImageScale',
+    inputs: { image: [imageId, 0], upscale_method: 'lanczos', width: params.width || 640, height: params.height || 640, crop: 'center' },
+  }
   // Encode image for CLIP vision embeddings (FramePackSampler image_embeds input)
   const clipVisionEncodeId = String(n++)
-  workflow[clipVisionEncodeId] = { class_type: 'CLIPVisionEncode', inputs: { crop: 'center', clip_vision: [clipVisionId, 0], image: [imageId, 0] } }
+  workflow[clipVisionEncodeId] = { class_type: 'CLIPVisionEncode', inputs: { crop: 'center', clip_vision: [clipVisionId, 0], image: [fpScaleId, 0] } }
   // Encode image to latent (FramePackSampler needs LATENT, not IMAGE)
   const vaeEncodeId = String(n++)
-  workflow[vaeEncodeId] = { class_type: 'VAEEncode', inputs: { pixels: [imageId, 0], vae: [vaeId, 0] } }
+  workflow[vaeEncodeId] = { class_type: 'VAEEncode', inputs: { pixels: [fpScaleId, 0], vae: [vaeId, 0] } }
   workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { text: params.prompt, clip: [clipId, 0] } }
   const negId = String(n++)
   workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { text: '', clip: [clipId, 0] } }
