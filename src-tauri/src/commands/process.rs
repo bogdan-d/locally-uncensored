@@ -689,10 +689,16 @@ pub fn start_ollama(state: State<'_, AppState>) -> Result<serde_json::Value, Str
 /// Does `python` have a working flash-attn? Real import test (not pip-list):
 /// a half-installed or ABI-mismatched wheel fails the import, and we must
 /// never pass `--use-flash-attention` then — ComfyUI would error at startup.
-/// The import loads torch, so allow up to 25 s; timeout counts as absent.
-pub(crate) fn probe_flash_attention(python: &str) -> bool {
+///
+/// Three-state result: Some(true) = import OK, Some(false) = the process
+/// DEFINITIVELY failed (ImportError etc.), None = timeout / couldn't spawn.
+/// The distinction matters for caching: importing flash_attn loads torch,
+/// which is ~4 s warm but can blow well past 25 s during an app-boot disk
+/// storm (live miss 2026-06-11: flag silently absent for the whole session
+/// because a cold-start timeout was cached as "not installed").
+pub(crate) fn probe_flash_attention(python: &str) -> Option<bool> {
     if python.is_empty() {
-        return false;
+        return Some(false);
     }
     let mut cmd = Command::new(python);
     cmd.args(["-c", "from flash_attn import flash_attn_func"])
@@ -703,32 +709,43 @@ pub(crate) fn probe_flash_attention(python: &str) -> bool {
     cmd.creation_flags(CREATE_NO_WINDOW);
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(_) => return None,
     };
-    for _ in 0..125 {
+    // 90 s ceiling: an ABSENT package fails fast (ModuleNotFoundError in
+    // seconds), so the long window only ever delays a start where flash-attn
+    // exists but the disk is busy — exactly the case worth waiting for.
+    for _ in 0..450 {
         match child.try_wait() {
-            Ok(Some(status)) => return status.success(),
+            Ok(Some(status)) => return Some(status.success()),
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(200)),
-            Err(_) => return false,
+            Err(_) => return None,
         }
     }
     let _ = child.kill();
-    false
+    None
 }
 
-/// Probe with per-python cache (the import costs ~5-10 s; only the first
-/// check per python path pays it).
+/// Probe with per-python cache. Only DEFINITIVE results are cached — a
+/// timeout returns false for this call but is retried on the next start,
+/// so one slow boot can't disable Flash Attention for the whole session.
 fn flash_attention_cached(state: &AppState, python: &str) -> bool {
     if let Some(v) = state.flash_attn_cache.lock().unwrap().get(python).copied() {
         return v;
     }
-    let v = probe_flash_attention(python);
-    state
-        .flash_attn_cache
-        .lock()
-        .unwrap()
-        .insert(python.to_string(), v);
-    v
+    match probe_flash_attention(python) {
+        Some(v) => {
+            state
+                .flash_attn_cache
+                .lock()
+                .unwrap()
+                .insert(python.to_string(), v);
+            v
+        }
+        None => {
+            println!("[ComfyUI] flash-attn probe timed out — starting without the flag (will retry next start)");
+            false
+        }
+    }
 }
 
 /// Same bundled-portable → venv → system resolution order as start_comfyui,
