@@ -21,8 +21,29 @@
 
 import type { AgentWorkspace } from '../types/agent-workspace'
 
-let activeChatId: string | null = null
-let activeWorkspace: AgentWorkspace | null = null
+/**
+ * Duplication-proof state carrier (v2.5.3 live E2E find, 2026-06-11).
+ *
+ * The rolldown-based Vite 8 build DUPLICATES this small module: the App
+ * chunk inlines its own copy (used by useAgentChat/useCodex) while the
+ * async mcp/vram-handoff graph imports the separate agent-context chunk.
+ * Proven live on the release build: the hook's setActiveAgentModel wrote
+ * copy A while vramHandoffGenerate's getActiveAgentModel read copy B —
+ * always null — so VRAM eviction silently never ran, and the builtin
+ * tools' chatId/workspace scoping read nulls the same way (grep the dist
+ * for the `noid` slug literal: it appears in TWO chunks).
+ *
+ * Plain `let` module state is therefore NOT a singleton here. Parking the
+ * state on `globalThis` makes every bundled copy share one store, whatever
+ * the chunker decides. Do not "simplify" this back to module-level lets.
+ */
+interface AgentCtxState {
+  chatId: string | null
+  workspace: AgentWorkspace | null
+  model: ActiveAgentModel | null
+}
+const _g = globalThis as typeof globalThis & { __LU_AGENT_CTX?: AgentCtxState }
+const ctx: AgentCtxState = _g.__LU_AGENT_CTX ?? (_g.__LU_AGENT_CTX = { chatId: null, workspace: null, model: null })
 
 /**
  * The text model driving the current agent loop. Pinned by useAgentChat right
@@ -44,28 +65,26 @@ export interface ActiveAgentModel {
   remote: boolean
 }
 
-let activeAgentModel: ActiveAgentModel | null = null
-
 export function setActiveChatId(id: string | null | undefined): void {
-  activeChatId = id ? String(id) : null
+  ctx.chatId = id ? String(id) : null
 }
 
 export function getActiveChatId(): string | null {
-  return activeChatId
+  return ctx.chatId
 }
 
 export function setActiveAgentModel(model: ActiveAgentModel | null | undefined): void {
-  activeAgentModel = model && model.name ? { name: model.name, providerId: model.providerId, remote: !!model.remote } : null
+  ctx.model = model && model.name ? { name: model.name, providerId: model.providerId, remote: !!model.remote } : null
 }
 
 export function getActiveAgentModel(): ActiveAgentModel | null {
-  return activeAgentModel
+  return ctx.model
 }
 
 export function clearActiveChatId(): void {
-  activeChatId = null
-  activeWorkspace = null
-  activeAgentModel = null
+  ctx.chatId = null
+  ctx.workspace = null
+  ctx.model = null
 }
 
 // ── Multi-Repo Agent (Sprint C #8 from uselu) ──────────────────
@@ -96,7 +115,7 @@ export function setActiveWorkspace(ws: AgentWorkspace | null | undefined): void 
           ),
         )
       : []
-    activeWorkspace = {
+    ctx.workspace = {
       kind: 'folder',
       path: ws.path,
       extraPaths: cleanedExtras.length > 0 ? cleanedExtras : undefined,
@@ -105,12 +124,12 @@ export function setActiveWorkspace(ws: AgentWorkspace | null | undefined): void 
     // Sandbox (or unset) → leave pointer null so the bridge falls back
     // to its own per-chat sandbox path. Setting it to { kind: 'sandbox' }
     // would just duplicate state the bridge already owns.
-    activeWorkspace = null
+    ctx.workspace = null
   }
 }
 
 export function getActiveWorkspace(): AgentWorkspace | null {
-  return activeWorkspace
+  return ctx.workspace
 }
 
 /**

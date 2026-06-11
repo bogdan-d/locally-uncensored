@@ -395,6 +395,48 @@ export async function detectLmsTextModel(
   return null
 }
 
+/** Live-truth fallback (v2.5.3 follow-up): whatever the LOCAL LM Studio REST
+ *  reports as loaded holds VRAM — regardless of which provider the chat uses
+ *  or whether the agent-loop pin survived (rolldown chunk duplication ate it
+ *  in the release build, and Codex never pinned). Returns the first loaded
+ *  model with its loaded context length, or null when LM Studio is absent /
+ *  nothing is loaded. */
+export async function detectAnyLoadedLmsModel(): Promise<LmsTextModel | null> {
+  try {
+    const list = await backendCall<{ loaded: string[] }>('lmstudio_list_loaded', {})
+    const id = Array.isArray(list?.loaded) ? list.loaded.find((m) => typeof m === 'string' && m) : undefined
+    if (!id) return null
+    let contextLength: number | null = null
+    try {
+      const info = await backendCall<{ loaded: number | null }>('lmstudio_model_context', { model: id })
+      contextLength = typeof info?.loaded === 'number' ? info.loaded : null
+    } catch { /* context unknown — reload without -c */ }
+    return { id, contextLength }
+  } catch {
+    return null
+  }
+}
+
+/** Pure pick: which resident Ollama model is the evict-then-reload target?
+ *  The pinned agent-loop model wins when it is actually resident; otherwise
+ *  the largest resident one (in practice: the chat model). Exported for the
+ *  unit tests — the live-state fallback this feeds exists because the pin
+ *  alone proved unreliable (chunk duplication / unpinned callers). */
+export function pickResidentOllamaTarget(
+  resident: { name: string; sizeVram?: number }[],
+  active: { name: string; providerId: string; remote: boolean } | null,
+): { name: string; sizeVram?: number } | null {
+  if (resident.length === 0) return null
+  const preferred =
+    active && active.providerId === 'ollama' && active.remote === false
+      ? resident.find((m) => m.name === active.name)
+      : undefined
+  return (
+    preferred ??
+    resident.reduce((a, b) => (((b.sizeVram ?? 0) > (a.sizeVram ?? 0)) ? b : a))
+  )
+}
+
 /** Rough VRAM estimate for an LM Studio text model from its id's parameter
  *  count ("…-7b…" → ~5.3 GB at Q4 + context overhead). LM Studio's REST has
  *  no VRAM figure, so this feeds decideUnload the same way Ollama's
@@ -577,72 +619,75 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
     return `Error: Could not query ComfyUI models — ${e instanceof Error ? e.message : String(e)}. Is ComfyUI installed and reachable?`
   }
 
-  // Which text model do we reload afterwards? From the active agent loop.
+  // Which text model do we reload afterwards? The pinned agent-loop model is
+  // the PREFERENCE — but the pin has proven fragile in the wild (the rolldown
+  // build duplicated agent-context so the pin read null in the release app,
+  // and Codex never pinned at all; live E2E 2026-06-11). What actually holds
+  // VRAM is authoritative, so the decision now starts from the LIVE state:
+  // /api/ps for a local Ollama, the LM Studio REST for a local LM Studio.
+  // Cloud providers / remote bases never show up in either probe, so they
+  // skip juggling exactly as before.
   const active = getActiveAgentModel()
-  // Cloud (openai/anthropic/openrouter/...) OR a remote Ollama base hold NO
-  // local VRAM — there is nothing to free or restore, so skip all juggling and
-  // just generate. `active.remote` is set by useAgentChat from the Ollama base
-  // host; providerId !== 'ollama' covers the cloud providers.
-  const textIsLocalOllama =
-    !!active && active.providerId === 'ollama' && active.remote === false && isOllamaLocal()
-  const textModel = textIsLocalOllama ? active!.name : null
 
-  // LM Studio (v2.5.3, live E2E 2026-06-10): an 'openai' provider can be a
-  // LOCAL LM Studio holding real VRAM. Pre-fix the orchestrator skipped all
-  // juggling for it — on a 12 GB card qwen2.5-vl-7b (~5 GB) stayed resident
-  // and an SDXL generation thrashed at 11.9/12 GB. Detection is empirical,
-  // not metadata-based: the model id reports state==='loaded' on the local
-  // LM Studio REST (lmstudio_model_context) → it holds local VRAM.
-  const lmsTarget = textModel ? null : await detectLmsTextModel(active)
-
-  // ── Decide unload (only relevant for a local Ollama text model) ──
-  let willUnload = false
-  if (textModel) {
+  // ── Ollama side (live): resident models from /api/ps ──────────────
+  let textModel: string | null = null
+  let textVramBytes: number | undefined
+  if (isOllamaLocal()) {
     try {
-      const [resident, footprint, systemVram, mode] = await Promise.all([
-        getResidentModels(),
-        Promise.resolve(estimateModelFootprintGB(targetModel)),
-        getSystemVRAM(),
-        Promise.resolve(getExclusiveVramMode()),
-      ])
-      const textEntry = resident.find((m) => m.name === textModel)
-      const decision = decideUnload({
-        textVramBytes: textEntry?.sizeVram,
-        modelFootprintGB: footprint,
-        systemVramGB: systemVram,
-        mode,
-      })
-      willUnload = decision.unload
-      log.info('vram_handoff.decision', { kind, targetModel, textModel, ...decision })
-    } catch (e) {
-      // Decision probe failed — default to NOT unloading (safer; attempt gen).
-      log.warn('vram_handoff.decision_failed', { err: String(e) })
-      willUnload = false
+      const resident = await getResidentModels()
+      const candidate = pickResidentOllamaTarget(resident, active)
+      if (candidate) {
+        textModel = candidate.name
+        textVramBytes = candidate.sizeVram
+      }
+    } catch {
+      // /api/ps unreachable → treat as nothing resident (no Ollama to juggle).
     }
   }
 
-  // ── Decide unload for a local LM Studio text model — same decideUnload
-  // math, same exclusiveVramMode setting. LM Studio's REST reports no VRAM
-  // figure, so the resident size is a parameter-count heuristic from the id
-  // (estimateLmsTextVramBytes); unknown sizes keep the safe no-evict default.
+  // ── LM Studio side (live): pinned context first, then list_loaded ──
+  // detectLmsTextModel covers the pinned 'openai' chat model; the fallback
+  // covers everything the pin misses (Codex, cloud chat with a stray loaded
+  // LMS model, lost pin). Both only ever match the LOCAL LM Studio REST.
+  let lmsTarget = await detectLmsTextModel(active)
+  if (!lmsTarget) lmsTarget = await detectAnyLoadedLmsModel()
+  const lmsVramBytes = lmsTarget ? estimateLmsTextVramBytes(lmsTarget.id) : undefined
+
+  // ── Decide: one shared fits/doesn't-fit call over EVERYTHING resident.
+  // If the sum doesn't co-exist with the generation footprint, free BOTH
+  // sides — over-evicting is lossless (both reload in the finally), while
+  // under-evicting risks the exact 11.9/12 GB thrash this exists to avoid.
+  let willUnload = false
   let willUnloadLms = false
-  if (lmsTarget) {
+  if (textModel || lmsTarget) {
     try {
       const [footprint, systemVram, mode] = await Promise.all([
         Promise.resolve(estimateModelFootprintGB(targetModel)),
         getSystemVRAM(),
         Promise.resolve(getExclusiveVramMode()),
       ])
+      const residentBytes = (textVramBytes ?? 0) + (lmsVramBytes ?? 0)
       const decision = decideUnload({
-        textVramBytes: estimateLmsTextVramBytes(lmsTarget.id),
+        textVramBytes: residentBytes > 0 ? residentBytes : undefined,
         modelFootprintGB: footprint,
         systemVramGB: systemVram,
         mode,
       })
-      willUnloadLms = decision.unload
-      log.info('vram_handoff.decision_lms', { kind, targetModel, lmsModel: lmsTarget.id, ...decision })
+      willUnload = decision.unload && !!textModel
+      willUnloadLms = decision.unload && !!lmsTarget
+      log.info('vram_handoff.decision', {
+        kind,
+        targetModel,
+        textModel,
+        lmsModel: lmsTarget?.id ?? null,
+        textVramBytes,
+        lmsVramBytes,
+        ...decision,
+      })
     } catch (e) {
-      log.warn('vram_handoff.decision_lms_failed', { err: String(e) })
+      // Decision probe failed — default to NOT unloading (safer; attempt gen).
+      log.warn('vram_handoff.decision_failed', { err: String(e) })
+      willUnload = false
       willUnloadLms = false
     }
   }

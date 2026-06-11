@@ -10,11 +10,11 @@ import { usePermissionStore } from '../stores/permissionStore'
 import { getToolCallingStrategy } from '../lib/model-compatibility'
 import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { chatNonStreaming } from '../api/agents'
-import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace } from '../api/agent-context'
+import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace, setActiveAgentModel } from '../api/agent-context'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { loadLurules, renderRulesSection, type RulesReader } from '../lib/lurules'
-import { backendCall } from '../api/backend'
+import { backendCall, isOllamaLocal } from '../api/backend'
 import { planWithArchitect, renderArchitectPlanSection } from '../api/agents/architect'
 import { fetchRepoMap, renderRepoMapSection } from '../api/agents/repo-map'
 import { isLocalModelByName } from '../api/agents/model-locality'
@@ -275,6 +275,17 @@ export function useCodex() {
       ? getToolCallingStrategy(activeModel)
       : 'native'
     const modelToUse = activeModel.includes('::') ? activeModel.split('::')[1] : activeModel
+
+    // Pin the text model driving this Codex run — parity with useAgentChat.
+    // The VRAM hand-off orchestrator (image/video generation in Code mode,
+    // v2.5.3) prefers this pin to pick its evict-then-reload target; without
+    // it the live-state fallback still evicts, but the pin guarantees the
+    // reload hits exactly the model this thread is using. Cleared in finally.
+    setActiveAgentModel({
+      name: modelToUse,
+      providerId,
+      remote: providerId === 'ollama' ? !isOllamaLocal() : false,
+    })
 
     // Build permissions — auto-approve reads, confirm writes
     const permissions = usePermissionStore.getState().getEffectivePermissions(convId)
