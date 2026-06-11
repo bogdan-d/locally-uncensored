@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { Brain, X, Plus, Trash2, ChevronDown, Archive } from 'lucide-react'
 import { useMemoryStore } from '../../stores/memoryStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -85,7 +86,14 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
     setAdding(false)
   }
 
-  return (
+  // Portal to document.body: this is a `fixed inset-0` overlay, but the brain
+  // button lives in the Header's center column which carries Tailwind's
+  // `-translate-x-1/2`. A CSS transform on ANY ancestor makes that ancestor the
+  // containing block for `position: fixed`, so without the portal the overlay
+  // was clamped to the header-center's ~132px width on every viewport ≥1024px
+  // (David flagged the squeezed Memory panel). Portaling out of the transformed
+  // subtree restores true viewport-anchored full-screen positioning.
+  return createPortal(
     <motion.div
       initial={{ opacity: 0, y: -5 }}
       animate={{ opacity: 1, y: 0 }}
@@ -181,6 +189,7 @@ function MemoryPopover({ onClose }: { onClose: () => void }) {
           </div>
         )}
       </div>
-    </motion.div>
+    </motion.div>,
+    document.body,
   )
 }

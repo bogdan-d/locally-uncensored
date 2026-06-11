@@ -696,13 +696,33 @@ export function useAgentChat() {
             }
             dropThinkingBlock()
           } else {
-            try {
-              turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
-            } catch (thinkErr: any) {
-              if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
-                const retryOptions = { ...chatOptions, thinking: undefined as unknown as boolean }
-                turn = await provider.chatWithTools(modelToUse, agentMessages, tools, retryOptions)
-              } else {
+            // Connection-failure retry for openai-compat providers — parity with
+            // the Ollama branch above. A LOCAL LM Studio model gets unloaded +
+            // JIT-reloaded around an image/video VRAM hand-off (detectLmsTextModel
+            // juggling, v2.5.3); a request that races that reload window dies as
+            // "LM Studio: Request failed". Without a retry that surfaced as a bare
+            // "Agent error" on the very next tool turn (ship-gate find 2026-06-11,
+            // chat-tools image on LM Studio). Retry transient failures a couple of
+            // times; a 4xx is deterministic and still surfaces immediately.
+            let connRetries = 0
+            for (;;) {
+              try {
+                turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
+                break
+              } catch (thinkErr: any) {
+                if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
+                  const retryOptions = { ...chatOptions, thinking: undefined as unknown as boolean }
+                  turn = await provider.chatWithTools(modelToUse, agentMessages, tools, retryOptions)
+                  break
+                }
+                const sc = typeof thinkErr?.statusCode === 'number' ? thinkErr.statusCode : 0
+                const transient = thinkErr?.name !== 'AbortError' && !(sc >= 400 && sc < 500)
+                if (transient && connRetries < 2) {
+                  connRetries++
+                  log.warn('agent.model_call_retry', { attempt: connRetries, provider: providerId, err: String(thinkErr?.message || thinkErr) })
+                  await new Promise((r) => setTimeout(r, 1500 * connRetries))
+                  continue
+                }
                 throw thinkErr
               }
             }

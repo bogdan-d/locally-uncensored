@@ -51,13 +51,11 @@ export function useChat() {
     // clearly needs one of those capabilities, run THIS turn through the agent
     // executor with a curated 5-tool allow-list + a chat-style prompt. Pure
     // conversation falls through to the fast plain path below, untouched — so
-    // normal chatting (and the rikki/thought-only fixes) never regress.
-    const agentActiveHere = !!store.activeConversationId
-      && useAgentModeStore.getState().isActive(store.activeConversationId)
+    // normal chatting (and the rikki/thought-only fixes) never regress. (Agent
+    // mode already returned above, so reaching here means Agent is off.)
     if (
       activeModel
       && settings.chatToolsEnabled !== false
-      && !agentActiveHere
       && detectChatToolIntent(content, !!images?.length)
     ) {
       return agentChat.sendAgentMessage(content, images, {
