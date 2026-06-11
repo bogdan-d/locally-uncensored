@@ -18,10 +18,16 @@ vi.mock('../comfyui-nodes', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../comfyui-nodes')>()
   return { ...actual, getAllNodeInfo: vi.fn() }
 })
+vi.mock('../backend', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../backend')>()
+  // comfyuiUrl reads `window` (isTauri) — stub it for the node test env.
+  return { ...actual, localFetch: vi.fn(), comfyuiUrl: (p: string) => `http://test${p}` }
+})
 
 import { buildDynamicWorkflow, determineStrategy, snapWanLength } from '../dynamic-workflow'
 import { categorizeNodes, getAllNodeInfo, type CategorizedNodes } from '../comfyui-nodes'
-import { classifyModel, isI2VModel, isT2VCapable } from '../comfyui'
+import { classifyModel, isI2VModel, isT2VCapable, findMatchingVAE } from '../comfyui'
+import { localFetch } from '../backend'
 import { resolveI2VResolution } from '../vram-handoff'
 
 // Minimal /object_info for a ComfyUI that can run Wan 2.2 5B.
@@ -178,6 +184,35 @@ describe('buildDynamicWorkflow — Wan 2.2 graph', () => {
   it('produces a video output node (VHS preferred when present)', async () => {
     const wf = await buildDynamicWorkflow({ ...wan22Params } as never)
     expect(nodesOf(wf, 'VHS_VideoCombine').length).toBe(1)
+  })
+})
+
+describe('findMatchingVAE — Wan 2.1 vs 2.2 (48-channel regression)', () => {
+  // David's EXACT live VAELoader enum after the Wan 2.2 bundle install. Note
+  // wan2.2_vae sorts BEFORE wan_2.1_vae — the old first-.includes('wan') hit
+  // decoded Wan 2.1 (16-ch latents) with the 2.2 VAE (48-ch) and every Wan 2.1
+  // generation died with "expected input to have 48 channels, but got 16".
+  const LIVE_VAE_ENUM = ['hunyuanvideo15_vae_fp16.safetensors', 'sdxl_vae.safetensors', 'wan2.2_vae.safetensors', 'wan_2.1_vae.safetensors', 'pixel_space']
+
+  beforeEach(() => {
+    vi.mocked(localFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ VAELoader: { input: { required: { vae_name: [LIVE_VAE_ENUM] } } } }),
+    } as never)
+  })
+
+  it("'wan' (2.1) picks the 2.1 VAE even though the 2.2 file sorts first", async () => {
+    expect(await findMatchingVAE('wan')).toBe('wan_2.1_vae.safetensors')
+  })
+  it("'wan22' picks the 2.2 VAE", async () => {
+    expect(await findMatchingVAE('wan22')).toBe('wan2.2_vae.safetensors')
+  })
+  it("'wan' without a 2.1 file still refuses the 2.2 VAE (falls to hunyuan)", async () => {
+    vi.mocked(localFetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ VAELoader: { input: { required: { vae_name: [['wan2.2_vae.safetensors', 'hunyuanvideo15_vae_fp16.safetensors']] } } } }),
+    } as never)
+    expect(await findMatchingVAE('wan')).toBe('hunyuanvideo15_vae_fp16.safetensors')
   })
 })
 

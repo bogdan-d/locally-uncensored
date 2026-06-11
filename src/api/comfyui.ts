@@ -687,10 +687,25 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     throw new Error(`No HunyuanVideo VAE found. Download "hunyuanvideo15_vae_fp16.safetensors" from the Model Manager.`)
   }
   if (modelType === 'wan') {
-    const match = vaes.find(v => lower(v).includes('wan'))
+    // Wan 2.1 latents are 16-channel; the Wan 2.2 VAE is 48-channel — decoding
+    // 2.1 output with it fails ("expected input to have 48 channels, but got
+    // 16"). Live regression 2026-06-11: right after the Wan 2.2 bundle install,
+    // wan2.2_vae sorted BEFORE wan_2.1_vae in the enum and the first
+    // .includes('wan') hit broke every Wan 2.1 generation. Prefer the 2.1 file
+    // explicitly and never fall into a 2.2 one.
+    const isWan22Vae = (v: string) => /wan[._]?2[._]?2/.test(lower(v))
+    const match = vaes.find(v => /wan[._]?2[._]?1/.test(lower(v)))
+      || vaes.find(v => lower(v).includes('wan') && !isWan22Vae(v))
       || vaes.find(v => lower(v).includes('hunyuan'))
     if (match) return match
     throw new Error(`No Wan VAE found. Download "wan_2.1_vae.safetensors" from the Model Manager.`)
+  }
+  if (modelType === 'wan22') {
+    // Defense in depth — the wan22 builder pins its VAE by name, but if this
+    // resolver is ever hit, ONLY the 2.2 VAE is valid (48-channel latents).
+    const match = vaes.find(v => /wan[._]?2[._]?2/.test(lower(v)))
+    if (match) return match
+    throw new Error(`No Wan 2.2 VAE found. Download "wan2.2_vae.safetensors" from the Model Manager.`)
   }
   if (modelType === 'ltx') {
     const match = vaes.find(v => lower(v).includes('ltx'))
@@ -1116,16 +1131,20 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record
     '8': { class_type: 'VAEDecode', inputs: { samples: ['7', 0], vae: ['3', 0] } },
   }
 
-  // Use SaveAnimatedWEBP if available, otherwise fall back to SaveImage (frame sequence)
+  // Use SaveAnimatedWEBP if available, otherwise fall back to SaveImage (frame
+  // sequence). Prompt-based prefix (David 2026-06-11) — the dynamic builder got
+  // this in c40d13f, this legacy T2V path still wrote locally_uncensored_vid.
+  const { promptFilenamePrefix } = await import('./dynamic-workflow')
+  const vidPrefix = promptFilenamePrefix(params.prompt, true)
   if (hasSaveWEBP) {
     workflow['9'] = {
       class_type: 'SaveAnimatedWEBP',
-      inputs: { images: ['8', 0], filename_prefix: 'locally_uncensored_vid', fps: params.fps, lossless: false, quality: 90, method: 'default' },
+      inputs: { images: ['8', 0], filename_prefix: vidPrefix, fps: params.fps, lossless: false, quality: 90, method: 'default' },
     }
   } else {
     workflow['9'] = {
       class_type: 'SaveImage',
-      inputs: { images: ['8', 0], filename_prefix: 'locally_uncensored_vid' },
+      inputs: { images: ['8', 0], filename_prefix: vidPrefix },
     }
   }
 

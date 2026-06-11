@@ -1,4 +1,4 @@
-import { getImageModels, getVideoModels, isI2VModel } from './comfyui'
+import { getImageModels, getVideoModels, isI2VModel, isT2VCapable } from './comfyui'
 import type { ModelPickKind } from '../stores/modelPickStore'
 
 /**
@@ -36,9 +36,12 @@ export async function pickModelForGeneration(
   let names: string[]
   try {
     const models = kind === 'image' ? await getImageModels() : await getVideoModels()
+    // T2V uses isT2VCapable (NOT !isI2VModel): Wan 2.2 TI2V is dual T2V/I2V,
+    // so it must appear in BOTH picker lists — the old negation hid it from
+    // the T2V picker (live find 2026-06-11, first wan22 T2V pick on the 3060).
     const eligible = kind === 'image'
       ? models
-      : models.filter((m) => (wantI2V ? isI2VModel(m.name) : !isI2VModel(m.name)))
+      : models.filter((m) => (wantI2V ? isI2VModel(m.name) : isT2VCapable(m.name)))
     names = eligible.map((m) => m.name)
   } catch {
     return null

@@ -28,6 +28,9 @@ const VIDEO_MODELS = [
   { name: 'svd_xt_1_1.safetensors', type: 'svd', source: 'checkpoint' },
   { name: 'wan2.1_t2v_1.3B_bf16.safetensors', type: 'wan', source: 'diffusion_model' },
   { name: 'FramePackI2V_HY_fp8_e4m3fn.safetensors', type: 'framepack', source: 'diffusion_model' },
+  // Dual T2V/I2V (live find 2026-06-11: the old !isI2VModel negation hid it
+  // from the T2V picker even though it text-to-videos natively).
+  { name: 'wan2.2_ti2v_5B_fp16.safetensors', type: 'wan22', source: 'diffusion_model' },
 ] as never
 
 /** Resolve the pending pick from the "UI side" as soon as it appears. */
@@ -100,28 +103,30 @@ describe('pickModelForGeneration — image', () => {
 })
 
 describe('pickModelForGeneration — video T2V vs I2V', () => {
-  it('text-to-video offers ONLY non-I2V models and uses the T2V pref key', async () => {
+  it('text-to-video offers T2V-capable models (incl. dual Wan 2.2) and uses the T2V pref key', async () => {
     const p = pickModelForGeneration('video', {})
     await vi.waitFor(() => {
       if (!useModelPickStore.getState().pending) throw new Error('no pending')
     })
     const pending = useModelPickStore.getState().pending!
     expect(pending.kind).toBe('video-t2v')
-    expect(pending.models).toEqual(['wan2.1_t2v_1.3B_bf16.safetensors'])
+    // Wan 2.2 TI2V is dual-capable → it belongs in the T2V list too; the
+    // I2V-only checkpoints (SVD/FramePack) stay excluded.
+    expect(pending.models.sort()).toEqual(['wan2.1_t2v_1.3B_bf16.safetensors', 'wan2.2_ti2v_5B_fp16.safetensors'])
     useModelPickStore.getState().choose({ model: 'wan2.1_t2v_1.3B_bf16.safetensors', save: true })
     expect(await p).toBe('wan2.1_t2v_1.3B_bf16.safetensors')
     expect(useSettingsStore.getState().settings.preferredVideoT2VModel).toBe('wan2.1_t2v_1.3B_bf16.safetensors')
     expect(useSettingsStore.getState().settings.preferredVideoI2VModel).toBe('')
   })
 
-  it('image-to-video offers ONLY I2V models (SVD/FramePack) and the I2V pref key', async () => {
+  it('image-to-video offers I2V-capable models (SVD/FramePack/Wan 2.2) and the I2V pref key', async () => {
     const p = pickModelForGeneration('video', { inputImage: 'ComfyUI_0001.png' })
     await vi.waitFor(() => {
       if (!useModelPickStore.getState().pending) throw new Error('no pending')
     })
     const pending = useModelPickStore.getState().pending!
     expect(pending.kind).toBe('video-i2v')
-    expect(pending.models.sort()).toEqual(['FramePackI2V_HY_fp8_e4m3fn.safetensors', 'svd_xt_1_1.safetensors'])
+    expect(pending.models.sort()).toEqual(['FramePackI2V_HY_fp8_e4m3fn.safetensors', 'svd_xt_1_1.safetensors', 'wan2.2_ti2v_5B_fp16.safetensors'])
     useModelPickStore.getState().choose({ model: 'svd_xt_1_1.safetensors', save: true })
     expect(await p).toBe('svd_xt_1_1.safetensors')
     expect(useSettingsStore.getState().settings.preferredVideoI2VModel).toBe('svd_xt_1_1.safetensors')
