@@ -929,6 +929,13 @@ async function generateVideo(
       const { frames, fps } = resolveClip(args, { defFps: d.fps, defFrames: d.frames, maxFrames: vMax })
       const tun = resolveTunables(args, caps, { steps: d.steps, cfg: d.cfg, sampler: d.sampler, scheduler: d.scheduler })
       if (tun.reject) return `Cannot generate: ${tun.reject}`
+      // resolveTunables falls back to the generic KSampler caps default (cfg 8 /
+      // 20 steps) over our model default. Wan 2.2 5B over-cooks at cfg 8 — its
+      // known-good sampling is cfg ~5 / ~30 steps. Honor an explicit user ask,
+      // else force the Wan default (David 2026-06-11: "Qualität muss stimmen").
+      const avq = args as Record<string, unknown>
+      const tunSteps = avq.steps !== undefined ? tun.steps : d.steps
+      const tunCfg = (avq.cfg ?? avq.cfg_scale ?? avq.cfgScale) !== undefined ? tun.cfg : d.cfg
 
       // I2V → resolution from the source aspect (faithful framing); T2V → model default.
       const base = inputImage ? resolveI2VResolution('wan22', srcW, srcH) : { width: d.width, height: d.height }
@@ -942,8 +949,8 @@ async function generateVideo(
           model,
           sampler: tun.sampler,
           scheduler: tun.scheduler,
-          steps: tun.steps,
-          cfgScale: tun.cfg,
+          steps: tunSteps,
+          cfgScale: tunCfg,
           width: snapped.width,
           height: snapped.height,
           seed,
@@ -954,7 +961,7 @@ async function generateVideo(
         },
         type,
       )
-      log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', wan22: true })
+      log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', wan22: true, steps: tunSteps, cfg: tunCfg })
       const promptId = await submitWorkflow(workflow)
       log.info('vram_handoff.video.submitted', { promptId })
       return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
@@ -1352,13 +1359,18 @@ export function resolveI2VResolution(
   }
   if (type === 'wan22') {
     // Wan 2.2 5B trains at 1280×704 / 704×1280. Keep the SOURCE aspect (faithful
-    // framing), cap the long edge at 1024 for sane 12 GB speed, snap to 32 (the
-    // Wan 2.2 latent grid). An ImageScale(crop:center) in the builder fills it.
-    const cap = 1024
+    // framing) and snap to 32 (the latent grid); an ImageScale(crop:center) in
+    // the builder fills it. Budget by TOTAL PIXELS, not the long edge: a square
+    // 1024² still (1.05 M px) sits at the VRAM ceiling on a 12 GB 3060 and can't
+    // do 5-7 s, while a 16:9 1024×576 (0.59 M px) runs the whole matrix. ~0.6 M
+    // px keeps every aspect tractable on 12 GB (David 2026-06-11: 5B I2V must be
+    // PRACTICAL + good, not just native-res-but-OOM).
+    const BUDGET_PX = 600_000
     let w = srcW
     let h = srcH
-    if (Math.max(w, h) > cap) {
-      const s = cap / Math.max(w, h)
+    const px = w * h
+    if (px > BUDGET_PX) {
+      const s = Math.sqrt(BUDGET_PX / px)
       w = Math.round(w * s)
       h = Math.round(h * s)
     }

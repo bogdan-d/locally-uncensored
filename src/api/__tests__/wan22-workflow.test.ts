@@ -181,8 +181,8 @@ describe('buildDynamicWorkflow — Wan 2.2 graph', () => {
   })
 })
 
-describe('resolveI2VResolution — wan22', () => {
-  it('landscape source keeps aspect, caps long edge at 1024, snaps to 32', () => {
+describe('resolveI2VResolution — wan22 (pixel-budget for 12 GB)', () => {
+  it('landscape source keeps aspect, snaps to 32, fits the ~0.6 M-px budget', () => {
     const r = resolveI2VResolution('wan22', 1920, 1080)
     expect(r.width).toBe(1024)
     expect(r.height).toBe(576)
@@ -193,6 +193,17 @@ describe('resolveI2VResolution — wan22', () => {
     const r = resolveI2VResolution('wan22', 1080, 1920)
     expect(r.height).toBeGreaterThan(r.width)
     expect(r.height).toBe(1024)
+    expect(r.width).toBe(576)
+  })
+  it('SQUARE source is budgeted to 768² — NOT 1024² (which OOMs a 3060 at 5-7 s)', () => {
+    // David's red apple is 1024×1024. The old long-edge cap left it at 1024²
+    // (1.05 M px, VRAM ceiling); the pixel budget pulls it to a runnable 768².
+    const r = resolveI2VResolution('wan22', 1024, 1024)
+    expect(r).toEqual({ width: 768, height: 768 })
+    expect(r.width * r.height).toBeLessThanOrEqual(650_000)
+  })
+  it('a small source is NOT upscaled (only budgeted down)', () => {
+    expect(resolveI2VResolution('wan22', 512, 512)).toEqual({ width: 512, height: 512 })
   })
   it('unprobed (0×0) falls back to a 16:9 landscape default', () => {
     expect(resolveI2VResolution('wan22', 0, 0)).toEqual({ width: 1024, height: 576 })
