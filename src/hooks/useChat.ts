@@ -12,6 +12,7 @@ import { effectiveContextWindow } from "../lib/context-window"
 import { useAgentChat } from "./useAgentChat"
 import { useMemory } from "./useMemory"
 import { useAgentModeStore } from "../stores/agentModeStore"
+import { detectChatToolIntent, CHAT_TOOLS } from "../lib/chat-tool-intent"
 import { getProviderForModel, getProviderIdFromModel } from "../api/providers"
 import { syncOllamaHealthFromError } from "../lib/sync-ollama-health"
 import { isThinkingCompatible, isPlainTextPlanner } from "../lib/model-compatibility"
@@ -43,6 +44,26 @@ export function useChat() {
     // Agent mode delegation: if active for this conversation, use agent chat
     if (store.activeConversationId && useAgentModeStore.getState().isActive(store.activeConversationId)) {
       return agentChat.sendAgentMessage(content, images)
+    }
+
+    // Chat-Tools routing (David 2026-06-11): web/file/image/video should work
+    // in PLAIN chat without flipping to full Agent mode. When the message
+    // clearly needs one of those capabilities, run THIS turn through the agent
+    // executor with a curated 5-tool allow-list + a chat-style prompt. Pure
+    // conversation falls through to the fast plain path below, untouched — so
+    // normal chatting (and the rikki/thought-only fixes) never regress.
+    const agentActiveHere = !!store.activeConversationId
+      && useAgentModeStore.getState().isActive(store.activeConversationId)
+    if (
+      activeModel
+      && settings.chatToolsEnabled !== false
+      && !agentActiveHere
+      && detectChatToolIntent(content, !!images?.length)
+    ) {
+      return agentChat.sendAgentMessage(content, images, {
+        curatedTools: CHAT_TOOLS,
+        chatToolsMode: true,
+      })
     }
 
     if (!activeModel) return

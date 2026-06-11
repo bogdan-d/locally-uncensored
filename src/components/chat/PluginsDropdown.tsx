@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plug, ChevronDown, Bone, User } from 'lucide-react'
+import { Plug, ChevronDown, Bone, User, Wrench } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import type { CavemanMode } from '../../types/settings'
@@ -19,6 +19,10 @@ export function PluginsDropdown() {
   const activePersona = getActivePersona()
   const allPersonas = useSettingsStore((s) => s.personas)
   const cavemanMode = useSettingsStore((s) => s.settings.cavemanMode)
+  // Chat-Tools (v2.5.3) — curated web/file/image/video tools in plain chat.
+  // Default ON (undefined → on) so the feature works out of the box; the
+  // toggle lets a user fall back to pure-text chat.
+  const chatToolsEnabled = useSettingsStore((s) => s.settings.chatToolsEnabled !== false)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
 
   // Per-chat persona enable/disable (mirrors mobile). Defaults to true
@@ -49,8 +53,9 @@ export function PluginsDropdown() {
       >
         <Plug size={10} />
         <span>Plugins</span>
-        {(isCavemanActive || isPersonaActive) && (
+        {(isCavemanActive || isPersonaActive || chatToolsEnabled) && (
           <div className="flex gap-0.5">
+            {chatToolsEnabled && <div className="w-1 h-1 rounded-full bg-blue-400" />}
             {isCavemanActive && <div className="w-1 h-1 rounded-full bg-amber-400" />}
             {isPersonaActive && <div className="w-1 h-1 rounded-full bg-green-400" />}
           </div>
@@ -62,6 +67,31 @@ export function PluginsDropdown() {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-1.5">
+
+            {/* ── Chat Tools toggle (v2.5.3) ──────────────── */}
+            <div className="px-2.5">
+              <div className="w-full flex items-center justify-between py-1.5 gap-2">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Wrench size={10} className={chatToolsEnabled ? 'text-blue-400' : 'text-gray-400'} />
+                  <span className="text-[0.6rem] font-medium text-gray-600 dark:text-gray-300">Chat Tools</span>
+                  <span className="text-[0.5rem] text-gray-400 truncate">web · file · image · video</span>
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); updateSettings({ chatToolsEnabled: !chatToolsEnabled }) }}
+                  title={chatToolsEnabled ? 'Disable tools in plain chat' : 'Enable web/file/image/video tools in plain chat'}
+                  className={
+                    'shrink-0 flex items-center w-7 h-3.5 rounded-full transition-colors ' +
+                    (chatToolsEnabled
+                      ? 'bg-blue-500/40 hover:bg-blue-500/55 justify-end'
+                      : 'bg-gray-300/30 dark:bg-white/10 hover:bg-gray-300/45 dark:hover:bg-white/15 justify-start')
+                  }
+                >
+                  <span className="w-3 h-3 rounded-full bg-white shadow-sm mx-px" />
+                </button>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-200 dark:border-white/[0.06] my-1" />
 
             {/* ── Caveman Mode Dropdown ───────────────────── */}
             <div className="px-2.5">

@@ -156,7 +156,15 @@ export function useAgentChat() {
 
   // ── Main agent message handler ────────────────────────────
 
-  const sendAgentMessage = useCallback(async (userContent: string, userImages?: import('../types/chat').ImageAttachment[]) => {
+  const sendAgentMessage = useCallback(async (
+    userContent: string,
+    userImages?: import('../types/chat').ImageAttachment[],
+    // Chat-Tools mode (David 2026-06-11): plain chat routes a tool-worthy turn
+    // here with a CURATED allow-list (the 5 chat tools) + a chat-style prompt,
+    // so web/file/image/video work without flipping to full Agent mode. When
+    // unset, this is the normal autonomous-agent path (full tool catalog).
+    opts?: { curatedTools?: readonly string[]; chatToolsMode?: boolean },
+  ) => {
     const { activeModel } = useModelStore.getState()
     const { settings } = useSettingsStore.getState()
     const store = useChatStore.getState()
@@ -369,16 +377,28 @@ export function useAgentChat() {
     // Get effective permissions for this conversation
     const permissions = usePermissionStore.getState().getEffectivePermissions(convId!)
 
+    // Chat-Tools mode: restrict the catalog to the curated allow-list so the
+    // model in plain chat only ever sees the 5 chat tools (and small models
+    // aren't drowned in the full ~24-tool set).
+    const curated = opts?.curatedTools
+    const toolMatchesCurated = (name: string) => !curated || curated.includes(name)
+
     // Build agent system prompt FIRST, then append caveman style as a modifier
     const hermesToolDefs = toolRegistry.toHermesToolDefs(permissions)
+      .filter((t) => toolMatchesCurated(t.name))
     // Small-Model Mode (Knob 2): swap the ~3000-char agent prompt for a lean
     // ~750-char one on the native path. The Hermes-XML branch already uses a
     // tight tool prompt (buildHermesToolPrompt), so it stays as-is.
+    // Chat-Tools mode uses a conversational prompt (NOT the autonomous-agent
+    // one) so plain chat keeps its normal voice and only reaches for a tool
+    // when the user actually needs it.
     let agentSystemPrompt = strategy === 'hermes_xml'
       ? buildHermesToolPrompt(hermesToolDefs) + (systemPrompt ? `\n\n${systemPrompt}` : '')
-      : settings.smallModelMode
-        ? buildAgentSystemPromptLean(systemPrompt)
-        : buildAgentSystemPrompt(systemPrompt)
+      : opts?.chatToolsMode
+        ? buildChatToolsSystemPrompt(systemPrompt)
+        : settings.smallModelMode
+          ? buildAgentSystemPromptLean(systemPrompt)
+          : buildAgentSystemPrompt(systemPrompt)
 
     // Multi-Repo (Sprint C #8): when the agent workspace has extra paths,
     // append a "Workspaces" section so the model can reference them by
@@ -576,7 +596,7 @@ export function useAgentChat() {
           // permissive selection unchanged for big models.
           const relevantDefs = await selectRelevantToolsAsync(
             lastUserMsg,
-            toolRegistry.getAll(),
+            toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
             permissions,
             settings.smallModelMode
               ? { embed: (texts) => generateEmbeddings(texts), topN: 5, embeddingThreshold: 6, maxTools: 6 }
@@ -1344,4 +1364,23 @@ Rules:
 - For images/video call image_generate / video_generate as real tool calls.
 - When everything is done, reply with one short sentence in the user's language.`
   return basePrompt ? `${lean}\n\n${basePrompt}` : lean
+}
+
+/**
+ * Chat-Tools prompt (David 2026-06-11). Plain chat with a curated 5-tool set:
+ * the model stays a normal conversational assistant but CAN reach for a tool
+ * when the user actually needs one. Deliberately NOT the autonomous-agent
+ * "you MUST use tools / execute end-to-end" prompt — that would turn ordinary
+ * chat into an agent. Kept short so it doesn't crowd a small model's context.
+ */
+function buildChatToolsSystemPrompt(basePrompt: string): string {
+  const p = `You are a helpful chat assistant in Locally Uncensored, having a normal conversation. You also have a few tools for things you cannot do from memory — use one ONLY when the user's request actually needs it, otherwise just reply normally:
+- web_search — look up current/real-world facts (returns short snippets)
+- web_fetch — read a specific web page or URL (after a search, or when the user gives a link)
+- file_write — save text to a file when the user asks you to write/create/save a file
+- image_generate — create an image when the user asks for a picture/drawing/logo
+- video_generate — create a short video/animation when the user asks for one (to animate an image you just made, pass its filename as inputImage)
+
+Emit tool calls through the real tool channel — never as plain text like image_generate("…"). After a tool runs, give a short, natural reply about the result. For web questions, prefer web_search then web_fetch on the best result before answering. Reply in the user's language.`
+  return basePrompt ? `${p}\n\n${basePrompt}` : p
 }

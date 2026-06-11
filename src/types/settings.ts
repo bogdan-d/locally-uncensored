@@ -28,6 +28,16 @@ export interface Settings {
    * Default false (big models are unaffected). Manual knob, not auto-forced.
    */
   smallModelMode: boolean
+  /**
+   * Chat-Tools (v2.5.3, David 2026-06-11). When on (default), PLAIN chat can
+   * use a curated set of five tools — web_search, web_fetch, file_write,
+   * image_generate, video_generate — without the user flipping the full Agent
+   * toggle. A lightweight intent detector routes only tool-worthy messages
+   * through the agent executor with that restricted allow-list + a chat-style
+   * prompt; ordinary conversation stays on the plain path. Off = plain chat is
+   * pure text (the pre-v2.5.3 behaviour); the full Agent toggle still works.
+   */
+  chatToolsEnabled: boolean
   cavemanMode: CavemanMode
   searchProvider: SearchProvider
   braveApiKey: string
