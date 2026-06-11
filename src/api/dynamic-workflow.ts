@@ -45,6 +45,7 @@ export type WorkflowStrategy =
   | 'unet_zimage'     // Z-Image: UNETLoader + CLIPLoader(qwen_image) + VAELoader + EmptySD3LatentImage
   | 'unet_ernie_image' // ERNIE-Image: UNETLoader + CLIPLoader(flux2) + VAELoader + EmptyFlux2LatentImage + ConditioningZeroOut
   | 'unet_video'      // Wan/Hunyuan: UNETLoader + CLIPLoader + VAELoader + EmptyHunyuanLatentVideo
+  | 'wan22'           // Wan 2.2 TI2V-5B: UNET + CLIP + Wan 2.2 VAE + Wan22ImageToVideoLatent (unified T2V/I2V)
   | 'unet_ltx'        // LTX Video: UNETLoader + CLIPLoader + EmptyLTXVLatentVideo
   | 'unet_mochi'      // Mochi: UNETLoader + CLIPLoader + VAELoader + EmptyMochiLatentVideo
   | 'unet_cosmos'     // Cosmos: UNETLoader + CLIPLoader(oldt5) + VAELoader + EmptyCosmosLatentVideo
@@ -121,6 +122,18 @@ export function determineStrategy(
       return { strategy: 'unet_ltx', reason: 'LTX Video → UNETLoader + EmptyLTXVLatentVideo' }
     }
     return { strategy: 'unavailable', reason: 'LTX Video requires UNETLoader + CLIPLoader nodes' }
+  }
+
+  // Wan 2.2 TI2V-5B → UNET + CLIP + Wan 2.2 VAE + Wan22ImageToVideoLatent (T2V & I2V)
+  if (modelType === 'wan22') {
+    const hasWan22Latent = nodes.latentInit.includes('Wan22ImageToVideoLatent')
+    if (hasUNET && hasCLIPLoader && hasVAELoader && hasWan22Latent) {
+      return { strategy: 'wan22', reason: 'Wan 2.2 TI2V-5B → UNETLoader + Wan22ImageToVideoLatent (unified T2V/I2V)' }
+    }
+    return {
+      strategy: 'unavailable',
+      reason: 'Wan 2.2 TI2V-5B needs the Wan22ImageToVideoLatent node (ComfyUI ≥ v0.3.46). Update ComfyUI, then try again.',
+    }
   }
 
   // Wan / Hunyuan → UNET-based with video latent
@@ -363,6 +376,9 @@ export async function buildDynamicWorkflow(
   }
   if (strategy === 'svd') {
     return buildSVDWorkflow(params as VideoParams, seed, nodes)
+  }
+  if (strategy === 'wan22') {
+    return buildWan22Workflow(params as VideoParams, seed, nodes)
   }
   if (strategy === 'framepack') {
     return buildFramePackWorkflow(params as VideoParams, seed, nodes)
@@ -918,6 +934,83 @@ function buildSVDWorkflow(params: VideoParams, seed: number, nodes: CategorizedN
     inputs: { model: [guidanceId, 0], positive: [condId, 0], negative: [condId, 1], latent_image: [condId, 2], seed, steps: params.steps, cfg: params.cfgScale, sampler_name: params.sampler, scheduler: params.scheduler, denoise: 1.0 },
   }
   workflow[decodeId] = { class_type: 'VAEDecode', inputs: { samples: [samplerId, 0], vae: [loaderId, 2] } }
+
+  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
+  return workflow
+}
+
+/**
+ * Snap a frame count to Wan 2.2's length grid. The Wan 2.2 VAE has a temporal
+ * stride of 4, so `Wan22ImageToVideoLatent.length` must be 4k+1 (…45, 49, 53…).
+ * An off-grid length makes ComfyUI error or silently drop the tail frame.
+ * Exported + pure for the unit tests and the vram-handoff duration math.
+ */
+export function snapWanLength(frames: number): number {
+  const f = Number.isFinite(frames) ? Math.round(frames) : 49
+  const k = Math.max(1, Math.round((f - 1) / 4))
+  return k * 4 + 1
+}
+
+/**
+ * Wan 2.2 TI2V-5B — one model, both modes. `Wan22ImageToVideoLatent` takes an
+ * OPTIONAL `start_image`: present → image-to-video (the clip opens on the source
+ * still), absent → text-to-video. Uses the Wan 2.2 VAE (NOT the 2.1 VAE — the 2.2
+ * VAE has 16× spatial / 4× temporal compression, a different latent shape) and the
+ * shared UMT5-XXL text encoder. `ModelSamplingSD3` applies Wan's sampling shift.
+ *
+ * I2V faithfulness (David 2026-06-11): an `ImageScale(crop:center)` aspect-fills
+ * the source into the generation size, so the first frame matches the still
+ * instead of being squished — the same fix proven on the SVD path.
+ */
+function buildWan22Workflow(params: VideoParams, seed: number, nodes: CategorizedNodes): Record<string, any> {
+  const workflow: Record<string, any> = {}
+  let n = 1
+
+  // Wan 2.2 dims snap to 32 (VAE spatial grid); length to 4k+1 (temporal stride 4).
+  const snap32 = (v: number | undefined, def: number) => Math.max(64, Math.round(((v && v > 0) ? v : def) / 32) * 32)
+  const width = snap32(params.width, 1024)
+  const height = snap32(params.height, 576)
+  const length = snapWanLength(params.frames || 49)
+
+  const unetId = String(n++)
+  const clipId = String(n++)
+  const vaeId = String(n++)
+  const posId = String(n++)
+  const negId = String(n++)
+
+  workflow[unetId] = { class_type: 'UNETLoader', inputs: { unet_name: params.model, weight_dtype: 'default' } }
+  workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', type: 'wan', device: 'default' } }
+  workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: 'wan2.2_vae.safetensors' } }
+  workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { text: params.prompt, clip: [clipId, 0] } }
+  workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { text: params.negativePrompt || '', clip: [clipId, 0] } }
+
+  // Wan's recommended sampling shift. ModelSamplingSD3 is a core node (ships since
+  // SD3), so the sampler reads from it to match the official 5B workflow's motion.
+  const shiftId = String(n++)
+  workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [unetId, 0], shift: 8.0 } }
+
+  // Unified latent: a start_image is attached ONLY for an I2V request.
+  const latentInputs: Record<string, any> = { vae: [vaeId, 0], width, height, length, batch_size: 1 }
+  if (params.inputImage) {
+    const imageId = String(n++)
+    const scaleId = String(n++)
+    workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
+    workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: [imageId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+    latentInputs.start_image = [scaleId, 0]
+  }
+  const latentId = String(n++)
+  workflow[latentId] = { class_type: 'Wan22ImageToVideoLatent', inputs: latentInputs }
+
+  const samplerId = String(n++)
+  workflow[samplerId] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: [shiftId, 0], positive: [posId, 0], negative: [negId, 0], latent_image: [latentId, 0],
+      seed, steps: params.steps, cfg: params.cfgScale, sampler_name: params.sampler, scheduler: params.scheduler, denoise: 1.0,
+    },
+  }
+  const decodeId = String(n++)
+  workflow[decodeId] = { class_type: 'VAEDecode', inputs: { samples: [samplerId, 0], vae: [vaeId, 0] } }
 
   addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
   return workflow

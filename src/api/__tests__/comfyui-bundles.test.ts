@@ -7,9 +7,10 @@ describe('Video Bundle Definitions', () => {
     bundles = getVideoBundles()
   })
 
-  it('has 13 video bundles', () => {
-    // 14 original - Allegro (diffusers only) + CogVideoX 2B replaced by 5B I2V
-    expect(bundles.length).toBe(13)
+  it('has 14 video bundles', () => {
+    // 14 original - Allegro (diffusers only) + CogVideoX 2B replaced by 5B I2V,
+    // + Wan 2.2 TI2V-5B (unified T2V/I2V, 2026-06-11)
+    expect(bundles.length).toBe(14)
   })
 
   it('every bundle has required fields', () => {
@@ -64,10 +65,11 @@ describe('Video Bundle Definitions', () => {
 
   it('I2V bundles have i2v: true', () => {
     const i2vBundles = bundles.filter(b => b.i2v)
-    expect(i2vBundles.length).toBe(3) // SVD + FramePack + CogVideoX 5B I2V
+    expect(i2vBundles.length).toBe(4) // SVD + FramePack + CogVideoX 5B I2V + Wan 2.2 TI2V-5B
     const i2vNames = i2vBundles.map(b => b.name)
     expect(i2vNames.some(n => n.includes('SVD'))).toBe(true)
     expect(i2vNames.some(n => n.includes('FramePack'))).toBe(true)
+    expect(i2vNames.some(n => n.includes('Wan 2.2'))).toBe(true)
   })
 
   it('LTX bundle has workflow "ltx" not "wan"', () => {
@@ -77,7 +79,7 @@ describe('Video Bundle Definitions', () => {
   })
 
   it('every workflow type is a known strategy', () => {
-    const knownWorkflows = ['wan', 'hunyuan', 'ltx', 'animatediff', 'cogvideo', 'framepack',
+    const knownWorkflows = ['wan', 'wan22', 'hunyuan', 'ltx', 'animatediff', 'cogvideo', 'framepack',
       'svd', 'mochi', 'cosmos', 'pyramidflow', 'allegro']
     for (const b of bundles) {
       expect(knownWorkflows).toContain(b.workflow)

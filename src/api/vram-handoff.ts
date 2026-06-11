@@ -59,6 +59,7 @@ import {
   getImageUrl,
   classifyModel,
   isI2VModel,
+  isT2VCapable,
   uploadImage,
   buildTxt2VidWorkflow,
   snapToVideoGrid,
@@ -590,11 +591,12 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
         }
         videoBackend = backend
       } else {
-        // Text-to-video must NOT pick an image-to-video-only checkpoint (SVD /
+        // Text-to-video must NOT pick an image-to-video-ONLY checkpoint (SVD /
         // FramePack) — those load via ImageOnlyCheckpointLoader, so feeding one
         // into a Wan/UNet T2V workflow yields ComfyUI "UNETLoader: value not in
-        // list" (gemma4 live, scenario 3c). Prefer a real T2V model.
-        const t2vModels = models.filter((m) => !isI2VModel(m.name))
+        // list" (gemma4 live, scenario 3c). isT2VCapable keeps Wan 2.2 TI2V (dual
+        // T2V/I2V) in the list while still excluding the I2V-only checkpoints.
+        const t2vModels = models.filter((m) => isT2VCapable(m.name))
         if (t2vModels.length === 0 || backend === 'none') {
           emitHandoff('error', { kind, detail: 'no text-to-video model installed' })
           return 'Error: No text-to-video model installed. Download one from Models → Discover (e.g. "Wan 2.1 — 1.3B (Lightweight)" for 8-10 GB VRAM or "HunyuanVideo 1.5 T2V FP8" for 12+ GB) — or generate an image first and animate it with an I2V model like "SVD-XT 1.1".'
@@ -886,6 +888,77 @@ async function generateVideo(
     const type = classifyModel(model)
     // Capability-aware (decision 2): real per-model limits/enums from ComfyUI.
     const caps = await fetchCaps(model, 'video')
+
+    // ── Wan 2.2 TI2V-5B: one model, both modes ─────────────────────
+    // Wan22ImageToVideoLatent takes an OPTIONAL start_image, so a single dynamic
+    // path serves text-to-video (no still) AND image-to-video (still → the clip
+    // opens on it). Handle it HERE, before the SVD/FramePack I2V branch — wan22 now
+    // matches isI2VModel(), but that branch's 25-frame / 8-fps tuning would butcher
+    // it (wan22 is 24 fps, up to ~7 s). buildDynamicWorkflow routes to buildWan22.
+    if (type === 'wan22') {
+      const { buildDynamicWorkflow } = await import('./dynamic-workflow')
+      const d = MODEL_TYPE_DEFAULTS.wan22
+      const av = args as Record<string, unknown>
+
+      // Optional source still (I2V). A wrong/hallucinated name falls back to the
+      // last image LU produced this session — same recovery as the SVD path.
+      let inputImage: string | undefined
+      let srcW = 0
+      let srcH = 0
+      if (typeof args.inputImage === 'string' && args.inputImage) {
+        let resolved: ResolvedInputImage
+        try {
+          resolved = await resolveInputImage(args.inputImage)
+        } catch (e) {
+          if (_lastImageFilename) {
+            log.warn('vram_handoff.i2v_input_fallback', { bad: String(args.inputImage), fallback: _lastImageFilename })
+            resolved = await resolveInputImage(_lastImageFilename)
+          } else {
+            throw e
+          }
+        }
+        inputImage = resolved.name
+        srcW = resolved.width
+        srcH = resolved.height
+      }
+
+      const frameRej = videoFrameReject(model, args, caps)
+      if (frameRej) return frameRej
+      // 24 fps native; up to ~7 s (169 frames). resolveClip honors `seconds`/`frames`.
+      const vMax = caps?.frameRange?.max ?? 169
+      const { frames, fps } = resolveClip(args, { defFps: d.fps, defFrames: d.frames, maxFrames: vMax })
+      const tun = resolveTunables(args, caps, { steps: d.steps, cfg: d.cfg, sampler: d.sampler, scheduler: d.scheduler })
+      if (tun.reject) return `Cannot generate: ${tun.reject}`
+
+      // I2V → resolution from the source aspect (faithful framing); T2V → model default.
+      const base = inputImage ? resolveI2VResolution('wan22', srcW, srcH) : { width: d.width, height: d.height }
+      const snapped = snapToVideoGrid(clampInt(av.width, base.width, 64, 2048), clampInt(av.height, base.height, 64, 2048))
+      const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
+
+      const workflow = await buildDynamicWorkflow(
+        {
+          prompt,
+          negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
+          model,
+          sampler: tun.sampler,
+          scheduler: tun.scheduler,
+          steps: tun.steps,
+          cfgScale: tun.cfg,
+          width: snapped.width,
+          height: snapped.height,
+          seed,
+          batchSize: 1,
+          frames,
+          fps,
+          ...(inputImage ? { inputImage } : {}),
+        },
+        type,
+      )
+      log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', wan22: true })
+      const promptId = await submitWorkflow(workflow)
+      log.info('vram_handoff.video.submitted', { promptId })
+      return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
+    }
 
     // ── Image-to-video (SVD / FramePack) ───────────────────────────
     // Resolve the still into ComfyUI's input folder and route through the
@@ -1270,12 +1343,27 @@ export function resolveI2VResolution(
 ): { width: number; height: number } {
   const landscapeDefault = { width: 1024, height: 576 }
   if (!srcW || !srcH || srcW <= 0 || srcH <= 0) {
-    return type === 'svd' ? landscapeDefault : { width: 768, height: 768 }
+    return (type === 'svd' || type === 'wan22') ? landscapeDefault : { width: 768, height: 768 }
   }
   const aspect = srcW / srcH
   if (type === 'svd') {
     // Square is closer to landscape than portrait; center-crop handles the rest.
     return aspect >= 0.95 ? { width: 1024, height: 576 } : { width: 576, height: 1024 }
+  }
+  if (type === 'wan22') {
+    // Wan 2.2 5B trains at 1280×704 / 704×1280. Keep the SOURCE aspect (faithful
+    // framing), cap the long edge at 1024 for sane 12 GB speed, snap to 32 (the
+    // Wan 2.2 latent grid). An ImageScale(crop:center) in the builder fills it.
+    const cap = 1024
+    let w = srcW
+    let h = srcH
+    if (Math.max(w, h) > cap) {
+      const s = cap / Math.max(w, h)
+      w = Math.round(w * s)
+      h = Math.round(h * s)
+    }
+    const snap = (v: number) => Math.max(64, Math.round(v / 32) * 32)
+    return { width: snap(w), height: snap(h) }
   }
   // FramePack / others: keep the real aspect, snap to a 16-multiple, cap the
   // long edge so a 12 GB card stays safe.

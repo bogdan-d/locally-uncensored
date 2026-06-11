@@ -48,7 +48,7 @@ function fullNodes(): CategorizedNodes {
       'EmptyLatentImage', 'EmptySD3LatentImage', 'EmptyFlux2LatentImage',
       'EmptyHunyuanLatentVideo', 'EmptyLTXVLatentVideo',
       'EmptyMochiLatentVideo', 'EmptyCosmosLatentVideo',
-      'CogVideoXEmptyLatents',
+      'CogVideoXEmptyLatents', 'Wan22ImageToVideoLatent',
     ],
     textEncoders: ['CLIPTextEncode', 'ConditioningZeroOut', 'CogVideoXTextEncode', 'PyramidFlowTextEncode', 'AllegroTextEncode'],
     decoders: ['VAEDecode', 'CogVideoXVAEDecode', 'PyramidFlowDecode', 'AllegroDecoder'],

@@ -111,7 +111,7 @@ export function extractComfyOutputFiles(nodeOutput: unknown): ComfyUIOutput[] {
   return found
 }
 
-export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -155,6 +155,10 @@ export function classifyModel(name: string | null | undefined): ModelType {
   if (lower.includes('allegro')) return 'allegro'
   if (lower.includes('svd') || lower.includes('stable-video-diffusion')) return 'svd'
   if (lower.includes('pyramid') && (lower.includes('flow') || lower.includes('dit'))) return 'pyramidflow'
+  // Wan 2.2 TI2V-5B — unified text+image-to-video. Detect BEFORE the generic Wan
+  // match: it needs its own latent node (Wan22ImageToVideoLatent), the Wan 2.2 VAE
+  // and the dual T2V/I2V path, none of which the Wan 2.1 'unet_video' strategy has.
+  if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return 'wan22'
   if (lower.includes('wan')) return 'wan'
   if (lower.includes('hunyuan')) return 'hunyuan'
   if (lower.includes('ltx')) return 'ltx'
@@ -190,14 +194,34 @@ export function isImageModelType(type: ModelType): boolean {
 }
 
 export function isVideoModelType(type: ModelType): boolean {
-  return type === 'wan' || type === 'hunyuan' || type === 'ltx' || type === 'mochi' || type === 'cosmos'
+  return type === 'wan' || type === 'wan22' || type === 'hunyuan' || type === 'ltx' || type === 'mochi' || type === 'cosmos'
     || type === 'cogvideo' || type === 'svd' || type === 'framepack' || type === 'pyramidflow' || type === 'allegro'
 }
 
-/** Check if a model filename is an Image-to-Video model (needs input image) */
+/**
+ * Can this model accept a source still (image-to-video)? True for explicit i2v
+ * tags, SVD, FramePack, and Wan 2.2 TI2V (which is dual T2V/I2V). Used to build
+ * the I2V picker list and to route an inputImage to the I2V branch.
+ */
 export function isI2VModel(name: string): boolean {
   const lower = name.toLowerCase()
   return lower.includes('i2v') || lower.includes('svd') || lower.includes('framepack')
+    || lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')
+}
+
+/**
+ * Can this model do TEXT-to-video (no source image required)? Everything EXCEPT
+ * the I2V-ONLY checkpoints: SVD and FramePack load via image-only/wrapper loaders,
+ * and a CogVideoX *I2V* checkpoint needs a still — none can run a T2V graph. Wan 2.2
+ * TI2V is dual-capable, so it stays in the T2V list too (the `ti2v`/`wan2.2` guard
+ * wins over the generic `i2v` substring). Keeps wan22 selectable for both modes.
+ */
+export function isT2VCapable(name: string): boolean {
+  const lower = name.toLowerCase()
+  if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return true
+  if (lower.includes('svd') || lower.includes('framepack')) return false
+  if (lower.includes('i2v')) return false
+  return true
 }
 
 // ─── Default generation parameters per model type ───
@@ -215,6 +239,10 @@ export interface ModelTypeDefaults {
 
 export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   wan: { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal', width: 832, height: 480, frames: 81, fps: 16 },
+  // Wan 2.2 TI2V-5B — native 1280×704 @ 24 fps, unified T2V/I2V. Default to a
+  // VRAM-/speed-friendly 1024×576 16:9 on 12 GB cards (native res is still available
+  // by setting width/height); 49 frames ≈ 2 s, the duration matrix runs up to ~7 s.
+  wan22: { steps: 30, cfg: 5.0, sampler: 'euler', scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
   hunyuan: { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 45, fps: 24 },
   ltx: { steps: 20, cfg: 3.0, sampler: 'euler', scheduler: 'normal', width: 768, height: 512, frames: 97, fps: 24 },
   mochi: { steps: 30, cfg: 4.5, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 84, fps: 24 },

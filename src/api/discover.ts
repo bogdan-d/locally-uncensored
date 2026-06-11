@@ -318,6 +318,14 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     clip: { patterns: ['umt5', 'wan'], downloadName: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders' },
     needsSeparateVAE: true, needsSeparateCLIP: true,
   },
+  wan22: {
+    loader: 'UNETLoader',
+    // Wan 2.2 5B uses its OWN VAE (higher compression than 2.1). Prefer the 2.2 file;
+    // 'wan' fallback covers a 2.1 VAE only as a last resort. CLIP is the shared UMT5.
+    vae: { patterns: ['wan2.2', 'wan2_2'], downloadName: 'wan2.2_vae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors', subfolder: 'vae' },
+    clip: { patterns: ['umt5', 'wan'], downloadName: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders' },
+    needsSeparateVAE: true, needsSeparateCLIP: true,
+  },
   hunyuan: {
     loader: 'UNETLoader',
     vae: { patterns: ['hunyuanvideo', 'hunyuan'], downloadName: 'hunyuanvideo15_vae_fp16.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/vae/hunyuanvideo15_vae_fp16.safetensors', subfolder: 'vae' },
@@ -1327,6 +1335,42 @@ export function getVideoBundles(): ModelBundle[] {
           name: 'Wan 2.1 CLIP (UMT5-XXL FP8)',
           description: 'Required text encoder.',
           pulls: '', tags: ['CLIP', '4.9 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.3,
+        },
+      ],
+    },
+    {
+      name: 'Wan 2.2 — TI2V 5B (Image + Text to Video)',
+      description: 'Wan 2.2 TI2V-5B — ONE model for both text-to-video and faithful image-to-video (the clip opens on your source image). Native 1280×704 @ 24 fps, smooth 2–7 s clips. The best-quality video model that fits 12 GB.',
+      tags: ['Wan 2.2', '720p', 'I2V', 'T2V', 'Quality'],
+      uncensored: true,
+      verified: true,
+      i2v: true,
+      hot: true,
+      totalSizeGB: 16.9,
+      vramRequired: '12+ GB',
+      workflow: 'wan22',
+      url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged',
+      files: [
+        {
+          name: 'Wan 2.2 TI2V 5B Model (FP16)',
+          description: 'The unified text + image-to-video model.',
+          pulls: '', tags: ['Model', '~9.3 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors',
+          filename: 'wan2.2_ti2v_5B_fp16.safetensors', subfolder: 'diffusion_models', sizeGB: 9.3,
+        },
+        {
+          name: 'Wan 2.2 VAE',
+          description: 'Required video encoder/decoder — the 2.2 VAE (NOT the 2.1 VAE: higher compression, different latent shape).',
+          pulls: '', tags: ['VAE', '~1.3 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors',
+          filename: 'wan2.2_vae.safetensors', subfolder: 'vae', sizeGB: 1.3,
+        },
+        {
+          name: 'Wan CLIP (UMT5-XXL FP8)',
+          description: 'Required text encoder — shared with Wan 2.1, so it is skipped if already installed.',
+          pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
           downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
           filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.3,
         },

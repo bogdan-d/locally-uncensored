@@ -28,7 +28,7 @@ function allNodesAvailable(): CategorizedNodes {
       'EmptyLatentImage', 'EmptySD3LatentImage', 'EmptyFlux2LatentImage',
       'EmptyHunyuanLatentVideo', 'EmptyLTXVLatentVideo',
       'EmptyMochiLatentVideo', 'EmptyCosmosLatentVideo',
-      'CogVideoXEmptyLatents',
+      'CogVideoXEmptyLatents', 'Wan22ImageToVideoLatent',
     ],
     textEncoders: ['CLIPTextEncode', 'CogVideoXTextEncode', 'PyramidFlowTextEncode', 'AllegroTextEncode'],
     decoders: ['VAEDecode', 'CogVideoXVAEDecode', 'PyramidFlowDecode', 'AllegroDecoder'],
@@ -60,7 +60,7 @@ describe('Full Pipeline: Bundle → Strategy for all 14 video bundles', () => {
 
       // 3. Map workflow to ModelType for strategy detection
       const workflowToModelType: Record<string, string> = {
-        wan: 'wan', hunyuan: 'hunyuan', ltx: 'ltx', animatediff: 'sd15',
+        wan: 'wan', wan22: 'wan22', hunyuan: 'hunyuan', ltx: 'ltx', animatediff: 'sd15',
         cogvideo: 'cogvideo', framepack: 'framepack', svd: 'svd',
         mochi: 'mochi', cosmos: 'cosmos', pyramidflow: 'pyramidflow', allegro: 'allegro',
       }
@@ -78,7 +78,7 @@ describe('Bundle consistency checks', () => {
   const bundles = getVideoBundles()
 
   it('all video bundle workflows map to video model types', () => {
-    const videoWorkflows = ['wan', 'hunyuan', 'ltx', 'animatediff', 'cogvideo', 'framepack', 'svd', 'mochi', 'cosmos', 'pyramidflow', 'allegro']
+    const videoWorkflows = ['wan', 'wan22', 'hunyuan', 'ltx', 'animatediff', 'cogvideo', 'framepack', 'svd', 'mochi', 'cosmos', 'pyramidflow', 'allegro']
     for (const b of bundles) {
       expect(videoWorkflows).toContain(b.workflow)
     }
@@ -98,7 +98,7 @@ describe('Bundle consistency checks', () => {
 
   it('native bundles (no customNodes) use native ComfyUI strategies', () => {
     const nativeBundles = bundles.filter(b => !b.customNodes || b.customNodes.length === 0)
-    const nativeWorkflows = ['wan', 'hunyuan', 'ltx', 'svd', 'mochi', 'cosmos']
+    const nativeWorkflows = ['wan', 'wan22', 'hunyuan', 'ltx', 'svd', 'mochi', 'cosmos']
     for (const b of nativeBundles) {
       expect(nativeWorkflows).toContain(b.workflow)
     }
@@ -124,6 +124,7 @@ describe('Model filename classification consistency', () => {
   // For each bundle, the main model file should classify to the right type
   const workflowToExpectedClassification: Record<string, string[]> = {
     wan: ['wan'],
+    wan22: ['wan22'],
     hunyuan: ['hunyuan'],
     ltx: ['ltx'],
     mochi: ['mochi'],
