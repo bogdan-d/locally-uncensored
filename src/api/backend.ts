@@ -30,6 +30,23 @@ async function getInvoke() {
 }
 
 /**
+ * The Rust proxy commands reject with the STRING `"HTTP <status>: <body>"`
+ * when the local backend answered non-2xx (vs. a transport error like
+ * "connection refused" when it could not be reached at all). Parse that shape
+ * so the JS side can rebuild a faithful Response — callers check
+ * `res.status === 400` for the Ollama think-field downgrade and similar, and
+ * those checks must behave identically whether the bytes traveled through the
+ * proxy (Windows/WebView2) or a direct fetch (Linux/macOS/dev).
+ */
+export function parseProxyHttpError(msg: string): { status: number; body: string } | null {
+  const m = /(?:^|:\s*)HTTP (\d{3}):\s?([\s\S]*)$/.exec(msg)
+  if (!m) return null
+  const status = Number(m[1])
+  if (status < 100 || status > 599) return null
+  return { status, body: m[2] ?? '' }
+}
+
+/**
  * Fetch a localhost URL, bypassing CORS in Tauri mode.
  * In dev mode: uses normal fetch().
  * In Tauri .exe: routes through Rust proxy_localhost command.
@@ -97,6 +114,19 @@ export async function localFetch(
     return new Response(text, { status: 200, headers: { "Content-Type": "application/json" } });
   } catch (proxyErr) {
     const proxyErrMsg = String(proxyErr)
+
+    // The Rust proxy DID reach the backend and the backend answered non-2xx
+    // (Err("HTTP <status>: <body>")). That is a real HTTP response, not a
+    // transport failure — surface it faithfully so callers' status checks
+    // (think-field 400 downgrade, buildError) behave exactly like a direct
+    // fetch does on Linux/macOS. Retrying via direct fetch would be pointless
+    // and on WebView2 149 just adds a second guaranteed failure (rikki
+    // Discord 2026-06-10: Win11 "agent error" while Kubuntu was fine).
+    const httpErr = parseProxyHttpError(proxyErrMsg)
+    if (httpErr) {
+      return new Response(httpErr.body, { status: httpErr.status })
+    }
+
     log.warn('[localFetch] Proxy failed, trying direct fetch', { err: proxyErrMsg })
 
     // Fallback: try direct fetch (works when ComfyUI has --enable-cors-header *)
@@ -147,44 +177,84 @@ export async function localFetchStream(
   const body = options?.body;
   const headers = body ? { "Content-Type": "application/json" } : undefined;
 
-  // Direct fetch first — Ollama has CORS open on localhost, so this gives
-  // us true chunked streaming. Works in both dev mode and Tauri .exe.
-  try {
-    const res = await fetch(url, {
-      method,
-      headers,
-      body,
-      signal: options?.signal,
-    });
-    // Guard: some Tauri WebView setups still reject — if the Response is
-    // malformed (no body at all), fall through to the proxy.
-    if (res.body || res.ok || res.status >= 400) {
-      return res;
+  // Transport order (rikki Discord 2026-06-10, Win11 "agent error"):
+  // on WebView2 the direct fetch to a loopback backend is dead on arrival —
+  // Ollama's CORS rejects the tauri.localhost origin and WebView2 149 made
+  // the failure mode flaky instead of clean. Burning that attempt first cost
+  // latency and, worse, a direct fetch that dies MID-stream cannot fall back
+  // (the body is already partially consumed). So in Tauri, loopback targets
+  // go proxy-FIRST; the direct fetch remains as fallback. Dev mode and
+  // non-loopback (LAN) targets keep the old order.
+  const proxyFirst = isTauri() && isLoopbackHost(hostnameOf(url));
+
+  const tryDirect = async (): Promise<Response | null> => {
+    try {
+      const res = await fetch(url, { method, headers, body, signal: options?.signal });
+      // Guard: some Tauri WebView setups still reject — if the Response is
+      // malformed (no body at all), fall through to the proxy.
+      if (res.body || res.ok || res.status >= 400) return res;
+      return null;
+    } catch (directErr) {
+      if (options?.signal?.aborted) throw directErr;
+      log.warn('[localFetchStream] Direct fetch failed', { err: String(directErr) });
+      return null;
     }
-  } catch (directErr) {
-    if (options?.signal?.aborted) throw directErr;
-    log.warn('[localFetchStream] Direct fetch failed, trying Rust proxy', { err: String(directErr) });
+  };
+
+  if (!proxyFirst) {
+    const direct = await tryDirect();
+    if (direct) return direct;
+    if (!isTauri()) {
+      // No proxy to fall back to in plain browser dev mode.
+      return new Response(JSON.stringify({ error: 'Network error' }), { status: 500 });
+    }
   }
 
-  // Fallback in Tauri: route through the Rust proxy.
-  if (!isTauri()) {
-    // Re-throw the original direct-fetch error if we are not in Tauri,
-    // since there is no proxy to fall back to.
-    return new Response(JSON.stringify({ error: 'Network error' }), { status: 500 });
+  const proxied = await proxyStreamChunked(url, method, body);
+  if (proxied) return proxied;
+
+  // Proxy layer itself unavailable (invoke/Channel import died) — give the
+  // direct fetch one shot if we skipped it above.
+  if (proxyFirst) {
+    const direct = await tryDirect();
+    if (direct) return direct;
   }
+  return new Response(JSON.stringify({ error: 'Local backend unreachable (proxy and direct fetch both failed)' }), { status: 503 });
+}
 
-  const invoke = await getInvoke();
-
-  // STREAMING proxy (David 2026-06-02): the webview can't fetch Ollama directly
-  // — its origin is `http://tauri.localhost` and Ollama's CORS rejects it
-  // ("Failed to fetch"), so EVERY chat request lands here. The old path awaited
-  // the whole body (`bytes` buffered), so a long/slow generation produced
-  // NOTHING in the UI until fully done — a multi-minute "model loading" hang
-  // (dhasim Discord report). A Tauri Channel now forwards each chunk from Rust
-  // as it arrives, fed into a ReadableStream → real token-by-token streaming.
+/**
+ * STREAMING proxy (David 2026-06-02): a Tauri Channel forwards each chunk from
+ * Rust as it arrives, fed into a ReadableStream → real token-by-token streaming
+ * (the old buffered path produced NOTHING until the body was complete — the
+ * multi-minute "model loading" hang, dhasim Discord report).
+ *
+ * Status fidelity (rikki Discord 2026-06-10): the Rust command rejects with the
+ * string "HTTP <status>: <body>" when the backend answered non-2xx — BEFORE any
+ * chunk is sent. The old code turned that into a stream error with no
+ * statusCode, so callers' `res.status === 400` handling (Ollama think-field
+ * downgrade, "does not support tools") never ran on the proxy path — Windows
+ * behaved differently from Linux for the SAME backend answer. Now the Response
+ * is deferred until the first signal:
+ *   - invoke rejects "HTTP <s>: <body>"  → faithful Response(<s>, body)
+ *   - invoke rejects otherwise           → Response 503 (transport: retryable)
+ *   - first chunk / EOF / invoke resolve → streaming Response 200
+ *
+ * Returns null when the invoke/Channel layer itself is unavailable so the
+ * caller can decide on a last-resort transport.
+ */
+async function proxyStreamChunked(url: string, method: string, body?: string): Promise<Response | null> {
+  let invoke: Awaited<ReturnType<typeof getInvoke>>;
+  let ChannelCtor: typeof import("@tauri-apps/api/core").Channel;
   try {
-    const { Channel } = await import("@tauri-apps/api/core");
-    const channel = new Channel<number[]>();
+    invoke = await getInvoke();
+    ChannelCtor = (await import("@tauri-apps/api/core")).Channel;
+  } catch (err) {
+    log.warn('[localFetchStream] invoke/Channel unavailable', { err: String(err) });
+    return null;
+  }
+
+  try {
+    const channel = new ChannelCtor<number[]>();
     let ctrl: ReadableStreamDefaultController<Uint8Array> | null = null;
     let closed = false;
     const stream = new ReadableStream<Uint8Array>({
@@ -195,30 +265,58 @@ export async function localFetchStream(
       closed = true;
       try { ctrl?.close(); } catch { /* already closed */ }
     };
+
+    let responseSettled = false;
+    let settle!: (res: Response) => void;
+    const settled = new Promise<Response>((resolve) => {
+      settle = (res) => { if (!responseSettled) { responseSettled = true; resolve(res) } };
+    });
+    const settleStreaming = () => {
+      if (responseSettled) return;
+      settle(new Response(stream, { status: 200, headers: { "Content-Type": "application/x-ndjson" } }));
+    };
+
     channel.onmessage = (chunk: number[]) => {
       if (closed) return;
       // Empty chunk = Rust's explicit EOF marker (data chunks are never
       // empty). Closing HERE instead of on the invoke result is the fix for
       // the silent no-reply chats (live find 2026-06-11): WebView2 149
       // delivers queued channel messages AFTER the invoke promise resolves,
-      // so the old `.then(close)` raced ahead of the data and dropped every
+      // so closing on the result raced ahead of the data and dropped every
       // chunk — the user message appeared, the reply never did.
       if (!chunk || chunk.length === 0) {
+        settleStreaming();
         closeStream();
         return;
       }
       try { ctrl?.enqueue(new Uint8Array(chunk)); } catch { /* reader gone */ }
+      settleStreaming();
     };
+
     void invoke("proxy_localhost_stream_chunked", { url, method, body: body || null, onChunk: channel })
       .then(() => {
         // Do NOT close here — the EOF marker does that (it may arrive after
         // this resolves; see above). Grace fallback so a lost EOF can't leak
         // the stream forever: anything still open 15s after the command
         // returned closes with whatever was delivered by then.
+        settleStreaming();
         setTimeout(closeStream, 15_000);
       })
-      .catch((err: unknown) => { closed = true; try { ctrl?.error(err); } catch { /* already errored */ } });
-    return new Response(stream, { status: 200, headers: { "Content-Type": "application/x-ndjson" } });
+      .catch((err: unknown) => {
+        const msg = String(err);
+        const httpErr = parseProxyHttpError(msg);
+        // Backend answered non-2xx (rejected before any chunk): faithful status.
+        // Transport failure (connection refused / validation): 503 so callers
+        // treat it as retryable instead of a deterministic 4xx.
+        settle(httpErr
+          ? new Response(httpErr.body, { status: httpErr.status })
+          : new Response(JSON.stringify({ error: msg }), { status: 503 }));
+        closed = true;
+        // If a reader is already consuming (mid-stream death), surface there too.
+        try { ctrl?.error(err instanceof Error ? err : new Error(msg)); } catch { /* no reader */ }
+      });
+
+    return await settled;
   } catch (chanErr) {
     // Channel unavailable → legacy buffered proxy (still works, just not streamed).
     log.warn('[localFetchStream] Channel stream unavailable, buffering via proxy', { err: String(chanErr) });
@@ -231,7 +329,11 @@ export async function localFetchStream(
       const uint8 = new Uint8Array(bytes);
       return new Response(uint8, { status: 200, headers: { "Content-Type": "application/x-ndjson" } });
     } catch (err) {
-      return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
+      const msg = String(err);
+      const httpErr = parseProxyHttpError(msg);
+      return httpErr
+        ? new Response(httpErr.body, { status: httpErr.status })
+        : new Response(JSON.stringify({ error: msg }), { status: 503 });
     }
   }
 }

@@ -1203,6 +1203,16 @@ export function useAgentChat() {
             convId!, assistantMessage.id,
             `This model does not support thinking mode. Disable the Think button or switch to a compatible model (Qwen 3, DeepSeek-R1, Gemma 4).`
           )
+        } else if (/failed to fetch|connection refused|connection reset|error sending request|proxy_localhost|network ?error|timed out|timeout|tcp connect|llama runner process|backend unreachable|HTTP 5\d\d/i.test(errorMsg)) {
+          // Connection-class failure — after the transient retries above this
+          // means the backend really dropped mid-run (crashed, was killed, or
+          // is busy swapping models). A bare "Agent error: Connection failed"
+          // gave users nothing to act on (rikki Discord 2026-06-10, Win11).
+          useChatStore.getState().updateMessageContent(
+            convId!, assistantMessage.id,
+            (contentRef.current ? contentRef.current + '\n\n' : '') +
+            `Lost the connection to the local model backend mid-response — it may have crashed, been closed, or was busy swapping models. LU already retried automatically.\n\nCheck that Ollama / LM Studio is running (and the model still loads), then send the message again.\n\nDetails: ${errorMsg}`
+          )
         } else {
           useChatStore.getState().updateMessageContent(
             convId!, assistantMessage.id,
