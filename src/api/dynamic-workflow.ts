@@ -9,6 +9,34 @@ import {
   type AvailableModels,
 } from './comfyui-nodes'
 
+// ─── Output filename slug (David 2026-06-11) ───
+//
+// Generated media used to be `locally_uncensored_00123_.png` /
+// `locally_uncensored_vid_00011.mp4` — opaque. Now the ComfyUI SaveImage /
+// VHS `filename_prefix` is derived from the PROMPT, so a file is
+// `red_apple_on_white_plate_00001_.png`. That makes the result string
+// self-descriptive, so a follow-up "animate the red-apple image" can pass the
+// recognisable filename straight back. ComfyUI still appends its own
+// `_NNNNN_` counter, so uniqueness is preserved.
+//
+// Exported + pure for the unit tests.
+export function promptFilenamePrefix(prompt: string | undefined, isVideo: boolean): string {
+  const slug = (prompt || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .split('_')
+    .filter(Boolean)
+    .slice(0, 6)          // first ~6 words keep it readable
+    .join('_')
+    .slice(0, 48)
+    .replace(/_+$/g, '')
+  if (!slug) return isVideo ? 'locally_uncensored_vid' : 'locally_uncensored'
+  // Keep a short tag so a folder full of generations is still recognisably ours
+  // and videos never collide with the still they were made from.
+  return isVideo ? `${slug}__vid` : slug
+}
+
 // ─── Strategy Detection ───
 
 export type WorkflowStrategy =
@@ -747,6 +775,7 @@ export async function buildDynamicWorkflow(
 
   if (isVideo) {
     // Video output: prefer VHS > SaveAnimatedWEBP > SaveImage
+    const vidPrefix = promptFilenamePrefix(params.prompt, true)
     if (nodes.videoSavers.includes('VHS_VideoCombine')) {
       workflow[saveId] = {
         class_type: 'VHS_VideoCombine',
@@ -754,7 +783,7 @@ export async function buildDynamicWorkflow(
           images: [decodeId, 0],
           frame_rate: videoParams.fps,
           loop_count: 0,
-          filename_prefix: 'locally_uncensored_vid',
+          filename_prefix: vidPrefix,
           format: 'video/h264-mp4',
           pingpong: false,
           save_output: true,
@@ -765,7 +794,7 @@ export async function buildDynamicWorkflow(
         class_type: 'SaveAnimatedWEBP',
         inputs: {
           images: [decodeId, 0],
-          filename_prefix: 'locally_uncensored_vid',
+          filename_prefix: vidPrefix,
           fps: videoParams.fps,
           lossless: false,
           quality: 90,
@@ -777,7 +806,7 @@ export async function buildDynamicWorkflow(
         class_type: 'SaveImage',
         inputs: {
           images: [decodeId, 0],
-          filename_prefix: 'locally_uncensored_vid',
+          filename_prefix: vidPrefix,
         },
       }
     }
@@ -786,7 +815,7 @@ export async function buildDynamicWorkflow(
       class_type: 'SaveImage',
       inputs: {
         images: [decodeId, 0],
-        filename_prefix: 'locally_uncensored',
+        filename_prefix: promptFilenamePrefix(params.prompt, false),
       },
     }
   }
@@ -800,22 +829,23 @@ export async function buildDynamicWorkflow(
 
 // ─── Wrapper Workflow Builders ───
 
-function addVideoOutput(workflow: Record<string, any>, n: number, decodeId: string, fps: number, nodes: CategorizedNodes): number {
+function addVideoOutput(workflow: Record<string, any>, n: number, decodeId: string, fps: number, nodes: CategorizedNodes, prompt?: string): number {
   const saveId = String(n++)
+  const prefix = promptFilenamePrefix(prompt, true)
   if (nodes.videoSavers.includes('VHS_VideoCombine')) {
     workflow[saveId] = {
       class_type: 'VHS_VideoCombine',
-      inputs: { images: [decodeId, 0], frame_rate: fps, loop_count: 0, filename_prefix: 'locally_uncensored_vid', format: 'video/h264-mp4', pingpong: false, save_output: true },
+      inputs: { images: [decodeId, 0], frame_rate: fps, loop_count: 0, filename_prefix: prefix, format: 'video/h264-mp4', pingpong: false, save_output: true },
     }
   } else if (nodes.videoSavers.includes('SaveAnimatedWEBP')) {
     workflow[saveId] = {
       class_type: 'SaveAnimatedWEBP',
-      inputs: { images: [decodeId, 0], filename_prefix: 'locally_uncensored_vid', fps, lossless: false, quality: 90, method: 'default' },
+      inputs: { images: [decodeId, 0], filename_prefix: prefix, fps, lossless: false, quality: 90, method: 'default' },
     }
   } else {
     workflow[saveId] = {
       class_type: 'SaveImage',
-      inputs: { images: [decodeId, 0], filename_prefix: 'locally_uncensored_vid' },
+      inputs: { images: [decodeId, 0], filename_prefix: prefix },
     }
   }
   return n
@@ -844,7 +874,7 @@ function buildCogVideoWorkflow(params: VideoParams, seed: number, nodes: Categor
   }
   workflow[decodeId] = { class_type: 'CogVideoXVAEDecode', inputs: { samples: [samplerId, 0], vae: [modelId, 1] } }
 
-  addVideoOutput(workflow, n, decodeId, params.fps, nodes)
+  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
   return workflow
 }
 
@@ -854,6 +884,7 @@ function buildSVDWorkflow(params: VideoParams, seed: number, nodes: CategorizedN
 
   const loaderId = String(n++)
   const imageId = String(n++)
+  const scaleId = String(n++)
   const condId = String(n++)
   const guidanceId = String(n++)
   const samplerId = String(n++)
@@ -861,12 +892,24 @@ function buildSVDWorkflow(params: VideoParams, seed: number, nodes: CategorizedN
 
   workflow[loaderId] = { class_type: 'ImageOnlyCheckpointLoader', inputs: { ckpt_name: params.model } }
   workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.inputImage || 'input_image.png' } }
+  // Aspect-fill the source into the SVD generation resolution (David 2026-06-11:
+  // a portrait/square still fed straight in came back squished and no longer
+  // matched the input). crop:'center' scales to cover width×height then
+  // centre-crops — so the conditioning sees the source at the right aspect with
+  // no distortion, instead of SVD stretching it internally.
+  workflow[scaleId] = {
+    class_type: 'ImageScale',
+    inputs: { image: [imageId, 0], upscale_method: 'lanczos', width: params.width, height: params.height, crop: 'center' },
+  }
   workflow[condId] = {
     class_type: 'SVD_img2vid_Conditioning',
     inputs: {
-      clip_vision: [loaderId, 1], init_image: [imageId, 0], vae: [loaderId, 2],
+      clip_vision: [loaderId, 1], init_image: [scaleId, 0], vae: [loaderId, 2],
       augmentation_level: 0.0, width: params.width, height: params.height,
-      video_frames: params.frames, motion_bucket_id: 127, fps: params.fps,
+      video_frames: params.frames,
+      // Lower motion = stays closer to the source (127 = SVD's high-drift default).
+      motion_bucket_id: params.motionBucketId ?? 90,
+      fps: params.fps,
     },
   }
   workflow[guidanceId] = { class_type: 'VideoLinearCFGGuidance', inputs: { model: [loaderId, 0], min_cfg: 1.0 } }
@@ -876,7 +919,7 @@ function buildSVDWorkflow(params: VideoParams, seed: number, nodes: CategorizedN
   }
   workflow[decodeId] = { class_type: 'VAEDecode', inputs: { samples: [samplerId, 0], vae: [loaderId, 2] } }
 
-  addVideoOutput(workflow, n, decodeId, params.fps, nodes)
+  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
   return workflow
 }
 
@@ -927,7 +970,7 @@ function buildFramePackWorkflow(params: VideoParams, seed: number, nodes: Catego
   }
   workflow[decodeId] = { class_type: 'VAEDecode', inputs: { samples: [samplerId, 0], vae: [vaeId, 0] } }
 
-  addVideoOutput(workflow, n, decodeId, params.fps, nodes)
+  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
   return workflow
 }
 
@@ -950,7 +993,7 @@ function buildPyramidFlowWorkflow(params: VideoParams, seed: number, nodes: Cate
   }
   workflow[decodeId] = { class_type: 'PyramidFlowDecode', inputs: { samples: [samplerId, 0] } }
 
-  addVideoOutput(workflow, n, decodeId, params.fps, nodes)
+  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
   return workflow
 }
 
@@ -971,6 +1014,6 @@ function buildAllegroWorkflow(params: VideoParams, seed: number, nodes: Categori
   }
   workflow[decodeId] = { class_type: 'AllegroDecoder', inputs: { samples: [samplerId, 0] } }
 
-  addVideoOutput(workflow, n, decodeId, params.fps, nodes)
+  addVideoOutput(workflow, n, decodeId, params.fps, nodes, params.prompt)
   return workflow
 }

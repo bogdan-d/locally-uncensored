@@ -58,6 +58,10 @@ export interface VideoParams extends GenerateParams {
   frames: number
   fps: number
   inputImage?: string  // Uploaded image filename for I2V models (SVD, FramePack)
+  // SVD motion strength (motion_bucket_id, 1–255). Lower = more faithful to the
+  // source still / calmer motion; 127 (SVD default) drifts hard. We default ~90
+  // for I2V fidelity (David 2026-06-11). Honoured only by the SVD path.
+  motionBucketId?: number
 }
 
 export interface ComfyUIOutput {

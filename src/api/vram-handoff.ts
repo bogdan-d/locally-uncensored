@@ -821,7 +821,7 @@ async function generateImage(prompt: string, model: string, args: VramHandoffArg
     let inputImage: string | undefined
     let denoise: number | undefined
     if (typeof args.inputImage === 'string' && args.inputImage) {
-      inputImage = await resolveInputImage(args.inputImage)
+      inputImage = (await resolveInputImage(args.inputImage)).name
       denoise = clampFloat(args.denoise, 0.6, 0.05, 1.0)
     }
     const workflow = await buildDynamicWorkflow(
@@ -895,17 +895,18 @@ async function generateVideo(
       const { buildDynamicWorkflow } = await import('./dynamic-workflow')
       // Resolve the source still; if the model gave a wrong/hallucinated name,
       // fall back to the last image LU actually produced this session.
-      let inputImage: string
+      let resolved: ResolvedInputImage
       try {
-        inputImage = await resolveInputImage(args.inputImage)
+        resolved = await resolveInputImage(args.inputImage)
       } catch (e) {
         if (_lastImageFilename) {
           log.warn('vram_handoff.i2v_input_fallback', { bad: String(args.inputImage), fallback: _lastImageFilename })
-          inputImage = await resolveInputImage(_lastImageFilename)
+          resolved = await resolveInputImage(_lastImageFilename)
         } else {
           throw e
         }
       }
+      const inputImage = resolved.name
       // SVD-XT genuinely caps ~25 frames. FramePack PACKS long video, so its real
       // ceiling comes from getModelCapabilities (request-driven — David 2026-06-04:
       // "FramePacks frame cap anheben durch input von uns"). REJECT (not clamp) an
@@ -918,8 +919,17 @@ async function generateVideo(
       const tun = resolveTunables(args, caps, { steps: type === 'framepack' ? 25 : 20, cfg: 3, sampler: 'euler', scheduler: 'normal' })
       if (tun.reject) return `Cannot generate: ${tun.reject}`
       const av = args as Record<string, unknown>
-      const snapped = snapToVideoGrid(clampInt(av.width, 768, 64, 2048), clampInt(av.height, 448, 64, 2048))
+      // Resolution from the SOURCE aspect ratio (David 2026-06-11: portrait
+      // stills came back as squished landscape that no longer matched the
+      // input). An explicit user width/height still wins; otherwise we pick the
+      // model's native bucket and an ImageScale(crop:center) fills it cleanly.
+      const native = resolveI2VResolution(type, resolved.width, resolved.height)
+      const snapped = snapToVideoGrid(
+        clampInt(av.width, native.width, 64, 2048),
+        clampInt(av.height, native.height, 64, 2048),
+      )
       const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
+      const motionBucketId = clampInt(av.motionBucketId ?? av.motion_bucket_id, 90, 1, 255)
       const workflow = await buildDynamicWorkflow(
         {
           prompt,
@@ -936,6 +946,7 @@ async function generateVideo(
           frames,
           fps,
           inputImage,
+          motionBucketId,
         },
         type,
       )
@@ -1176,7 +1187,15 @@ export function resolveClip(
  * Generated images live in ComfyUI's *output* folder, but LoadImage reads from
  * *input* — so we fetch the referenced image and re-upload it via /upload/image.
  */
-async function resolveInputImage(ref: string): Promise<string> {
+interface ResolvedInputImage {
+  /** Filename in ComfyUI's input folder, ready for a LoadImage node. */
+  name: string
+  /** Source pixel dimensions (0 when they could not be probed). */
+  width: number
+  height: number
+}
+
+async function resolveInputImage(ref: string): Promise<ResolvedInputImage> {
   let url: string
   let name: string
   if (/^https?:\/\//i.test(ref)) {
@@ -1190,8 +1209,60 @@ async function resolveInputImage(ref: string): Promise<string> {
   const resp = await fetch(url)
   if (!resp.ok) throw new Error(`could not read input image "${ref}" (HTTP ${resp.status})`)
   const blob = await resp.blob()
+  // Probe the source dimensions so the I2V path can pick the model's native
+  // aspect ratio (David 2026-06-11: a portrait still forced into 768×448
+  // landscape no longer resembled the source). Best-effort — a probe failure
+  // just yields 0×0 and the caller falls back to a sane default.
+  let width = 0
+  let height = 0
+  try {
+    const bmp = await createImageBitmap(blob)
+    width = bmp.width
+    height = bmp.height
+    bmp.close()
+  } catch { /* dimensions unknown → caller uses defaults */ }
   const file = new File([blob], name, { type: blob.type || 'image/png' })
-  return await uploadImage(file)
+  const uploaded = await uploadImage(file)
+  return { name: uploaded, width, height }
+}
+
+/**
+ * Pick the generation resolution for an image-to-video model from the SOURCE
+ * still's aspect ratio. SVD-XT was trained ONLY at 1024×576 (landscape) and
+ * 576×1024 (portrait); feeding it the old fixed 768×448 squished every source
+ * and the clip stopped resembling the input. We match the source ORIENTATION
+ * to the nearest native bucket; an ImageScale(crop:center) in the workflow
+ * then fills it exactly (aspect-fill, no squish). FramePack is far more
+ * resolution-flexible, so it just gets a tidy 16-multiple of the source.
+ *
+ * Exported + pure for the unit tests.
+ */
+export function resolveI2VResolution(
+  type: string,
+  srcW: number,
+  srcH: number,
+): { width: number; height: number } {
+  const landscapeDefault = { width: 1024, height: 576 }
+  if (!srcW || !srcH || srcW <= 0 || srcH <= 0) {
+    return type === 'svd' ? landscapeDefault : { width: 768, height: 768 }
+  }
+  const aspect = srcW / srcH
+  if (type === 'svd') {
+    // Square is closer to landscape than portrait; center-crop handles the rest.
+    return aspect >= 0.95 ? { width: 1024, height: 576 } : { width: 576, height: 1024 }
+  }
+  // FramePack / others: keep the real aspect, snap to a 16-multiple, cap the
+  // long edge so a 12 GB card stays safe.
+  const cap = 768
+  let w = srcW
+  let h = srcH
+  if (Math.max(w, h) > cap) {
+    const s = cap / Math.max(w, h)
+    w = Math.round(w * s)
+    h = Math.round(h * s)
+  }
+  const snap = (v: number) => Math.max(64, Math.round(v / 16) * 16)
+  return { width: snap(w), height: snap(h) }
 }
 
 function getImageTimeoutMs(): number {

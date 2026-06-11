@@ -81,7 +81,7 @@ vi.mock('../agent-context', () => ({
 // settingsStore is the real module — pure, no services. The orchestrator reads
 // settings.exclusiveVramMode through it; default DEFAULT_SETTINGS = 'auto'.
 
-import { decideUnload, vramHandoffGenerate, pollGone, resolveClip, resolveModelName } from '../vram-handoff'
+import { decideUnload, vramHandoffGenerate, pollGone, resolveClip, resolveModelName, resolveI2VResolution } from '../vram-handoff'
 import { useSettingsStore } from '../../stores/settingsStore'
 
 const GB = 1024 * 1024 * 1024
@@ -213,6 +213,41 @@ describe('resolveClip', () => {
 
   it('FramePack clamps a runaway request to the 600-frame safety ceiling', () => {
     expect(resolveClip({ prompt: 'x', seconds: 60, fps: 40 }, FRAMEPACK).frames).toBe(600)
+  })
+})
+
+// ── resolveI2VResolution: pick native res from source aspect (David 2026-06-11:
+//    "I2V results are never what the source image showed" — portrait stills came
+//    back as squished 768×448 landscape) ──
+describe('resolveI2VResolution', () => {
+  it('SVD square source → landscape 1024×576 (square is closer to landscape; center-crop fills it)', () => {
+    expect(resolveI2VResolution('svd', 1024, 1024)).toEqual({ width: 1024, height: 576 })
+  })
+
+  it('SVD portrait source → portrait native 576×1024 (no more squish to landscape)', () => {
+    expect(resolveI2VResolution('svd', 1024, 1536)).toEqual({ width: 576, height: 1024 })
+  })
+
+  it('SVD landscape source → landscape native 1024×576', () => {
+    expect(resolveI2VResolution('svd', 1920, 1080)).toEqual({ width: 1024, height: 576 })
+  })
+
+  it('SVD unknown dimensions → safe landscape default', () => {
+    expect(resolveI2VResolution('svd', 0, 0)).toEqual({ width: 1024, height: 576 })
+  })
+
+  it('FramePack keeps the source aspect, snapped to a 16-multiple under the 768 cap', () => {
+    // 1024×1024 → scaled to 768×768 (cap), already 16-aligned.
+    expect(resolveI2VResolution('framepack', 1024, 1024)).toEqual({ width: 768, height: 768 })
+    // 1920×1080 → long edge 1920>768 → ×0.4 → 768×432 (both 16-aligned).
+    expect(resolveI2VResolution('framepack', 1920, 1080)).toEqual({ width: 768, height: 432 })
+  })
+
+  it('FramePack small source is not upscaled past its size, just 16-snapped', () => {
+    const r = resolveI2VResolution('framepack', 500, 500)
+    expect(r.width % 16).toBe(0)
+    expect(r.height % 16).toBe(0)
+    expect(r.width).toBeLessThanOrEqual(512)
   })
 })
 
