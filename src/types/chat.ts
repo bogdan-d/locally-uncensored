@@ -8,6 +8,22 @@ export interface ImageAttachment {
   name: string       // filename
 }
 
+/**
+ * A chat-tools "artifact": a file the model produced in PLAIN chat. In chat
+ * mode `file_write` does NOT touch disk (ChatGPT-style) — the content lands in
+ * the message and renders inline with a preview + Download button. (The Coding
+ * Agent still writes to its real working directory.)
+ */
+export interface ChatArtifact {
+  id: string
+  /** Filename the model chose, e.g. "report.md". */
+  name: string
+  /** The text content the model "wrote". */
+  content: string
+  /** MIME type, derived from the extension — drives the preview. */
+  mime: string
+}
+
 export interface Message {
   id: string
   role: Role
@@ -24,6 +40,9 @@ export interface Message {
   // Agent Mode fields
   agentBlocks?: AgentBlock[]
   toolCallSummary?: string
+  /** Chat-tools artifacts — files "written" in plain chat, rendered inline
+   *  with preview + Download (never touch disk). See ChatArtifact. */
+  artifacts?: ChatArtifact[]
   // Continue capability — tool-call history persisted between turns so
   // the model sees what it did before (parity with original Codex CLI).
   // Hidden messages are included in the API payload but not rendered.
@@ -33,7 +52,12 @@ export interface Message {
   // OpenAI/LM-Studio usage.*). promptTokens = the FULL consumed context for that
   // turn (system prompt + tools + RAG + history + input), so it powers a
   // 100%-real context readout instead of a char/4 estimate.
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+  // promptTokens = the FULL consumed context (system prompt + tools + RAG +
+  // history + input). `estimated` is true for the provisional value the agent
+  // loop sets BEFORE the model replies (so the counter isn't a tiny char/4 guess
+  // of only the visible messages); it flips to false once the model reports the
+  // exact prompt_eval_count / usage.prompt_tokens.
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number; estimated?: boolean }
 }
 
 export interface Conversation {

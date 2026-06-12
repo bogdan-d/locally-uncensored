@@ -1,7 +1,7 @@
 import { useRef, useState, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import { chatNonStreaming } from '../api/agents'
-import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace, setActiveAgentModel, renderWorkspaceSection } from '../api/agent-context'
+import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace, setActiveAgentModel, renderWorkspaceSection, setChatArtifactMode, takeChatArtifacts } from '../api/agent-context'
 import { isOllamaLocal } from '../api/backend'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
@@ -20,7 +20,7 @@ import { log } from '../lib/logger'
 import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, canonicalToolName } from '../lib/loose-tool-parse'
 import { buildVisionFeedback } from '../api/vision-feedback'
-import { compactMessages, getModelMaxTokens } from '../lib/context-compaction'
+import { compactMessages, getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { getModelContextCached } from '../api/ollama'
 import { effectiveContextWindow } from '../lib/context-window'
 import { useMemoryStore } from '../stores/memoryStore'
@@ -291,6 +291,11 @@ export function useAgentChat() {
       defaultWorkspace: settings.defaultWorkspace,
     })
     setActiveWorkspace(resolvedWorkspace)
+
+    // Chat-tools (plain chat) → "file writes" become in-chat artifacts (preview
+    // + download), never disk writes (ChatGPT-style, David 2026-06-12). Full
+    // Agent mode keeps writing to disk, so this is ON only for chatToolsMode.
+    setChatArtifactMode(opts?.chatToolsMode === true)
 
     // Feature EE (v2.5.0) — pin the text model driving this loop so the VRAM
     // hand-off orchestrator (image/video generation) knows which model to
@@ -612,6 +617,23 @@ export function useAgentChat() {
           }))
 
           let turn!: { content: string; toolCalls: ToolCall[]; thinking?: string; promptEvalCount?: number; evalCount?: number }
+
+          // Token counter (David 2026-06-12): reflect the REAL prompt size — system
+          // prompt + tool defs + history — immediately, not a char/4 guess of just
+          // the visible messages. Provisional estimate the model's exact count
+          // overwrites below; only set while no real count has landed yet.
+          {
+            const existingUsage = useChatStore.getState().conversations
+              .find((c) => c.id === convId)?.messages.find((m) => m.id === assistantMessage.id)?.usage
+            if (!existingUsage || existingUsage.estimated) {
+              const estPrompt =
+                estimateTokens(agentMessages.map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))).join('\n')) +
+                estimateTokens(JSON.stringify(tools))
+              useChatStore.getState().updateMessageUsage(convId!, assistantMessage.id, {
+                promptTokens: estPrompt, completionTokens: 0, totalTokens: estPrompt, estimated: true,
+              })
+            }
+          }
           if (providerId === 'ollama') {
             // Streaming path — parity with desktop Codex. Without this
             // the user stared at a frozen chat for 30-90 s while Gemma
@@ -745,6 +767,7 @@ export function useAgentChat() {
               promptTokens: turn.promptEvalCount || 0,
               completionTokens: turn.evalCount || 0,
               totalTokens: (turn.promptEvalCount || 0) + (turn.evalCount || 0),
+              estimated: false,
             })
           }
           // Native thinking field from Ollama
@@ -1268,6 +1291,17 @@ export function useAgentChat() {
       setIsAgentRunning(false)
       runningRef.current = false
       abortRef.current = null
+      // Chat-tools artifact mode: attach any files the model "wrote" (captured
+      // in-memory, NOT on disk) to the assistant message so they render inline
+      // with a preview + Download button. takeChatArtifacts drains the buffer;
+      // clearActiveChatId() then resets the mode for the next run.
+      const capturedArtifacts = takeChatArtifacts()
+      if (capturedArtifacts.length) {
+        useChatStore.getState().updateMessageArtifacts(
+          convId!, assistantMessage.id,
+          capturedArtifacts.map((a) => ({ id: uuid(), name: a.name, content: a.content, mime: a.mime })),
+        )
+      }
       // Drop the per-run workspace scope so standalone tool calls from
       // other tabs don't accidentally land in this chat's folder.
       clearActiveChatId()

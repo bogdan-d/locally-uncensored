@@ -14,6 +14,7 @@ import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspa
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { loadLurules, renderRulesSection, type RulesReader } from '../lib/lurules'
+import { parseAgentCommand } from '../lib/agent-commands'
 import { backendCall, isOllamaLocal } from '../api/backend'
 import { planWithArchitect, renderArchitectPlanSection } from '../api/agents/architect'
 import { fetchRepoMap, renderRepoMapSection } from '../api/agents/repo-map'
@@ -35,7 +36,7 @@ import { extractToolCallsWithRanges, stripRanges } from '../lib/tool-call-repair
 import { selectRelevantTools, selectRelevantToolsAsync } from '../lib/tool-selection'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
-import { compactMessages, getModelMaxTokens } from '../lib/context-compaction'
+import { compactMessages, getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { useMemoryStore } from '../stores/memoryStore'
 import { extractMemoriesFromPair } from './useMemory'
 import type { OllamaChatMessage } from '../types/agent-mode'
@@ -185,9 +186,20 @@ export function useCodex() {
   const abortRef = useRef<AbortController | null>(null)
   const runningRef = useRef(false)
 
-  const sendInstruction = useCallback(async (instruction: string) => {
+  const sendInstruction = useCallback(async (rawInstruction: string, opts?: { displayContent?: string }) => {
     const { activeModel } = useModelStore.getState()
     if (!activeModel) return
+
+    // Coding-Agent slash commands (David 2026-06-12): "/review", "/commit",
+    // "/test", … live HERE, in the Code view — its full file_*/shell/git tools
+    // + working directory are exactly what these templates drive. Expand the
+    // command to the full instruction the model acts on; the raw "/cmd args" is
+    // shown as the user's message (displayContent). A non-command input passes
+    // through unchanged. (They were briefly wired into the normal chat — David
+    // moved them here, where they belong.)
+    const slash = parseAgentCommand(rawInstruction)
+    const instruction = slash ? slash.expanded : rawInstruction
+    const displayInstruction = slash ? rawInstruction : opts?.displayContent
 
     const store = useChatStore.getState()
     const codexStore = useCodexStore.getState()
@@ -244,9 +256,11 @@ export function useCodex() {
       id: uuid(), type: 'instruction', content: instruction, timestamp: Date.now(),
     })
 
-    // Add user message to chat store
+    // Add user message to chat store. For a slash command the UI shows the raw
+    // "/cmd args" (displayContent) while the model receives the expansion.
     useChatStore.getState().addMessage(convId, {
       id: uuid(), role: 'user', content: instruction, timestamp: Date.now(),
+      ...(displayInstruction ? { displayContent: displayInstruction } : {}),
     })
 
     // Add empty assistant message
@@ -679,6 +693,23 @@ export function useCodex() {
               if (echoRetriesRemaining > 0 && isSystemPromptEcho(c)) return
               useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, fullContent ? fullContent + '\n\n' + c : c)
             }
+            // Token counter (David 2026-06-12): reflect the REAL prompt size —
+            // system prompt + tool defs + repo map + history — immediately, not a
+            // char/4 guess of just the visible messages. Provisional estimate that
+            // the model's exact count overwrites below; only (re)set while no real
+            // count has landed yet, so a real value is never downgraded.
+            {
+              const existingUsage = useChatStore.getState().conversations
+                .find((c) => c.id === convId)?.messages.find((m) => m.id === assistantMsg.id)?.usage
+              if (!existingUsage || existingUsage.estimated) {
+                const estPrompt =
+                  estimateTokens(messages.map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))).join('\n')) +
+                  estimateTokens(JSON.stringify(tools))
+                useChatStore.getState().updateMessageUsage(convId!, assistantMsg.id, {
+                  promptTokens: estPrompt, completionTokens: 0, totalTokens: estPrompt, estimated: true,
+                })
+              }
+            }
             try {
               void diagLog('streamWithTools-enter', { iter: i, messagesLen: messages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
               turn = await streamWithTools(
@@ -723,6 +754,7 @@ export function useCodex() {
                 promptTokens: turn.promptEvalCount || 0,
                 completionTokens: turn.evalCount || 0,
                 totalTokens: (turn.promptEvalCount || 0) + (turn.evalCount || 0),
+                estimated: false,
               })
             }
             void diagLog('streamWithTools-return', {

@@ -28,7 +28,11 @@ export function TokenCounter() {
     return sum + tokens
   }, 0)
   const usedTokens = lastUsage ? lastUsage.totalTokens : estimated
-  const isReal = !!lastUsage
+  // "Real" = the model reported it. A provisional estimate the agent loop sets
+  // before the first reply (so the bar reflects the system prompt + tools, not a
+  // char/4 guess of the visible messages) carries `estimated:true` — show it, but
+  // don't claim it's the model's exact count.
+  const isReal = !!lastUsage && !lastUsage.estimated
 
   if (!activeConversationId || messages.length === 0) return null
 
@@ -49,7 +53,9 @@ export function TokenCounter() {
       : 'model context'
   const title = isReal
     ? `Context: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}) — real, reported by the model (includes system prompt + tools + RAG)`
-    : `Estimated: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}) — estimate until the first reply`
+    : lastUsage
+      ? `Estimated: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}) — includes the system prompt + tools; the exact count lands when the model replies`
+      : `Estimated: ${usedTokens.toLocaleString()} / ${maxTokens.toLocaleString()} tokens (${source}) — estimate until the first reply`
 
   return (
     <div className={`flex items-center gap-1.5 px-2 py-1 ${color}`} title={title}>

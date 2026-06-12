@@ -37,13 +37,23 @@ import type { AgentWorkspace } from '../types/agent-workspace'
  * state on `globalThis` makes every bundled copy share one store, whatever
  * the chunker decides. Do not "simplify" this back to module-level lets.
  */
+/** A file the model "wrote" in plain-chat artifact mode (never hit disk). */
+export interface CapturedArtifact {
+  name: string
+  content: string
+  mime: string
+}
 interface AgentCtxState {
   chatId: string | null
   workspace: AgentWorkspace | null
   model: ActiveAgentModel | null
+  /** Chat-tools artifact mode: when true, file_write captures instead of
+   *  writing to disk, so plain chat shows files inline (ChatGPT-style). */
+  artifactMode: boolean
+  artifacts: CapturedArtifact[]
 }
 const _g = globalThis as typeof globalThis & { __LU_AGENT_CTX?: AgentCtxState }
-const ctx: AgentCtxState = _g.__LU_AGENT_CTX ?? (_g.__LU_AGENT_CTX = { chatId: null, workspace: null, model: null })
+const ctx: AgentCtxState = _g.__LU_AGENT_CTX ?? (_g.__LU_AGENT_CTX = { chatId: null, workspace: null, model: null, artifactMode: false, artifacts: [] })
 
 /**
  * The text model driving the current agent loop. Pinned by useAgentChat right
@@ -85,6 +95,37 @@ export function clearActiveChatId(): void {
   ctx.chatId = null
   ctx.workspace = null
   ctx.model = null
+  ctx.artifactMode = false
+  ctx.artifacts = []
+}
+
+// ── Chat-tools artifact mode (David 2026-06-12) ────────────────
+//
+// In PLAIN chat, "file writes" must behave like ChatGPT: the content is shown
+// IN the chat with a preview + download, never silently dumped to a folder.
+// useChat flips this on for the chat-tools run; executeFileWrite then captures
+// {name, content, mime} here instead of calling fs_write, and useAgentChat
+// drains the captures into the assistant message as `artifacts`. The Coding
+// Agent and full Agent mode leave this OFF and keep writing to disk.
+
+export function setChatArtifactMode(on: boolean): void {
+  ctx.artifactMode = !!on
+  if (!on) ctx.artifacts = []
+}
+
+export function isChatArtifactMode(): boolean {
+  return ctx.artifactMode
+}
+
+export function captureChatArtifact(name: string, content: string, mime: string): void {
+  ctx.artifacts.push({ name, content, mime })
+}
+
+/** Return the captured artifacts and clear the buffer (drain). */
+export function takeChatArtifacts(): CapturedArtifact[] {
+  const out = ctx.artifacts
+  ctx.artifacts = []
+  return out
 }
 
 // ── Multi-Repo Agent (Sprint C #8 from uselu) ──────────────────

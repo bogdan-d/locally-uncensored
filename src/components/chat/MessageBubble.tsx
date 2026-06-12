@@ -7,6 +7,7 @@ import { ToolCallBlock } from './ToolCallBlock'
 import { ReflectionBlock } from './ReflectionBlock'
 import { VramSwitchCard } from './VramSwitchCard'
 import { SpeakerButton } from './SpeakerButton'
+import { ChatArtifactCard } from './ChatArtifactCard'
 import type { Message } from '../../types/chat'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -301,6 +302,16 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
           )}
 
         </div>
+
+        {/* Chat-tools artifacts (David 2026-06-12): files the model "wrote" in
+            plain chat — rendered inline with preview + Download, never on disk. */}
+        {!isUser && message.artifacts && message.artifacts.length > 0 && (
+          <div className="space-y-1">
+            {message.artifacts.map((a) => (
+              <ChatArtifactCard key={a.id} artifact={a} />
+            ))}
+          </div>
+        )}
 
         {/* Action bar UNDER the message (David 2026-06-06: "eigene Leiste unter
             der Nachricht" instead of cramped hover-icons in the corner). Bigger

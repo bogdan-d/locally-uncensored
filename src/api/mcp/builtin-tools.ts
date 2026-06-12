@@ -3,7 +3,7 @@
 import type { MCPToolDefinition } from './types'
 import type { ToolRegistry } from './tool-registry'
 import { backendCall, fetchExternal } from '../backend'
-import { getActiveChatId, getActiveWorkspace } from '../agent-context'
+import { getActiveChatId, getActiveWorkspace, isChatArtifactMode, captureChatArtifact } from '../agent-context'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import { WorkflowEngine } from '../../lib/workflow-engine'
 import type { StepResult } from '../../types/agent-workflows'
@@ -670,8 +670,39 @@ async function executeFileRead(args: Record<string, any>): Promise<string> {
   return data.content || ''
 }
 
+/** Last path segment, defaulting to file.txt. */
+function artifactBaseName(p: any): string {
+  const raw = typeof p === 'string' && p.trim() ? p.trim() : 'file.txt'
+  return raw.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'file.txt'
+}
+
+/** MIME from a filename extension — drives the in-chat artifact preview. */
+function mimeForName(name: string): string {
+  const ext = (name.split('.').pop() || '').toLowerCase()
+  const map: Record<string, string> = {
+    md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain',
+    json: 'application/json', js: 'text/javascript', mjs: 'text/javascript',
+    ts: 'text/typescript', tsx: 'text/typescript', jsx: 'text/javascript',
+    py: 'text/x-python', html: 'text/html', htm: 'text/html', css: 'text/css',
+    csv: 'text/csv', yml: 'text/yaml', yaml: 'text/yaml', xml: 'application/xml',
+    sh: 'text/x-shellscript', sql: 'text/plain', toml: 'text/plain',
+    rs: 'text/x-rust', go: 'text/x-go', java: 'text/x-java', c: 'text/x-c', cpp: 'text/x-c++',
+  }
+  return map[ext] || 'text/plain'
+}
+
 async function executeFileWrite(args: Record<string, any>): Promise<string> {
-  const data = await backendCall('fs_write', { path: args.path, content: args.content, ...chatCtx() })
+  const content = typeof args.content === 'string' ? args.content : String(args.content ?? '')
+  // Plain-chat artifact mode (ChatGPT-style, David 2026-06-12): in the NORMAL
+  // chat, a "file write" must NOT touch disk — capture it so it renders inline
+  // with a preview + Download button. The Coding Agent / full Agent leave
+  // artifact mode OFF and fall through to the real fs_write below.
+  if (isChatArtifactMode()) {
+    const name = artifactBaseName(args.path)
+    captureChatArtifact(name, content, mimeForName(name))
+    return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button — nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
+  }
+  const data = await backendCall('fs_write', { path: args.path, content, ...chatCtx() })
   // Rust returns {status: 'saved', path: <absolute>}. Surface the real path
   // so the model (and the file-change event) knows WHERE the write landed —
   // especially important when chatId is None and Rust routes a relative path

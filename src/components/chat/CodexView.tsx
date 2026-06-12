@@ -224,7 +224,10 @@ export function CodexView() {
           ) : (
             <div className="py-1">
               {messages.filter(msg => !msg.hidden).map((msg) => {
-                const cleanContent = msg.content ? stripChannelTags(msg.content) : ''
+                // Slash commands: the user typed "/review", but msg.content holds
+                // the expanded instruction the model ran on — show displayContent.
+                const rawForDisplay = msg.role === 'user' ? (msg.displayContent || msg.content) : msg.content
+                const cleanContent = rawForDisplay ? stripChannelTags(rawForDisplay) : ''
                 return (
                   <div
                     key={msg.id}
@@ -385,6 +388,7 @@ export function CodexView() {
           onSend={(content) => sendInstruction(content)}
           onStop={stopCodex}
           isGenerating={isRunning}
+          slashCommands
         />
       </div>
 

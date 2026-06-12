@@ -18,6 +18,11 @@ interface Props {
   onApprove?: () => void
   onReject?: () => void
   disabled?: boolean
+  /**
+   * Enable the "/command" typeahead. Only the Coding Agent (Code view) sets this
+   * — slash commands belong there, not in the normal chat (David 2026-06-12).
+   */
+  slashCommands?: boolean
 }
 
 function fileToImageAttachment(file: File): Promise<ImageAttachment> {
@@ -33,7 +38,7 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
   })
 }
 
-export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject, disabled }: Props) {
+export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject, disabled, slashCommands }: Props) {
   const [input, setInput] = useState('')
   const [images, setImages] = useState<ImageAttachment[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
@@ -97,10 +102,12 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
-  // Update the input + the slash-command typeahead together.
+  // Update the input + the slash-command typeahead together. The typeahead is
+  // Coding-Agent-only — in the normal chat (slashCommands unset) "/foo" is just
+  // text and no menu appears.
   const updateInput = (value: string) => {
     setInput(value)
-    const matches = matchAgentCommands(value)
+    const matches = slashCommands ? matchAgentCommands(value) : []
     setCmdMenu(matches)
     setCmdIndex(0)
   }
@@ -200,7 +207,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
         {cmdMenu.length > 0 && (
           <div className="absolute bottom-full left-0 right-0 mb-1.5 z-50 max-h-64 overflow-y-auto scrollbar-thin rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1f1f1f] shadow-xl py-1">
             <div className="px-2.5 py-1 flex items-center gap-1 text-[0.5rem] uppercase tracking-widest text-gray-400 dark:text-gray-600">
-              <Terminal size={9} /> Agent commands
+              <Terminal size={9} /> Coding commands
             </div>
             {cmdMenu.map((cmd, i) => (
               <button
