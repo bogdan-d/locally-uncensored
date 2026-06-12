@@ -366,25 +366,27 @@ export function ModelSelector() {
   const [togglingOllama, setTogglingOllama] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Refresh LM Studio loaded-models snapshot whenever the dropdown
-  // opens. Cheap — single HTTP call. We don't poll while the dropdown
-  // is open because the user is about to click something anyway and
-  // staleness is at most a few seconds.
+  // Keep the per-row On/Off LOAD state LIVE while the dropdown is open
+  // (David 2026-06-12: "on und offload button sehr delayed und nicht immer
+  // akkurat — gemma4b ist geladen laut ollama aber in LU steht off"). The old
+  // code fetched the loaded set ONCE on open, so a model that loaded after the
+  // open — or a slow/transiently-failed first fetch — showed the wrong state
+  // until the user reopened. Now: fetch immediately, then poll /api/ps + LM
+  // Studio every 1.5 s so the toggle self-corrects within a beat. Both calls are
+  // cheap loopback requests; we only poll while the panel is actually open.
   useEffect(() => {
     if (!open) return
     setSelectError(null) // fresh open — drop any stale auto-load error
     let cancelled = false
-    void listLoadedLmStudioModels().then((list) => {
-      if (cancelled) return
-      setLmsLoaded(new Set(list))
-    })
-    // Ollama loaded set (/api/ps) — drives the on/off load toggle on Ollama rows.
-    void listRunningModels().then((list) => {
-      if (cancelled) return
-      setOllamaLoaded(new Set(list))
-    }).catch(() => { /* Ollama unreachable → no Ollama toggles, fine */ })
+    const refresh = () => {
+      void listLoadedLmStudioModels().then((list) => { if (!cancelled) setLmsLoaded(new Set(list)) }).catch(() => {})
+      void listRunningModels().then((list) => { if (!cancelled) setOllamaLoaded(new Set(list)) }).catch(() => {})
+    }
+    refresh()
+    const id = setInterval(refresh, 1500)
     return () => {
       cancelled = true
+      clearInterval(id)
     }
   }, [open])
 
