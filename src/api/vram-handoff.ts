@@ -1137,6 +1137,13 @@ export function comfyErrorHint(nodeType: string | undefined, _excType: string | 
   if (m.includes('out of memory') || m.includes('outofmemory') || _excType === 'torch.OutOfMemoryError') {
     return 'Ran out of GPU memory. Try a shorter clip / lower resolution, set VRAM hand-off to "always" in Settings so the chat model is evicted first, or pick a lighter model.'
   }
+  // Windows "paging file is too small" (os error 1455, bear5real0o0 GH #61):
+  // ComfyUI couldn't commit enough memory while loading a node (often the text
+  // encoder / CLIPLoader) because the OS ran out of RAM + pagefile. This is a
+  // Windows virtual-memory setting, not an LU bug — point the user at the fix.
+  if (m.includes('paging file') || m.includes('os error 1455')) {
+    return 'Windows ran out of virtual memory while loading the model (its paging file is too small). This is a Windows setting, not a Locally Uncensored bug. Let Windows manage the page file, or raise it: Settings → System → About → Advanced system settings → Performance → Settings → Advanced → Virtual memory → Change, set a larger custom size, then reboot. Closing other heavy apps or picking a smaller model also helps.'
+  }
   return ''
 }
 

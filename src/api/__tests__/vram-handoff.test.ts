@@ -265,6 +265,14 @@ describe('comfyErrorHint', () => {
     expect(comfyErrorHint(undefined, undefined, 'CUDA out of memory')).toMatch(/GPU memory/i)
   })
 
+  it('Windows pagefile too small (os error 1455) → virtual-memory advice, not an LU bug (#61)', () => {
+    const h = comfyErrorHint('CLIPLoader', undefined, 'The paging file is too small for this operation to complete. (os error 1455)')
+    expect(h).toMatch(/virtual memory|page file/i)
+    expect(h).toMatch(/not a Locally Uncensored bug/i)
+    // matches on the bare os-error code too, regardless of node
+    expect(comfyErrorHint(undefined, undefined, 'os error 1455')).toMatch(/virtual memory/i)
+  })
+
   it('unknown error → no hint (verbatim error stands alone)', () => {
     expect(comfyErrorHint('KSampler', 'ValueError', 'something weird')).toBe('')
   })
