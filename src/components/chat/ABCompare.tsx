@@ -41,17 +41,22 @@ export function ABCompare() {
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center gap-3 px-3 py-2 border-b border-white/5">
-        <button
-          onClick={() => { setComparing(false); reset() }}
-          className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
-        >
-          <ArrowLeft size={14} />
-        </button>
-        <span className="text-[0.7rem] font-semibold text-white">A/B Compare</span>
+      <div className="grid grid-cols-[1fr_auto_1fr] items-center px-3 py-2 border-b border-white/5">
+        <div className="flex items-center gap-3 justify-self-start">
+          <button
+            onClick={() => { setComparing(false); reset() }}
+            className="p-1 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+          >
+            <ArrowLeft size={14} />
+          </button>
+
+          <span className="text-[0.7rem] font-semibold text-white">
+            A/B Compare
+          </span>
+        </div>
 
         {/* Model selectors */}
-        <div className="flex-1 flex items-center justify-center gap-3">
+        <div className="flex items-center justify-center gap-3 justify-self-center">
           <select
             value={modelA}
             onChange={(e) => setModelA(e.target.value)}
@@ -74,6 +79,7 @@ export function ABCompare() {
             ))}
           </select>
         </div>
+        <div className="justify-self-end" />
       </div>
 
       {/* Split view */}

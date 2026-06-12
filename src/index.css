@@ -110,6 +110,9 @@ body {
   width: 0;
   height: 0;
 }
+button:not(:disabled) {
+  cursor: pointer;
+}
 
 .scrollbar-thin::-webkit-scrollbar-corner {
   background: transparent;

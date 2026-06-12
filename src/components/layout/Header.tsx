@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Menu, Loader2, Sun, Moon, RefreshCw, X } from 'lucide-react'
+import { Menu, Loader2, Sun, Moon, RefreshCw, X, MoreVertical } from 'lucide-react'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
@@ -32,6 +32,8 @@ export function Header() {
   const healthStaleModels = useModelHealthStore((s) => s.staleModels)
   const addStaleToHealth = useModelHealthStore((s) => s.setStaleModels)
   const markHealthFresh = useModelHealthStore((s) => s.markFresh)
+  const [showMoreMenu, setShowMoreMenu] = useState(false)
+  const isCreateView = currentView === 'create'
 
   // Check if active model is an Ollama model
   const isOllamaModel = activeModel ? getProviderIdFromModel(activeModel) === 'ollama' : false
@@ -126,20 +128,49 @@ export function Header() {
         useCompareStore.getState().setComparing(false)
         setView(view as any)
       }}
-      className={`text-[0.6rem] font-medium transition-colors ${
-        currentView === view && !isComparing
-          ? 'text-gray-900 dark:text-white'
-          : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
-      }`}
+      className={`text-[0.6rem] font-medium transition-colors ${currentView === view && !isComparing
+        ? 'text-gray-900 dark:text-white'
+        : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
+        }`}
     >
       {label}
     </button>
   )
 
+  const dropdownNav = (view: string, label: string) => (
+    <button
+      onClick={() => {
+        useCompareStore.getState().setComparing(false)
+        setView(view as any)
+        setShowMoreMenu(false)
+      }}
+      className={`text-left text-[0.6rem] font-medium transition-colors ${currentView === view && !isComparing
+        ? 'text-gray-900 dark:text-white'
+        : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
+        }`}
+    >
+      {label}
+    </button>
+  )
+
+  useEffect(() => {
+    if (!showMoreMenu) return
+
+    const handlePointerDown = () => {
+      setShowMoreMenu(false)
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown)
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+    }
+  }, [showMoreMenu])
+
   return (
-    <header className="relative h-10 flex items-center justify-between px-3 bg-gray-100 dark:bg-[#141414] z-30">
+    <header className="h-10 grid grid-cols-[auto_1fr_auto] items-center px-3 bg-gray-100 dark:bg-[#141414] z-40 gap-4">
       {/* Left: Sidebar + Logo */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 min-w-0">
         <button
           onClick={toggleSidebar}
           className="p-1 rounded-md hover:bg-gray-200 dark:hover:bg-white/5 text-gray-500 hover:text-gray-800 dark:hover:text-white transition-colors"
@@ -170,56 +201,58 @@ export function Header() {
           and the utilities (right). The per-row Lichtschalter that used to
           live here has moved INTO the dropdown — each model row in
           `ModelSelector` has its own load/unload toggle next to the name. */}
-      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1">
+      <div className="lg:absolute lg:left-1/2 lg:-translate-x-1/2 flex items-center justify-center gap-2 min-w-0 ">
         {currentView === 'create' ? (
           <CreateTopControls />
         ) : (
           <>
-        <ModelSelector />
-        {/* Memory — moved here from the chat/code/agent toolbars (David
+            <ModelSelector />
+            {/* Lichtschalter (load/unload into VRAM) now lives per-row inside the
+            ModelSelector dropdown — the header center stays just the picker. */}
+            {/* Memory — moved here from the chat/code/agent toolbars (David
             2026-06-06). One brain icon next to the model picker → editable
             memory popover (view / add / delete the injected context). */}
-        <MemoryDebugToggle />
-        {/* Lichtschalter (load/unload into VRAM) now lives per-row inside the
-            ModelSelector dropdown — the header center stays just the picker. */}
-        {isOllamaModel && staleError && (
-          <div
-            className="ml-1.5 flex items-center gap-1 px-1.5 py-[2px] rounded-md bg-amber-500/10 border border-amber-400/30 text-[0.6rem]"
-            title={staleError.message}
-          >
-            <span className="text-amber-600 dark:text-amber-300 font-medium">
-              stale — refresh?
-            </span>
-            <button
-              onClick={handleRefreshStale}
-              disabled={isRefreshing}
-              className="flex items-center gap-0.5 px-1 py-[1px] rounded text-amber-700 dark:text-amber-200 hover:bg-amber-500/20 disabled:opacity-50 transition-colors"
-              title={`Re-pull ${staleError.model}`}
-            >
-              {isRefreshing ? (
-                <Loader2 size={9} className="animate-spin" />
-              ) : (
-                <RefreshCw size={9} />
-              )}
-              <span>Refresh</span>
-            </button>
-            <button
-              onClick={() => setStaleError(null)}
-              className="flex items-center p-[1px] rounded text-amber-600/70 hover:text-amber-800 hover:bg-amber-500/20 transition-colors"
-              title="Dismiss"
-              aria-label="Dismiss"
-            >
-              <X size={9} />
-            </button>
-          </div>
-        )}
+            <MemoryDebugToggle />
+
+            {isOllamaModel && staleError && (
+              <div
+                className="ml-1.5 flex items-center gap-1 px-1.5 py-[2px] rounded-md bg-amber-500/10 border border-amber-400/30 text-[0.6rem]"
+                title={staleError.message}
+              >
+                <span className="text-amber-600 dark:text-amber-300 font-medium">
+                  stale — refresh?
+                </span>
+                <button
+                  onClick={handleRefreshStale}
+                  disabled={isRefreshing}
+                  className="flex items-center gap-0.5 px-1 py-[1px] rounded text-amber-700 dark:text-amber-200 hover:bg-amber-500/20 disabled:opacity-50 transition-colors"
+                  title={`Re-pull ${staleError.model}`}
+                >
+                  {isRefreshing ? (
+                    <Loader2 size={9} className="animate-spin" />
+                  ) : (
+                    <RefreshCw size={9} />
+                  )}
+                  <span>Refresh</span>
+                </button>
+                <button
+                  onClick={() => setStaleError(null)}
+                  className="flex items-center p-[1px] rounded text-amber-600/70 hover:text-amber-800 hover:bg-amber-500/20 transition-colors"
+                  title="Dismiss"
+                  aria-label="Dismiss"
+                >
+                  <X size={9} />
+                </button>
+              </div>
+            )}
           </>
         )}
       </div>
 
       {/* Right: text nav + icon utilities */}
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center justify-end gap-2.5 min-w-0">
         <DownloadBadge />
+
         <button
           onClick={toggleTheme}
           className="p-1 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
@@ -227,21 +260,78 @@ export function Header() {
         >
           {settings.theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
         </button>
-        {textNav('chat', 'Chat')}
-        {textNav('create', 'Create')}
-        <button
-          onClick={() => { useCompareStore.getState().setComparing(true); setView('chat') }}
-          className={`text-[0.6rem] font-medium transition-colors ${
-            isComparing
+
+        {/* Desktop navigation */}
+        <div className={
+          isCreateView
+            ? "hidden xl:flex items-center gap-2.5"
+            : "hidden lg:flex items-center gap-2.5"
+        }>
+          {textNav('chat', 'Chat')}
+          {textNav('create', 'Create')}
+
+          <button
+            onClick={() => {
+              useCompareStore.getState().setComparing(true)
+              setView('chat')
+            }}
+            className={`text-[0.6rem] font-medium transition-colors ${isComparing
               ? 'text-gray-900 dark:text-white'
               : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
-          }`}
-        >
-          Compare
-        </button>
-        {textNav('benchmark', 'Benchmark')}
-        {textNav('models', 'Models')}
-        {textNav('settings', 'Settings')}
+              }`}
+          >
+            Compare
+          </button>
+
+          {textNav('benchmark', 'Benchmark')}
+          {textNav('models', 'Models')}
+          {textNav('settings', 'Settings')}
+        </div>
+
+        {/* Collapsed navigation */}
+        <div className={
+          isCreateView
+            ? "relative xl:hidden"
+            : "relative lg:hidden"
+        }>
+          <button
+            onClick={() => setShowMoreMenu(!showMoreMenu)}
+            className="p-1 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+            title="More"
+          >
+            <MoreVertical size={16} />
+          </button>
+
+          {showMoreMenu && (
+            <div onPointerDown={(e) => e.stopPropagation()} className="absolute right-0 top-full mt-2 w-40 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1a1a1a] shadow-xl z-50">
+              <div className="flex flex-col gap-2 p-3">
+
+                {dropdownNav('chat', 'Chat')}
+                {dropdownNav('create', 'Create')}
+
+                <button
+                  onClick={() => {
+                    useCompareStore.getState().setComparing(true)
+                    setView('chat')
+                    setShowMoreMenu(false)
+                  }}
+                  className={`text-left text-[0.6rem] font-medium transition-colors ${isComparing
+                    ? 'text-gray-900 dark:text-white'
+                    : 'text-gray-500 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white'
+                    }`}
+                >
+                  Compare
+                </button>
+
+                {dropdownNav('benchmark', 'Benchmark')}
+                {dropdownNav('models', 'Models')}
+                {dropdownNav('settings', 'Settings')}
+
+              </div>
+            </div>
+          )}
+        </div>
+
         <UpdateBadge />
       </div>
     </header>
