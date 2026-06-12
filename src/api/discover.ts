@@ -1749,10 +1749,25 @@ export interface CivitAIModelResult {
   sourceUrl: string
 }
 
+export const CIVITAI_DEFAULT_HOST = 'civitai.com'
+
+/**
+ * Rewrite a civitai.com absolute URL to the chosen mirror host (GitHub #53).
+ * The CivitAI API returns absolute civitai.com download/source URLs even when
+ * it is queried through a mirror, so without this the actual file download
+ * still hits the blocked origin for users on civitai.red. No-op on the default
+ * host. Exported + pure for unit tests.
+ */
+export function civitaiHostSwap(url: string | undefined, host: string): string | undefined {
+  if (!url || !host || host === CIVITAI_DEFAULT_HOST) return url
+  return url.replace(/^(https?:\/\/)civitai\.com/i, `$1${host}`)
+}
+
 export async function searchCivitaiModels(
   query: string,
   type: 'Checkpoint' | 'LORA' | 'VAE' | 'TextualInversion' = 'Checkpoint',
-  apiKey?: string
+  apiKey?: string,
+  host: string = CIVITAI_DEFAULT_HOST
 ): Promise<CivitAIModelResult[]> {
   try {
     const params = new URLSearchParams({
@@ -1768,7 +1783,7 @@ export async function searchCivitaiModels(
     })
     // Adding the user's API key as a bearer token unlocks the full catalog and
     // lifts the per-IP rate limit. Falls back to anon access if no key is set.
-    const url = `https://civitai.com/api/v1/models?${params}${apiKey ? `&token=${encodeURIComponent(apiKey)}` : ''}`
+    const url = `https://${host}/api/v1/models?${params}${apiKey ? `&token=${encodeURIComponent(apiKey)}` : ''}`
     const text = await fetchExternal(url)
     const data = JSON.parse(text)
     const items: any[] = data.items ?? []
@@ -1805,13 +1820,13 @@ export async function searchCivitaiModels(
         description: descParts.join(' — '),
         type: type,
         thumbnailUrl: thumb,
-        downloadUrl,
+        downloadUrl: civitaiHostSwap(downloadUrl, host),
         filename,
         subfolder,
         sizeGB: sizeKB > 0 ? Math.round(sizeKB / 1024 / 1024 * 10) / 10 : undefined,
         stats: item.stats ? { downloads: item.stats.downloadCount || 0, likes: item.stats.thumbsUpCount || 0 } : undefined,
         creator: item.creator?.username,
-        sourceUrl: `https://civitai.com/models/${item.id}`,
+        sourceUrl: `https://${host}/models/${item.id}`,
       }
     })
   } catch (err) {

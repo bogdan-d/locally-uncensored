@@ -393,9 +393,10 @@ function detectModelTypes(workflow: Record<string, any>): ModelType[] {
 // ─── Fetch workflow from URL (supports JSON and ZIP) ───
 
 export async function fetchWorkflowFromUrl(url: string, apiKey?: string): Promise<Record<string, any>> {
-  // Append CivitAI API key if provided and URL is from CivitAI
+  // Append CivitAI API key if provided and URL is from CivitAI (any host —
+  // civitai.com or a mirror like civitai.red, GitHub #53).
   let finalUrl = url
-  if (apiKey && url.includes('civitai.com')) {
+  if (apiKey && /civitai\.(com|red)/i.test(url)) {
     const sep = url.includes('?') ? '&' : '?'
     finalUrl = `${url}${sep}token=${apiKey}`
   }
@@ -596,7 +597,7 @@ interface CivitAIModel {
   }>
 }
 
-export async function searchCivitai(query: string): Promise<WorkflowSearchResult[]> {
+export async function searchCivitai(query: string, host: string = 'civitai.com'): Promise<WorkflowSearchResult[]> {
   try {
     const params = new URLSearchParams({
       query,
@@ -604,7 +605,7 @@ export async function searchCivitai(query: string): Promise<WorkflowSearchResult
       limit: '20',
       sort: 'Most Downloaded',
     })
-    const text = await fetchExternal(`https://civitai.com/api/v1/models?${params}`)
+    const text = await fetchExternal(`https://${host}/api/v1/models?${params}`)
     const data = JSON.parse(text)
     if (!data.items) {
       log.warn('[workflows] CivitAI returned no items')
@@ -615,8 +616,12 @@ export async function searchCivitai(query: string): Promise<WorkflowSearchResult
     return items.map((item) => {
       const version = item.modelVersions?.[0]
       const thumb = version?.images?.[0]?.url
-      // Prefer the version downloadUrl, fall back to first file
-      const downloadUrl = version?.downloadUrl ?? version?.files?.[0]?.downloadUrl
+      // Prefer the version downloadUrl, fall back to first file. Rewrite the
+      // host so a mirror (civitai.red) serves the actual file too (#53).
+      const rawDownloadUrl = version?.downloadUrl ?? version?.files?.[0]?.downloadUrl
+      const downloadUrl = host === 'civitai.com'
+        ? rawDownloadUrl
+        : rawDownloadUrl?.replace(/^(https?:\/\/)civitai\.com/i, `$1${host}`)
 
       // Build description with stats
       const descParts: string[] = []
@@ -634,7 +639,7 @@ export async function searchCivitai(query: string): Promise<WorkflowSearchResult
         name: item.name || `CivitAI #${item.id}`,
         description: descParts.join(' — '),
         source: 'civitai' as const,
-        sourceUrl: `https://civitai.com/models/${item.id}`,
+        sourceUrl: `https://${host}/models/${item.id}`,
         thumbnailUrl: thumb,
         modelTypes: ['unknown'] as ModelType[],
         mode: 'image' as const,
@@ -651,7 +656,8 @@ export async function searchCivitai(query: string): Promise<WorkflowSearchResult
 
 export async function searchWorkflows(
   query: string,
-  source: 'civitai' | 'templates'
+  source: 'civitai' | 'templates',
+  host: string = 'civitai.com'
 ): Promise<WorkflowSearchResult[]> {
   if (source === 'templates') {
     const templates = getBuiltinTemplates()
@@ -663,5 +669,5 @@ export async function searchWorkflows(
       t.modelTypes.some(mt => mt.includes(lower))
     )
   }
-  return searchCivitai(query)
+  return searchCivitai(query, host)
 }

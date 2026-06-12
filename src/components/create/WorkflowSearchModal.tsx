@@ -49,7 +49,7 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
   const initialSearchDone = useRef(false)
   const templatesCached = useRef<WorkflowSearchResult[] | null>(null)
 
-  const { installedWorkflows, installWorkflow, assignToModelName, civitaiApiKey, setCivitaiApiKey } = useWorkflowStore()
+  const { installedWorkflows, installWorkflow, assignToModelName, civitaiApiKey, setCivitaiApiKey, civitaiHost } = useWorkflowStore()
   const [showApiKey, setShowApiKey] = useState(false)
   const [showApiKeyInput, setShowApiKeyInput] = useState(false)
   const [showApiKeyWarning, setShowApiKeyWarning] = useState(false)
@@ -82,7 +82,7 @@ export function WorkflowSearchModal({ open, onClose, modelName, modelType }: Pro
     setError(null)
     try {
       const searchSource = source === 'discover' ? 'civitai' : 'templates'
-      const r = await searchWorkflows(searchQuery, searchSource as any)
+      const r = await searchWorkflows(searchQuery, searchSource as any, civitaiHost)
       setResults(r)
       if (r.length === 0) setError('No workflows found. Try different search terms.')
     } catch (err) {
