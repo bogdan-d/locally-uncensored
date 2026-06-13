@@ -379,7 +379,20 @@ export function ModelSelector() {
     setSelectError(null) // fresh open — drop any stale auto-load error
     let cancelled = false
     const refresh = () => {
-      void listLoadedLmStudioModels().then((list) => { if (!cancelled) setLmsLoaded(new Set(list)) }).catch(() => {})
+      // Only probe LM Studio's loaded-state when LM Studio models are actually
+      // listed. When its server is down there are NO LM Studio rows, so this
+      // skips the probe entirely — removing the last frontend reason the
+      // dropdown ever stalled on a down LM Studio (the Rust side is now async +
+      // port-pre-checked too). Ollama's /api/ps is a cheap loopback call and
+      // always runs.
+      const hasLmsRows = useModelStore.getState().models.some((m) =>
+        isLmStudioProvider(('providerName' in m && (m as any).providerName) as string | undefined),
+      )
+      if (hasLmsRows) {
+        void listLoadedLmStudioModels().then((list) => { if (!cancelled) setLmsLoaded(new Set(list)) }).catch(() => {})
+      } else if (!cancelled) {
+        setLmsLoaded((prev) => (prev.size ? new Set() : prev))
+      }
       void listRunningModels().then((list) => { if (!cancelled) setOllamaLoaded(new Set(list)) }).catch(() => {})
     }
     refresh()

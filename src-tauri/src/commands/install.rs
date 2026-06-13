@@ -1496,13 +1496,35 @@ fn lmstudio_gui_exe() -> Option<PathBuf> {
     if p.exists() { Some(p) } else { None }
 }
 
+/// Fast, BOUNDED reachability probe for the LM Studio server. A plain HTTP GET
+/// to a DOWN server is catastrophically slow on some Windows boxes: connecting
+/// to a closed `127.0.0.1:<port>` can take ~2 s to refuse (the IPv4 loopback
+/// SYN is silently dropped by the firewall → TCP retransmit timeout), and
+/// `reqwest`'s request `timeout` does NOT bound the connect phase tightly, so
+/// the GET ran 2–7 s. Worse, the model-selector re-polls the LM-Studio
+/// loaded-state every ~1.5 s while open, and the commands were SYNCHRONOUS
+/// (→ main thread), so each stacked multi-second probe froze the whole UI.
+/// `TcpStream::connect_timeout` hard-caps the down-case at 300 ms; the explicit
+/// `127.0.0.1` (not `localhost`) skips the slow IPv4/IPv6 happy-eyeballs dance.
+fn lmstudio_port_open() -> bool {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), LMSTUDIO_DEFAULT_PORT);
+    TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(300)).is_ok()
+}
+
 fn lmstudio_server_running() -> bool {
+    // Bail in <=300 ms when nothing is listening — see lmstudio_port_open.
+    if !lmstudio_port_open() {
+        return false;
+    }
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_millis(800))
+        .connect_timeout(std::time::Duration::from_millis(400))
+        .no_proxy()
         .build();
     if let Ok(c) = client {
         return c
-            .get(format!("http://localhost:{}/v1/models", LMSTUDIO_DEFAULT_PORT))
+            .get(format!("http://127.0.0.1:{}/v1/models", LMSTUDIO_DEFAULT_PORT))
             .send()
             .map(|r| r.status().is_success() || r.status() == 401)
             .unwrap_or(false);
@@ -1800,18 +1822,28 @@ pub fn start_lmstudio_server() -> Result<serde_json::Value, String> {
     }
 }
 
+// ASYNC + spawn_blocking: this command does a (now-bounded) blocking TCP/HTTP
+// probe + filesystem scan. A SYNCHRONOUS Tauri command runs on the MAIN thread,
+// so the model-selector's on-open + 1.5 s poll froze the UI. Running the
+// blocking body on the blocking pool keeps the webview responsive even if a
+// probe is slow. (reqwest::blocking also panics inside an async runtime, so the
+// blocking work MUST live in spawn_blocking, not a bare async body.)
 #[tauri::command]
-pub fn lmstudio_server_status() -> Result<serde_json::Value, String> {
-    let model_count = lmstudio_models_present();
-    Ok(serde_json::json!({
-        "running": lmstudio_server_running(),
-        "port": LMSTUDIO_DEFAULT_PORT,
-        "lms_present": lmstudio_lms_path().is_some(),
-        // Soft-detect signals — onboarding shows "Start LM Studio server?"
-        // when models are present even if lms.exe couldn't be located.
-        "models_detected": model_count > 0,
-        "model_count": model_count,
-    }))
+pub async fn lmstudio_server_status() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(|| -> Result<serde_json::Value, String> {
+        let model_count = lmstudio_models_present();
+        Ok(serde_json::json!({
+            "running": lmstudio_server_running(),
+            "port": LMSTUDIO_DEFAULT_PORT,
+            "lms_present": lmstudio_lms_path().is_some(),
+            // Soft-detect signals — onboarding shows "Start LM Studio server?"
+            // when models are present even if lms.exe couldn't be located.
+            "models_detected": model_count > 0,
+            "model_count": model_count,
+        }))
+    })
+    .await
+    .map_err(|e| format!("lmstudio_server_status task: {e}"))?
 }
 
 // ── Per-model load / unload ────────────────────────────────────
@@ -1828,32 +1860,47 @@ pub fn lmstudio_server_status() -> Result<serde_json::Value, String> {
 // the lms-CLI lookup uses desktop's richer `lmstudio_lms_path()` helper
 // instead of uselu's lighter `os_paths::find_lms_cli()`.
 
+// ASYNC + spawn_blocking + fast port pre-check (see lmstudio_server_status /
+// lmstudio_port_open). Polled every ~1.5 s by the model selector while open —
+// the old sync + slow-localhost-probe form was the main cause of the dropdown
+// freeze.
 #[tauri::command]
-pub fn lmstudio_list_loaded() -> Result<serde_json::Value, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_millis(1500))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let url = format!("http://localhost:{}/api/v0/models", LMSTUDIO_DEFAULT_PORT);
-    let resp = match client.get(&url).send() {
-        Ok(r) => r,
-        Err(_) => return Ok(serde_json::json!({ "loaded": Vec::<String>::new() })),
-    };
-    if !resp.status().is_success() {
-        return Ok(serde_json::json!({ "loaded": Vec::<String>::new() }));
-    }
-    let body: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
-    let loaded: Vec<String> = body
-        .get("data")
-        .and_then(|d| d.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter(|m| m.get("state").and_then(|s| s.as_str()) == Some("loaded"))
-                .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(serde_json::json!({ "loaded": loaded }))
+pub async fn lmstudio_list_loaded() -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(|| -> Result<serde_json::Value, String> {
+        let empty = || serde_json::json!({ "loaded": Vec::<String>::new() });
+        // Down server → return empty in <=300 ms instead of a 2–7 s connect.
+        if !lmstudio_port_open() {
+            return Ok(empty());
+        }
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_millis(1500))
+            .connect_timeout(std::time::Duration::from_millis(400))
+            .no_proxy()
+            .build()
+            .map_err(|e| e.to_string())?;
+        let url = format!("http://127.0.0.1:{}/api/v0/models", LMSTUDIO_DEFAULT_PORT);
+        let resp = match client.get(&url).send() {
+            Ok(r) => r,
+            Err(_) => return Ok(empty()),
+        };
+        if !resp.status().is_success() {
+            return Ok(empty());
+        }
+        let body: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+        let loaded: Vec<String> = body
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter(|m| m.get("state").and_then(|s| s.as_str()) == Some("loaded"))
+                    .filter_map(|m| m.get("id").and_then(|i| i.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(serde_json::json!({ "loaded": loaded }))
+    })
+    .await
+    .map_err(|e| format!("lmstudio_list_loaded task: {e}"))?
 }
 
 #[allow(non_snake_case)]
@@ -1929,44 +1976,55 @@ pub fn lmstudio_load_model(model: String, contextLength: Option<u32>) -> Result<
 /// `max_context_length` (the model's ceiling). Both are null when LM Studio
 /// isn't running or the model isn't found. Reading the list endpoint (not the
 /// per-id one) sidesteps URL-encoding issues with publisher/slash ids.
+// ASYNC + spawn_blocking + fast port pre-check — same freeze class as
+// lmstudio_list_loaded; this one feeds the header token counter.
 #[tauri::command]
-pub fn lmstudio_model_context(model: String) -> Result<serde_json::Value, String> {
-    let null_json = serde_json::json!({ "loaded": serde_json::Value::Null, "max": serde_json::Value::Null, "state": serde_json::Value::Null });
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_millis(2000))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return Ok(null_json),
-    };
-    let url = format!("http://localhost:{}/api/v0/models", LMSTUDIO_DEFAULT_PORT);
-    let resp = match client.get(&url).send() {
-        Ok(r) => r,
-        Err(_) => return Ok(null_json),
-    };
-    if !resp.status().is_success() {
-        return Ok(null_json);
-    }
-    let body: serde_json::Value = match resp.json() {
-        Ok(b) => b,
-        Err(_) => return Ok(null_json),
-    };
-    let entry = body
-        .get("data")
-        .and_then(|d| d.as_array())
-        .and_then(|arr| arr.iter().find(|m| m.get("id").and_then(|i| i.as_str()) == Some(model.as_str())));
-    match entry {
-        Some(m) => {
-            let loaded = m.get("loaded_context_length").and_then(|v| v.as_u64());
-            let max = m
-                .get("max_context_length")
-                .and_then(|v| v.as_u64())
-                .or_else(|| m.get("context_length").and_then(|v| v.as_u64()));
-            let state = m.get("state").and_then(|v| v.as_str());
-            Ok(serde_json::json!({ "loaded": loaded, "max": max, "state": state }))
+pub async fn lmstudio_model_context(model: String) -> Result<serde_json::Value, String> {
+    tokio::task::spawn_blocking(move || -> Result<serde_json::Value, String> {
+        let null_json = || serde_json::json!({ "loaded": serde_json::Value::Null, "max": serde_json::Value::Null, "state": serde_json::Value::Null });
+        if !lmstudio_port_open() {
+            return Ok(null_json());
         }
-        None => Ok(null_json),
-    }
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_millis(2000))
+            .connect_timeout(std::time::Duration::from_millis(400))
+            .no_proxy()
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return Ok(null_json()),
+        };
+        let url = format!("http://127.0.0.1:{}/api/v0/models", LMSTUDIO_DEFAULT_PORT);
+        let resp = match client.get(&url).send() {
+            Ok(r) => r,
+            Err(_) => return Ok(null_json()),
+        };
+        if !resp.status().is_success() {
+            return Ok(null_json());
+        }
+        let body: serde_json::Value = match resp.json() {
+            Ok(b) => b,
+            Err(_) => return Ok(null_json()),
+        };
+        let entry = body
+            .get("data")
+            .and_then(|d| d.as_array())
+            .and_then(|arr| arr.iter().find(|m| m.get("id").and_then(|i| i.as_str()) == Some(model.as_str())));
+        match entry {
+            Some(m) => {
+                let loaded = m.get("loaded_context_length").and_then(|v| v.as_u64());
+                let max = m
+                    .get("max_context_length")
+                    .and_then(|v| v.as_u64())
+                    .or_else(|| m.get("context_length").and_then(|v| v.as_u64()));
+                let state = m.get("state").and_then(|v| v.as_str());
+                Ok(serde_json::json!({ "loaded": loaded, "max": max, "state": state }))
+            }
+            None => Ok(null_json()),
+        }
+    })
+    .await
+    .map_err(|e| format!("lmstudio_model_context task: {e}"))?
 }
 
 #[tauri::command]
