@@ -25,7 +25,13 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 // ─── Constants ───
 
-const PASSCODE_TTL_SECS: u64 = 300; // 5 minutes — what the user types on the phone
+// 15 minutes. The pairing code the user types on the phone. Was 5 min, but it
+// auto-rotates on expiry, and 5 min silently rotated the code mid-connect when
+// there was any delay between reading it and entering it (David 2026-06-15).
+// 15 min gives a comfortable pairing window; the live panel still shows a
+// countdown + the current code, and the JWT issued after pairing has its own
+// (separate) lifetime, so this only widens the one-time pairing window.
+const PASSCODE_TTL_SECS: u64 = 900;
 const JWT_TTL_SECS: u64 = 60 * 60;  // 1 hour — how long an authenticated session lasts
 const MAX_FAILED_ATTEMPTS: u32 = 3;
 const COOLDOWN_SECS: u64 = 60;
