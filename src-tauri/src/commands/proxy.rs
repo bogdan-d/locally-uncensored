@@ -510,6 +510,47 @@ pub fn cancel_proxy_stream(
     Ok(())
 }
 
+/// Upload an image to ComfyUI's `/upload/image` as a clean multipart POST from
+/// Rust. `uploadImage()` in the frontend used a RAW browser `fetch()` — the only
+/// non-proxy fetch left — which 400'd on some WebView2 builds (multipart /
+/// boundary / CORS-preflight quirks; konata 2026-06-14 "Failed to upload image:
+/// HTTP 400"). reqwest's multipart is machine-independent and removes WebView2
+/// as a variable, matching the "everything via the Rust proxy" pattern
+/// (WebView2-149 finding). Returns ComfyUI's JSON body ({ name, subfolder, type }).
+#[tauri::command]
+pub async fn comfy_upload_image(
+    url: String,
+    filename: String,
+    content_type: Option<String>,
+    file_bytes: Vec<u8>,
+    state: tauri::State<'_, crate::state::AppState>,
+) -> Result<String, String> {
+    validate_proxy_url(&url, &state)?;
+    if file_bytes.is_empty() {
+        return Err("the source image is empty (0 bytes)".to_string());
+    }
+    let ct = content_type.filter(|c| !c.is_empty()).unwrap_or_else(|| "image/png".to_string());
+    let part = reqwest::multipart::Part::bytes(file_bytes)
+        .file_name(filename)
+        .mime_str(&ct)
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::multipart::Form::new()
+        .part("image", part)
+        .text("overwrite", "true");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client.post(&url).multipart(form).send().await
+        .map_err(|e| format!("comfy_upload_image: {}", e))?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("HTTP {}: {}", status.as_u16(), body.trim()));
+    }
+    Ok(body)
+}
+
 /// Streaming Ollama model pull — emits per-model progress events.
 /// Each event is a JSON object: { "model": "name", "data": { ...ollama progress... } }
 #[tauri::command]

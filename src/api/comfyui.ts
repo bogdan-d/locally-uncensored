@@ -1,4 +1,4 @@
-import { comfyuiUrl, localFetch, fetchLocalhostBytes } from "./backend"
+import { comfyuiUrl, localFetch, fetchLocalhostBytes, isTauri, backendCall } from "./backend"
 import { log } from "../lib/logger"
 
 // ─── Control-plane fetch timeouts ───
@@ -967,6 +967,33 @@ export async function uploadImage(file: File): Promise<string> {
   // sanitised filename with a real image extension rather than trusting file.name
   // (a Blob-derived File can carry "" or an extension-less name).
   const safeName = ensureImageFilename(file.name, file.type)
+
+  // Tauri (packaged): post the multipart from Rust. The raw browser fetch()
+  // below was the ONLY non-proxy fetch left in the app, and it 400'd on some
+  // WebView2 builds (multipart/boundary/CORS-preflight quirks; konata
+  // 2026-06-14 "Failed to upload image: HTTP 400"). reqwest's multipart is
+  // machine-independent and removes WebView2 as a variable — matching the
+  // "everything via the Rust proxy" pattern (WebView2-149 finding). Dev/browser
+  // keeps the direct fetch (Vite proxy / CORS-enabled ComfyUI).
+  if (isTauri()) {
+    const bytes = Array.from(new Uint8Array(await file.arrayBuffer()))
+    let body: string
+    try {
+      body = await backendCall<string>('comfy_upload_image', {
+        url: comfyuiUrl('/upload/image'),
+        filename: safeName,
+        contentType: file.type || 'image/png',
+        fileBytes: bytes,
+      })
+    } catch (e) {
+      // The Rust side rejects with "HTTP <s>: <body>" — surface ComfyUI's
+      // actual reason so the dropzone error is self-explanatory.
+      throw new Error(`Failed to upload image: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    const data = JSON.parse(body)
+    return data.name // ComfyUI returns { name, subfolder, type }
+  }
+
   const formData = new FormData()
   formData.append('image', file, safeName)
   formData.append('overwrite', 'true')
