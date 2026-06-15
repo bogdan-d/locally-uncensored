@@ -5,6 +5,7 @@ import type { Conversation, Message, ChatArtifact } from '../types/chat'
 import type { AgentBlock } from '../types/agent-mode'
 import { idbStorage } from '../lib/idbStorage'
 import { migrateBlockInPlace } from '../api/agents/block-helpers'
+import { useGenerationStore } from './generationStore'
 
 /**
  * Rehydration migration for Phase 1 (v2.4.0) — wraps legacy
@@ -92,12 +93,18 @@ export const useChatStore = create<ChatState>()(
         return id
       },
 
-      deleteConversation: (id) =>
+      deleteConversation: (id) => {
+        // Stop any in-flight turn (chat stream OR agent loop) for this chat
+        // BEFORE dropping it, so deleting/closing a chat halts its activity
+        // completely — no orphaned stream burning tokens / GPU after the chat
+        // is gone (David 2026-06-15).
+        try { useGenerationStore.getState().abortConversation(id) } catch { /* best-effort */ }
         set((state) => ({
           conversations: state.conversations.filter((c) => c.id !== id),
           activeConversationId:
             state.activeConversationId === id ? null : state.activeConversationId,
-        })),
+        }))
+      },
 
       renameConversation: (id, title) =>
         set((state) => ({

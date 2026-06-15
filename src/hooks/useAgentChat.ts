@@ -458,6 +458,8 @@ export function useAgentChat() {
     // Bind the generating flag to THIS conversation so the typing indicator
     // shows only in the chat whose turn is in flight (David 2026-06-12).
     useGenerationStore.getState().setGenerating(convId, true)
+    // Register so deleting/closing this chat stops the agent loop (Bug C).
+    useGenerationStore.getState().registerAborter(convId, () => { runningRef.current = false; abort.abort() })
     contentRef.current = ''
     thinkingRef.current = ''
     blocksRef.current = []
@@ -1294,6 +1296,7 @@ export function useAgentChat() {
     } finally {
       setIsAgentRunning(false)
       useGenerationStore.getState().setGenerating(convId, false)
+      useGenerationStore.getState().clearAborter(convId)
       runningRef.current = false
       abortRef.current = null
       // Chat-tools artifact mode: attach any files the model "wrote" (captured

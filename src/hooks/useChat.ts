@@ -190,6 +190,8 @@ export function useChat() {
 
     const abort = new AbortController()
     abortRef.current = abort
+    // Register so deleting/closing this chat aborts the in-flight stream (Bug C).
+    useGenerationStore.getState().registerAborter(convId, () => abort.abort())
     setIsGenerating(true)
     // Bind the generating flag to THIS conversation so the typing indicator
     // only shows in the chat whose turn is in flight — not in every other chat
@@ -427,6 +429,7 @@ export function useChat() {
     } finally {
       setIsGenerating(false)
       useGenerationStore.getState().setGenerating(convId, false)
+      useGenerationStore.getState().clearAborter(convId)
       setIsLoadingModel(false)
       useModelStore.getState().setIsModelLoading(false)
       abortRef.current = null
