@@ -27,11 +27,11 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ### Screenshots
 
-| Chat with Personas | Image / Video Generation |
+| Chat that draws your images | Built-in image & video studio |
 |:---:|:---:|
-| ![Chat](docs/screenshots/chat_personas_dark.png) | ![Create](docs/screenshots/create_dark.png) |
-| **Model Manager** | **Create View with Parameters** |
-| ![Models](docs/screenshots/model_manager_dark.png) | ![Create Params](docs/screenshots/create_params_dark.png) |
+| ![Chat](docs/screenshots/chat_generate_dark.webp) | ![Create](docs/screenshots/create_gallery_dark.webp) |
+| **Coding Agent reviews & fixes** | **Agent Mode builds it for you** |
+| ![Coding Agent](docs/screenshots/coding_review_dark.webp) | ![Agent Mode](docs/screenshots/agent_mode_dark.webp) |
 
 ---
 
