@@ -1,12 +1,13 @@
 import { useRef, useState, useCallback } from 'react'
 import { v4 as uuid } from 'uuid'
 import { chatNonStreaming } from '../api/agents'
-import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace, setActiveAgentModel, renderWorkspaceSection } from '../api/agent-context'
+import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace, setActiveAgentModel, renderWorkspaceSection, setChatArtifactMode, takeChatArtifacts } from '../api/agent-context'
 import { isOllamaLocal } from '../api/backend'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
 import { useChatStore } from '../stores/chatStore'
+import { useGenerationStore } from '../stores/generationStore'
 import { agentVariantExists, createAgentVariant, getAgentModelName, canFixModel } from '../api/model-template-fix'
 import { useModelStore } from '../stores/modelStore'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -20,7 +21,7 @@ import { log } from '../lib/logger'
 import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { parseLooseToolCalls, stripMatchedCalls, stripToolCallText, canonicalToolName } from '../lib/loose-tool-parse'
 import { buildVisionFeedback } from '../api/vision-feedback'
-import { compactMessages, getModelMaxTokens } from '../lib/context-compaction'
+import { compactMessages, getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { getModelContextCached } from '../api/ollama'
 import { effectiveContextWindow } from '../lib/context-window'
 import { useMemoryStore } from '../stores/memoryStore'
@@ -156,7 +157,17 @@ export function useAgentChat() {
 
   // ── Main agent message handler ────────────────────────────
 
-  const sendAgentMessage = useCallback(async (userContent: string, userImages?: import('../types/chat').ImageAttachment[]) => {
+  const sendAgentMessage = useCallback(async (
+    userContent: string,
+    userImages?: import('../types/chat').ImageAttachment[],
+    // Chat-Tools mode (David 2026-06-11): plain chat routes a tool-worthy turn
+    // here with a CURATED allow-list (the 5 chat tools) + a chat-style prompt,
+    // so web/file/image/video work without flipping to full Agent mode. When
+    // unset, this is the normal autonomous-agent path (full tool catalog).
+    // displayContent: a slash command shows the raw "/commit" the user typed
+    // while `userContent` carries the expanded instruction the model receives.
+    opts?: { curatedTools?: readonly string[]; chatToolsMode?: boolean; displayContent?: string },
+  ) => {
     const { activeModel } = useModelStore.getState()
     const { settings } = useSettingsStore.getState()
     const store = useChatStore.getState()
@@ -282,6 +293,11 @@ export function useAgentChat() {
     })
     setActiveWorkspace(resolvedWorkspace)
 
+    // Chat-tools (plain chat) → "file writes" become in-chat artifacts (preview
+    // + download), never disk writes (ChatGPT-style, David 2026-06-12). Full
+    // Agent mode keeps writing to disk, so this is ON only for chatToolsMode.
+    setChatArtifactMode(opts?.chatToolsMode === true)
+
     // Feature EE (v2.5.0) — pin the text model driving this loop so the VRAM
     // hand-off orchestrator (image/video generation) knows which model to
     // evict-then-reload around a ComfyUI run. We use the already-resolved
@@ -301,6 +317,8 @@ export function useAgentChat() {
       id: uuid(),
       role: 'user' as const,
       content: userContent,
+      // Slash command: show "/commit" to the user, keep the expansion in content.
+      ...(opts?.displayContent ? { displayContent: opts.displayContent } : {}),
       images: userImages,
       timestamp: Date.now(),
     }
@@ -369,16 +387,28 @@ export function useAgentChat() {
     // Get effective permissions for this conversation
     const permissions = usePermissionStore.getState().getEffectivePermissions(convId!)
 
+    // Chat-Tools mode: restrict the catalog to the curated allow-list so the
+    // model in plain chat only ever sees the 5 chat tools (and small models
+    // aren't drowned in the full ~24-tool set).
+    const curated = opts?.curatedTools
+    const toolMatchesCurated = (name: string) => !curated || curated.includes(name)
+
     // Build agent system prompt FIRST, then append caveman style as a modifier
     const hermesToolDefs = toolRegistry.toHermesToolDefs(permissions)
+      .filter((t) => toolMatchesCurated(t.name))
     // Small-Model Mode (Knob 2): swap the ~3000-char agent prompt for a lean
     // ~750-char one on the native path. The Hermes-XML branch already uses a
     // tight tool prompt (buildHermesToolPrompt), so it stays as-is.
+    // Chat-Tools mode uses a conversational prompt (NOT the autonomous-agent
+    // one) so plain chat keeps its normal voice and only reaches for a tool
+    // when the user actually needs it.
     let agentSystemPrompt = strategy === 'hermes_xml'
       ? buildHermesToolPrompt(hermesToolDefs) + (systemPrompt ? `\n\n${systemPrompt}` : '')
-      : settings.smallModelMode
-        ? buildAgentSystemPromptLean(systemPrompt)
-        : buildAgentSystemPrompt(systemPrompt)
+      : opts?.chatToolsMode
+        ? buildChatToolsSystemPrompt(systemPrompt)
+        : settings.smallModelMode
+          ? buildAgentSystemPromptLean(systemPrompt)
+          : buildAgentSystemPrompt(systemPrompt)
 
     // Multi-Repo (Sprint C #8): when the agent workspace has extra paths,
     // append a "Workspaces" section so the model can reference them by
@@ -425,6 +455,9 @@ export function useAgentChat() {
     abortRef.current = abort
     runningRef.current = true
     setIsAgentRunning(true)
+    // Bind the generating flag to THIS conversation so the typing indicator
+    // shows only in the chat whose turn is in flight (David 2026-06-12).
+    useGenerationStore.getState().setGenerating(convId, true)
     contentRef.current = ''
     thinkingRef.current = ''
     blocksRef.current = []
@@ -576,7 +609,7 @@ export function useAgentChat() {
           // permissive selection unchanged for big models.
           const relevantDefs = await selectRelevantToolsAsync(
             lastUserMsg,
-            toolRegistry.getAll(),
+            toolRegistry.getAll().filter((t) => toolMatchesCurated(t.name)),
             permissions,
             settings.smallModelMode
               ? { embed: (texts) => generateEmbeddings(texts), topN: 5, embeddingThreshold: 6, maxTools: 6 }
@@ -588,6 +621,23 @@ export function useAgentChat() {
           }))
 
           let turn!: { content: string; toolCalls: ToolCall[]; thinking?: string; promptEvalCount?: number; evalCount?: number }
+
+          // Token counter (David 2026-06-12): reflect the REAL prompt size — system
+          // prompt + tool defs + history — immediately, not a char/4 guess of just
+          // the visible messages. Provisional estimate the model's exact count
+          // overwrites below; only set while no real count has landed yet.
+          {
+            const existingUsage = useChatStore.getState().conversations
+              .find((c) => c.id === convId)?.messages.find((m) => m.id === assistantMessage.id)?.usage
+            if (!existingUsage || existingUsage.estimated) {
+              const estPrompt =
+                estimateTokens(agentMessages.map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))).join('\n')) +
+                estimateTokens(JSON.stringify(tools))
+              useChatStore.getState().updateMessageUsage(convId!, assistantMessage.id, {
+                promptTokens: estPrompt, completionTokens: 0, totalTokens: estPrompt, estimated: true,
+              })
+            }
+          }
           if (providerId === 'ollama') {
             // Streaming path — parity with desktop Codex. Without this
             // the user stared at a frozen chat for 30-90 s while Gemma
@@ -676,13 +726,33 @@ export function useAgentChat() {
             }
             dropThinkingBlock()
           } else {
-            try {
-              turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
-            } catch (thinkErr: any) {
-              if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
-                const retryOptions = { ...chatOptions, thinking: undefined as unknown as boolean }
-                turn = await provider.chatWithTools(modelToUse, agentMessages, tools, retryOptions)
-              } else {
+            // Connection-failure retry for openai-compat providers — parity with
+            // the Ollama branch above. A LOCAL LM Studio model gets unloaded +
+            // JIT-reloaded around an image/video VRAM hand-off (detectLmsTextModel
+            // juggling, v2.5.3); a request that races that reload window dies as
+            // "LM Studio: Request failed". Without a retry that surfaced as a bare
+            // "Agent error" on the very next tool turn (ship-gate find 2026-06-11,
+            // chat-tools image on LM Studio). Retry transient failures a couple of
+            // times; a 4xx is deterministic and still surfaces immediately.
+            let connRetries = 0
+            for (;;) {
+              try {
+                turn = await provider.chatWithTools(modelToUse, agentMessages, tools, chatOptions)
+                break
+              } catch (thinkErr: any) {
+                if (thinkErr?.message?.includes('does not support thinking') || thinkErr?.statusCode === 400) {
+                  const retryOptions = { ...chatOptions, thinking: undefined as unknown as boolean }
+                  turn = await provider.chatWithTools(modelToUse, agentMessages, tools, retryOptions)
+                  break
+                }
+                const sc = typeof thinkErr?.statusCode === 'number' ? thinkErr.statusCode : 0
+                const transient = thinkErr?.name !== 'AbortError' && !(sc >= 400 && sc < 500)
+                if (transient && connRetries < 2) {
+                  connRetries++
+                  log.warn('agent.model_call_retry', { attempt: connRetries, provider: providerId, err: String(thinkErr?.message || thinkErr) })
+                  await new Promise((r) => setTimeout(r, 1500 * connRetries))
+                  continue
+                }
                 throw thinkErr
               }
             }
@@ -701,6 +771,7 @@ export function useAgentChat() {
               promptTokens: turn.promptEvalCount || 0,
               completionTokens: turn.evalCount || 0,
               totalTokens: (turn.promptEvalCount || 0) + (turn.evalCount || 0),
+              estimated: false,
             })
           }
           // Native thinking field from Ollama
@@ -1203,6 +1274,16 @@ export function useAgentChat() {
             convId!, assistantMessage.id,
             `This model does not support thinking mode. Disable the Think button or switch to a compatible model (Qwen 3, DeepSeek-R1, Gemma 4).`
           )
+        } else if (/failed to fetch|connection refused|connection reset|error sending request|proxy_localhost|network ?error|timed out|timeout|tcp connect|llama runner process|backend unreachable|HTTP 5\d\d/i.test(errorMsg)) {
+          // Connection-class failure — after the transient retries above this
+          // means the backend really dropped mid-run (crashed, was killed, or
+          // is busy swapping models). A bare "Agent error: Connection failed"
+          // gave users nothing to act on (rikki Discord 2026-06-10, Win11).
+          useChatStore.getState().updateMessageContent(
+            convId!, assistantMessage.id,
+            (contentRef.current ? contentRef.current + '\n\n' : '') +
+            `Lost the connection to the local model backend mid-response — it may have crashed, been closed, or was busy swapping models. LU already retried automatically.\n\nCheck that Ollama / LM Studio is running (and the model still loads), then send the message again.\n\nDetails: ${errorMsg}`
+          )
         } else {
           useChatStore.getState().updateMessageContent(
             convId!, assistantMessage.id,
@@ -1212,8 +1293,20 @@ export function useAgentChat() {
       }
     } finally {
       setIsAgentRunning(false)
+      useGenerationStore.getState().setGenerating(convId, false)
       runningRef.current = false
       abortRef.current = null
+      // Chat-tools artifact mode: attach any files the model "wrote" (captured
+      // in-memory, NOT on disk) to the assistant message so they render inline
+      // with a preview + Download button. takeChatArtifacts drains the buffer;
+      // clearActiveChatId() then resets the mode for the next run.
+      const capturedArtifacts = takeChatArtifacts()
+      if (capturedArtifacts.length) {
+        useChatStore.getState().updateMessageArtifacts(
+          convId!, assistantMessage.id,
+          capturedArtifacts.map((a) => ({ id: uuid(), name: a.name, content: a.content, mime: a.mime })),
+        )
+      }
       // Drop the per-run workspace scope so standalone tool calls from
       // other tabs don't accidentally land in this chat's folder.
       clearActiveChatId()
@@ -1280,7 +1373,7 @@ Available tools:
 - Filesystem: file_read, file_write, file_list, file_search
 - Web: web_search, web_fetch
 - System: shell_execute, code_execute, system_info, screenshot, process_list, get_current_time
-- Creative: image_generate, run_workflow
+- Creative: image_generate, video_generate (text-to-video, or animate a generated image via inputImage), run_workflow
 
 AUTONOMY CONTRACT (read carefully — this is the most important rule):
 - When the user asks you to BUILD, CREATE, MAKE, or WRITE something (a file, a website, a script, a folder structure), you MUST execute it via tools — typically file_write.
@@ -1334,4 +1427,23 @@ Rules:
 - For images/video call image_generate / video_generate as real tool calls.
 - When everything is done, reply with one short sentence in the user's language.`
   return basePrompt ? `${lean}\n\n${basePrompt}` : lean
+}
+
+/**
+ * Chat-Tools prompt (David 2026-06-11). Plain chat with a curated 5-tool set:
+ * the model stays a normal conversational assistant but CAN reach for a tool
+ * when the user actually needs one. Deliberately NOT the autonomous-agent
+ * "you MUST use tools / execute end-to-end" prompt — that would turn ordinary
+ * chat into an agent. Kept short so it doesn't crowd a small model's context.
+ */
+function buildChatToolsSystemPrompt(basePrompt: string): string {
+  const p = `You are a helpful chat assistant in Locally Uncensored, having a normal conversation. You also have a few tools for things you cannot do from memory — use one ONLY when the user's request actually needs it, otherwise just reply normally:
+- web_search — look up current/real-world facts (returns short snippets)
+- web_fetch — read a specific web page or URL (after a search, or when the user gives a link)
+- file_write — save text to a file when the user asks you to write/create/save a file
+- image_generate — create an image when the user asks for a picture/drawing/logo
+- video_generate — create a short video/animation when the user asks for one (to animate an image you just made, pass its filename as inputImage)
+
+Emit tool calls through the real tool channel — never as plain text like image_generate("…"). After a tool runs, give a short, natural reply about the result. For web questions, prefer web_search then web_fetch on the best result before answering. Reply in the user's language.`
+  return basePrompt ? `${p}\n\n${basePrompt}` : p
 }

@@ -117,10 +117,10 @@ describe('getOllamaTools', () => {
     expect(ollamaTools).toHaveLength(AGENT_TOOL_DEFS.length - blockedByDefaultNames.size)
   })
 
-  it('excludes video_generate (off by default) but keeps image_generate', () => {
+  it('includes video_generate (live since v2.5.3) alongside image_generate', () => {
     const names = getOllamaTools().map((t) => t.function.name)
-    expect(blockedByDefaultNames.has('video_generate')).toBe(true)
-    expect(names).not.toContain('video_generate')
+    expect(blockedByDefaultNames.has('video_generate')).toBe(false)
+    expect(names).toContain('video_generate')
     expect(names).toContain('image_generate')
   })
 

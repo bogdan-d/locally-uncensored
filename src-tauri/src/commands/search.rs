@@ -108,6 +108,118 @@ async fn try_ddg(query: &str, count: usize) -> Result<Vec<SearchResult>, String>
     }
 }
 
+/// Parse a Brave Search API response body into results. Split out of
+/// `try_brave` so the shape mapping is unit-testable without network.
+fn parse_brave_results(json: &serde_json::Value, count: usize) -> Vec<SearchResult> {
+    json.pointer("/web/results")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .take(count)
+                .filter_map(|r| {
+                    Some(SearchResult {
+                        title: html_decode(&strip_html(r.get("title")?.as_str()?)),
+                        url: r.get("url")?.as_str()?.to_string(),
+                        snippet: r
+                            .get("description")
+                            .and_then(|d| d.as_str())
+                            .map(|d| html_decode(&strip_html(d)))
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Brave Search API (paid/free-tier key from Settings → Agent → Search
+/// Provider). The settings fields existed since v2.4 but were never wired
+/// into this command — the key was silently ignored (same bug class as
+/// GitHub #59's silent reset button). Now: explicit provider support.
+async fn try_brave(query: &str, count: usize, api_key: &str) -> Result<Vec<SearchResult>, String> {
+    let url = format!(
+        "https://api.search.brave.com/res/v1/web/search?q={}&count={}",
+        urlencoding::encode(query),
+        count.min(20)
+    );
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/json")
+        .header("X-Subscription-Token", api_key)
+        .send()
+        .await
+        .map_err(|e| format!("Brave: {}", e))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("Brave: HTTP {} (check the API key)", status.as_u16()));
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|e| format!("Brave: {}", e))?;
+    let results = parse_brave_results(&json, count);
+    if results.is_empty() {
+        Err("Brave: no results".to_string())
+    } else {
+        Ok(results)
+    }
+}
+
+/// Parse a Tavily API response body into results (unit-testable, no network).
+fn parse_tavily_results(json: &serde_json::Value, count: usize) -> Vec<SearchResult> {
+    json.get("results")
+        .and_then(|r| r.as_array())
+        .map(|arr| {
+            arr.iter()
+                .take(count)
+                .filter_map(|r| {
+                    Some(SearchResult {
+                        title: r.get("title")?.as_str()?.to_string(),
+                        url: r.get("url")?.as_str()?.to_string(),
+                        snippet: r
+                            .get("content")
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Tavily search API. Key in the JSON body (legacy) AND as Bearer header
+/// (current docs) — both are accepted by Tavily, covering old + new plans.
+async fn try_tavily(query: &str, count: usize, api_key: &str) -> Result<Vec<SearchResult>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .post("https://api.tavily.com/search")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&serde_json::json!({
+            "api_key": api_key,
+            "query": query,
+            "max_results": count.min(20),
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Tavily: {}", e))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("Tavily: HTTP {} (check the API key)", status.as_u16()));
+    }
+    let json: serde_json::Value = resp.json().await.map_err(|e| format!("Tavily: {}", e))?;
+    let results = parse_tavily_results(&json, count);
+    if results.is_empty() {
+        Err("Tavily: no results".to_string())
+    } else {
+        Ok(results)
+    }
+}
+
 async fn try_wikipedia(query: &str, count: usize) -> Result<Vec<SearchResult>, String> {
     let url = format!(
         "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={}&format=json&srlimit={}",
@@ -165,28 +277,92 @@ fn strip_html(s: &str) -> String {
 pub async fn web_search(
     query: String,
     count: Option<usize>,
+    provider: Option<String>,
+    brave_api_key: Option<String>,
+    tavily_api_key: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let count = count.unwrap_or(5);
+    let provider = provider.unwrap_or_else(|| "auto".to_string());
+    let brave_key = brave_api_key.unwrap_or_default();
+    let tavily_key = tavily_api_key.unwrap_or_default();
+
+    // The frontend has offered Brave / Tavily in Settings → Agent → Search
+    // Provider since v2.4, but this command silently dropped the choice and
+    // always ran the free tiers. Honor it now:
+    //   - explicit 'brave' / 'tavily' → use that provider; on failure fall
+    //     back to the free tiers but surface why in `providerError`.
+    //   - 'auto' → paid provider first when a key is configured, then the
+    //     free tiers (SearXNG → DuckDuckGo → Wikipedia).
+    let mut provider_error: Option<String> = None;
+
+    match provider.as_str() {
+        "brave" => {
+            if brave_key.is_empty() {
+                provider_error = Some(
+                    "Brave Search is selected but no API key is configured (Settings → Agent → Search Provider).".to_string(),
+                );
+            } else {
+                match try_brave(&query, count, &brave_key).await {
+                    Ok(results) => return Ok(serde_json::json!({"results": results, "provider": "brave"})),
+                    Err(e) => provider_error = Some(e),
+                }
+            }
+        }
+        "tavily" => {
+            if tavily_key.is_empty() {
+                provider_error = Some(
+                    "Tavily is selected but no API key is configured (Settings → Agent → Search Provider).".to_string(),
+                );
+            } else {
+                match try_tavily(&query, count, &tavily_key).await {
+                    Ok(results) => return Ok(serde_json::json!({"results": results, "provider": "tavily"})),
+                    Err(e) => provider_error = Some(e),
+                }
+            }
+        }
+        _ => {
+            // auto: a configured key signals intent — prefer that provider.
+            if !brave_key.is_empty() {
+                if let Ok(results) = try_brave(&query, count, &brave_key).await {
+                    return Ok(serde_json::json!({"results": results, "provider": "brave"}));
+                }
+            }
+            if !tavily_key.is_empty() {
+                if let Ok(results) = try_tavily(&query, count, &tavily_key).await {
+                    return Ok(serde_json::json!({"results": results, "provider": "tavily"}));
+                }
+            }
+        }
+    }
+
+    // Free tiers. Reached directly in 'auto' or as fallback after a paid
+    // provider failed (provider_error carries the reason to the model).
+    let attach = |mut v: serde_json::Value| {
+        if let Some(err) = &provider_error {
+            v["providerError"] = serde_json::json!(err);
+        }
+        v
+    };
 
     // Try SearXNG first
     if state.searxng_available.load(Ordering::Relaxed) {
         if let Ok(results) = try_searxng(&query, count).await {
-            return Ok(serde_json::json!({"results": results}));
+            return Ok(attach(serde_json::json!({"results": results, "provider": "searxng"})));
         }
     }
 
     // Fallback to DuckDuckGo
     if let Ok(results) = try_ddg(&query, count).await {
-        return Ok(serde_json::json!({"results": results}));
+        return Ok(attach(serde_json::json!({"results": results, "provider": "duckduckgo"})));
     }
 
     // Fallback to Wikipedia
     if let Ok(results) = try_wikipedia(&query, count).await {
-        return Ok(serde_json::json!({"results": results}));
+        return Ok(attach(serde_json::json!({"results": results, "provider": "wikipedia"})));
     }
 
-    Ok(serde_json::json!({"results": [], "error": "All search tiers failed"}))
+    Ok(attach(serde_json::json!({"results": [], "error": "All search tiers failed"})))
 }
 
 #[tauri::command]
@@ -444,4 +620,71 @@ fn collapse_whitespace(s: &str) -> String {
         }
     }
     out.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn brave_parses_web_results() {
+        let json: serde_json::Value = serde_json::json!({
+            "web": { "results": [
+                { "title": "Rust <strong>lang</strong>", "url": "https://rust-lang.org", "description": "A &amp; B systems language" },
+                { "title": "Second", "url": "https://example.com", "description": "More" },
+                { "title": "Third", "url": "https://third.example" }
+            ]}
+        });
+        let r = parse_brave_results(&json, 2);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].title, "Rust lang");
+        assert_eq!(r[0].url, "https://rust-lang.org");
+        assert_eq!(r[0].snippet, "A & B systems language");
+    }
+
+    #[test]
+    fn brave_missing_description_is_empty_snippet() {
+        let json: serde_json::Value = serde_json::json!({
+            "web": { "results": [ { "title": "T", "url": "https://x.example" } ] }
+        });
+        let r = parse_brave_results(&json, 5);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].snippet, "");
+    }
+
+    #[test]
+    fn brave_unexpected_shape_yields_empty() {
+        let json: serde_json::Value = serde_json::json!({ "message": "invalid key" });
+        assert!(parse_brave_results(&json, 5).is_empty());
+    }
+
+    #[test]
+    fn tavily_parses_results() {
+        let json: serde_json::Value = serde_json::json!({
+            "results": [
+                { "title": "Doc", "url": "https://docs.example", "content": "Body text" },
+                { "title": "NoContent", "url": "https://b.example" }
+            ],
+            "answer": "ignored"
+        });
+        let r = parse_tavily_results(&json, 5);
+        assert_eq!(r.len(), 2);
+        assert_eq!(r[0].snippet, "Body text");
+        assert_eq!(r[1].snippet, "");
+    }
+
+    #[test]
+    fn tavily_unexpected_shape_yields_empty() {
+        let json: serde_json::Value = serde_json::json!({ "detail": "unauthorized" });
+        assert!(parse_tavily_results(&json, 5).is_empty());
+    }
+
+    #[test]
+    fn tavily_respects_count_cap() {
+        let arr: Vec<serde_json::Value> = (0..10)
+            .map(|i| serde_json::json!({ "title": format!("t{}", i), "url": format!("https://e{}.example", i), "content": "" }))
+            .collect();
+        let json = serde_json::json!({ "results": arr });
+        assert_eq!(parse_tavily_results(&json, 3).len(), 3);
+    }
 }

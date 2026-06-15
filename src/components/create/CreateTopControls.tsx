@@ -90,7 +90,7 @@ export function CreateTopControls() {
     if (comfyBusy) return
     if (comfyRunning) {
       setComfyBusy('stopping')
-      try { await backendCall('stop_comfyui') } catch {}
+      try { await backendCall('stop_comfyui') } catch { }
       setComfyRunning(false)
       setComfyBusy(null)
       return
@@ -138,32 +138,30 @@ export function CreateTopControls() {
     : (comfyRunning ? 'ComfyUI running — click to stop' : 'ComfyUI stopped — click to start')
 
   return (
-    <div className="flex items-center gap-1" data-create-top-picker>
+    <div className="flex items-center gap-1 min-w-0" data-create-top-picker>
       {/* Image / Video mode switch */}
       <div className="flex items-center rounded-md border border-gray-200 dark:border-white/10 overflow-hidden">
         <button
           onClick={() => setMode('image')}
-          className={`px-2 h-[22px] flex items-center gap-1 text-[0.6rem] font-medium transition-colors ${
-            mode === 'image'
-              ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
-              : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-          }`}
+          className={`px-2 h-[22px] flex items-center gap-1 text-[0.6rem] font-medium transition-colors ${mode === 'image'
+            ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
+            : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+            }`}
           title="Image mode"
         >
           <ImageIcon size={11} />
-          Image
+          <span className="hidden sm:inline">Image</span>
         </button>
         <button
           onClick={() => setMode('video')}
-          className={`px-2 h-[22px] flex items-center gap-1 text-[0.6rem] font-medium transition-colors ${
-            mode === 'video'
-              ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
-              : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-          }`}
+          className={`px-2 h-[22px] flex items-center gap-1 text-[0.6rem] font-medium transition-colors ${mode === 'video'
+            ? 'bg-gray-200 dark:bg-white/10 text-gray-900 dark:text-white'
+            : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+            }`}
           title="Video mode"
         >
           <Film size={11} />
-          Video
+          <span className="hidden sm:inline">Video</span>
         </button>
       </div>
 
@@ -171,7 +169,7 @@ export function CreateTopControls() {
       <div className="relative">
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex items-center gap-1 h-[22px] px-2 rounded-md text-[0.65rem] text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors max-w-[220px]"
+          className="flex items-center gap-1 h-[22px] px-2 rounded-md text-[0.65rem] text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-white/5 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors max-w-[120px] sm:max-w-[220px]"
           title={activeModel || `Select ${mode} model`}
         >
           <span className="truncate">{activeModel || `No ${mode} model`}</span>
@@ -189,11 +187,10 @@ export function CreateTopControls() {
                 <button
                   key={m.name}
                   onClick={() => onPickModel(m.name)}
-                  className={`w-full text-left px-3 py-1.5 text-[0.65rem] flex items-center justify-between gap-2 transition-colors ${
-                    activeModel === m.name
-                      ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5'
-                  }`}
+                  className={`w-full text-left px-3 py-1.5 text-[0.65rem] flex items-center justify-between gap-2 transition-colors ${activeModel === m.name
+                    ? 'bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white'
+                    : 'text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-white/5'
+                    }`}
                 >
                   <span className="truncate">{m.name}</span>
                   {activeModel === m.name && <Check size={11} />}
@@ -211,22 +208,20 @@ export function CreateTopControls() {
         disabled={!!comfyBusy}
         title={toggleTitle}
         aria-label={toggleTitle}
-        className={`relative flex items-center h-[18px] w-[34px] rounded-full transition-colors duration-200 ${
-          comfyBusy
-            ? 'bg-amber-500/25 border border-amber-400/40'
-            : comfyRunning
-              ? 'bg-green-500/25 border border-green-400/50'
-              : 'bg-red-500/20 border border-red-400/40 hover:bg-red-500/30'
-        }`}
+        className={`relative flex items-center h-[18px] w-[34px] rounded-full transition-colors duration-200 ${comfyBusy
+          ? 'bg-amber-500/25 border border-amber-400/40'
+          : comfyRunning
+            ? 'bg-green-500/25 border border-green-400/50'
+            : 'bg-red-500/20 border border-red-400/40 hover:bg-red-500/30'
+          }`}
       >
         <span
-          className={`absolute top-[1px] flex items-center justify-center w-[14px] h-[14px] rounded-full shadow-sm transition-all duration-200 ${
-            comfyBusy
-              ? 'left-[9px] bg-amber-400'
-              : comfyRunning
-                ? 'left-[18px] bg-green-400'
-                : 'left-[1px] bg-red-400'
-          }`}
+          className={`absolute top-[1px] flex items-center justify-center w-[14px] h-[14px] rounded-full shadow-sm transition-all duration-200 ${comfyBusy
+            ? 'left-[9px] bg-amber-400'
+            : comfyRunning
+              ? 'left-[18px] bg-green-400'
+              : 'left-[1px] bg-red-400'
+            }`}
         >
           {comfyBusy ? (
             <Loader2 size={9} className="animate-spin text-gray-900" />

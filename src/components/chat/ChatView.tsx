@@ -24,6 +24,7 @@ import { PermissionOverrideBar } from './PermissionOverrideBar'
 import { RealtimeCounter } from './RealtimeCounter'
 import { CodexView } from './CodexView'
 import { useCodexStore } from '../../stores/codexStore'
+import { useGenerationStore } from '../../stores/generationStore'
 import { useRemoteStore } from '../../stores/remoteStore'
 import { useImageToolNoti } from '../../hooks/useImageToolNoti'
 
@@ -38,6 +39,14 @@ export function ChatView() {
   const [exportToast, setExportToast] = useState<string>('')
   const [toolsDropdownOpen, setToolsDropdownOpen] = useState(false)
   const chatMode = useCodexStore((s) => s.chatMode)
+
+  // Per-conversation generating flag (David 2026-06-12): the typing indicator
+  // + realtime counter must show ONLY in the chat that is actually generating,
+  // not in every other chat the user switches to. `isGenerating` from the hook
+  // is global (and stays so for the input, where it guards shared stream refs);
+  // the visual indicators below read this conversation-scoped map instead.
+  const generatingMap = useGenerationStore((s) => s.generating)
+  const activeGenerating = !!activeConversationId && !!generatingMap[activeConversationId]
 
   const docCount = useRAGStore((s) =>
     activeConversationId ? (s.documents[activeConversationId] || []).length : 0
@@ -282,6 +291,7 @@ export function ChatView() {
 
               <MessageList
                 isGenerating={isGenerating}
+                isThisChatGenerating={activeGenerating}
                 isLoadingModel={isLoadingModel}
                 onRegenerate={regenerateMessage}
                 onEdit={editAndResend}
@@ -289,7 +299,7 @@ export function ChatView() {
                 onApprove={approveToolCall}
                 onReject={rejectToolCall}
               />
-              <RealtimeCounter isRunning={isGenerating} />
+              <RealtimeCounter isRunning={activeGenerating} />
 
               {/* Remote session banners */}
               {isThisRemoteActive && (

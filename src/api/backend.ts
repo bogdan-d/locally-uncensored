@@ -30,6 +30,23 @@ async function getInvoke() {
 }
 
 /**
+ * The Rust proxy commands reject with the STRING `"HTTP <status>: <body>"`
+ * when the local backend answered non-2xx (vs. a transport error like
+ * "connection refused" when it could not be reached at all). Parse that shape
+ * so the JS side can rebuild a faithful Response — callers check
+ * `res.status === 400` for the Ollama think-field downgrade and similar, and
+ * those checks must behave identically whether the bytes traveled through the
+ * proxy (Windows/WebView2) or a direct fetch (Linux/macOS/dev).
+ */
+export function parseProxyHttpError(msg: string): { status: number; body: string } | null {
+  const m = /(?:^|:\s*)HTTP (\d{3}):\s?([\s\S]*)$/.exec(msg)
+  if (!m) return null
+  const status = Number(m[1])
+  if (status < 100 || status > 599) return null
+  return { status, body: m[2] ?? '' }
+}
+
+/**
  * Fetch a localhost URL, bypassing CORS in Tauri mode.
  * In dev mode: uses normal fetch().
  * In Tauri .exe: routes through Rust proxy_localhost command.
@@ -97,6 +114,19 @@ export async function localFetch(
     return new Response(text, { status: 200, headers: { "Content-Type": "application/json" } });
   } catch (proxyErr) {
     const proxyErrMsg = String(proxyErr)
+
+    // The Rust proxy DID reach the backend and the backend answered non-2xx
+    // (Err("HTTP <status>: <body>")). That is a real HTTP response, not a
+    // transport failure — surface it faithfully so callers' status checks
+    // (think-field 400 downgrade, buildError) behave exactly like a direct
+    // fetch does on Linux/macOS. Retrying via direct fetch would be pointless
+    // and on WebView2 149 just adds a second guaranteed failure (rikki
+    // Discord 2026-06-10: Win11 "agent error" while Kubuntu was fine).
+    const httpErr = parseProxyHttpError(proxyErrMsg)
+    if (httpErr) {
+      return new Response(httpErr.body, { status: httpErr.status })
+    }
+
     log.warn('[localFetch] Proxy failed, trying direct fetch', { err: proxyErrMsg })
 
     // Fallback: try direct fetch (works when ComfyUI has --enable-cors-header *)
@@ -147,57 +177,146 @@ export async function localFetchStream(
   const body = options?.body;
   const headers = body ? { "Content-Type": "application/json" } : undefined;
 
-  // Direct fetch first — Ollama has CORS open on localhost, so this gives
-  // us true chunked streaming. Works in both dev mode and Tauri .exe.
-  try {
-    const res = await fetch(url, {
-      method,
-      headers,
-      body,
-      signal: options?.signal,
-    });
-    // Guard: some Tauri WebView setups still reject — if the Response is
-    // malformed (no body at all), fall through to the proxy.
-    if (res.body || res.ok || res.status >= 400) {
-      return res;
+  // Transport order (rikki Discord 2026-06-10, Win11 "agent error"):
+  // on WebView2 the direct fetch to a loopback backend is dead on arrival —
+  // Ollama's CORS rejects the tauri.localhost origin and WebView2 149 made
+  // the failure mode flaky instead of clean. Burning that attempt first cost
+  // latency and, worse, a direct fetch that dies MID-stream cannot fall back
+  // (the body is already partially consumed). So in Tauri, loopback targets
+  // go proxy-FIRST; the direct fetch remains as fallback. Dev mode and
+  // non-loopback (LAN) targets keep the old order.
+  const proxyFirst = isTauri() && isLoopbackHost(hostnameOf(url));
+
+  const tryDirect = async (): Promise<Response | null> => {
+    try {
+      const res = await fetch(url, { method, headers, body, signal: options?.signal });
+      // Guard: some Tauri WebView setups still reject — if the Response is
+      // malformed (no body at all), fall through to the proxy.
+      if (res.body || res.ok || res.status >= 400) return res;
+      return null;
+    } catch (directErr) {
+      if (options?.signal?.aborted) throw directErr;
+      log.warn('[localFetchStream] Direct fetch failed', { err: String(directErr) });
+      return null;
     }
-  } catch (directErr) {
-    if (options?.signal?.aborted) throw directErr;
-    log.warn('[localFetchStream] Direct fetch failed, trying Rust proxy', { err: String(directErr) });
+  };
+
+  if (!proxyFirst) {
+    const direct = await tryDirect();
+    if (direct) return direct;
+    if (!isTauri()) {
+      // No proxy to fall back to in plain browser dev mode.
+      return new Response(JSON.stringify({ error: 'Network error' }), { status: 500 });
+    }
   }
 
-  // Fallback in Tauri: route through the Rust proxy.
-  if (!isTauri()) {
-    // Re-throw the original direct-fetch error if we are not in Tauri,
-    // since there is no proxy to fall back to.
-    return new Response(JSON.stringify({ error: 'Network error' }), { status: 500 });
+  const proxied = await proxyStreamChunked(url, method, body);
+  if (proxied) return proxied;
+
+  // Proxy layer itself unavailable (invoke/Channel import died) — give the
+  // direct fetch one shot if we skipped it above.
+  if (proxyFirst) {
+    const direct = await tryDirect();
+    if (direct) return direct;
   }
+  return new Response(JSON.stringify({ error: 'Local backend unreachable (proxy and direct fetch both failed)' }), { status: 503 });
+}
 
-  const invoke = await getInvoke();
-
-  // STREAMING proxy (David 2026-06-02): the webview can't fetch Ollama directly
-  // — its origin is `http://tauri.localhost` and Ollama's CORS rejects it
-  // ("Failed to fetch"), so EVERY chat request lands here. The old path awaited
-  // the whole body (`bytes` buffered), so a long/slow generation produced
-  // NOTHING in the UI until fully done — a multi-minute "model loading" hang
-  // (dhasim Discord report). A Tauri Channel now forwards each chunk from Rust
-  // as it arrives, fed into a ReadableStream → real token-by-token streaming.
+/**
+ * STREAMING proxy (David 2026-06-02): a Tauri Channel forwards each chunk from
+ * Rust as it arrives, fed into a ReadableStream → real token-by-token streaming
+ * (the old buffered path produced NOTHING until the body was complete — the
+ * multi-minute "model loading" hang, dhasim Discord report).
+ *
+ * Status fidelity (rikki Discord 2026-06-10): the Rust command rejects with the
+ * string "HTTP <status>: <body>" when the backend answered non-2xx — BEFORE any
+ * chunk is sent. The old code turned that into a stream error with no
+ * statusCode, so callers' `res.status === 400` handling (Ollama think-field
+ * downgrade, "does not support tools") never ran on the proxy path — Windows
+ * behaved differently from Linux for the SAME backend answer. Now the Response
+ * is deferred until the first signal:
+ *   - invoke rejects "HTTP <s>: <body>"  → faithful Response(<s>, body)
+ *   - invoke rejects otherwise           → Response 503 (transport: retryable)
+ *   - first chunk / EOF / invoke resolve → streaming Response 200
+ *
+ * Returns null when the invoke/Channel layer itself is unavailable so the
+ * caller can decide on a last-resort transport.
+ */
+async function proxyStreamChunked(url: string, method: string, body?: string): Promise<Response | null> {
+  let invoke: Awaited<ReturnType<typeof getInvoke>>;
+  let ChannelCtor: typeof import("@tauri-apps/api/core").Channel;
   try {
-    const { Channel } = await import("@tauri-apps/api/core");
-    const channel = new Channel<number[]>();
+    invoke = await getInvoke();
+    ChannelCtor = (await import("@tauri-apps/api/core")).Channel;
+  } catch (err) {
+    log.warn('[localFetchStream] invoke/Channel unavailable', { err: String(err) });
+    return null;
+  }
+
+  try {
+    const channel = new ChannelCtor<number[]>();
     let ctrl: ReadableStreamDefaultController<Uint8Array> | null = null;
     let closed = false;
     const stream = new ReadableStream<Uint8Array>({
       start(c) { ctrl = c; },
     });
+    const closeStream = () => {
+      if (closed) return;
+      closed = true;
+      try { ctrl?.close(); } catch { /* already closed */ }
+    };
+
+    let responseSettled = false;
+    let settle!: (res: Response) => void;
+    const settled = new Promise<Response>((resolve) => {
+      settle = (res) => { if (!responseSettled) { responseSettled = true; resolve(res) } };
+    });
+    const settleStreaming = () => {
+      if (responseSettled) return;
+      settle(new Response(stream, { status: 200, headers: { "Content-Type": "application/x-ndjson" } }));
+    };
+
     channel.onmessage = (chunk: number[]) => {
       if (closed) return;
+      // Empty chunk = Rust's explicit EOF marker (data chunks are never
+      // empty). Closing HERE instead of on the invoke result is the fix for
+      // the silent no-reply chats (live find 2026-06-11): WebView2 149
+      // delivers queued channel messages AFTER the invoke promise resolves,
+      // so closing on the result raced ahead of the data and dropped every
+      // chunk — the user message appeared, the reply never did.
+      if (!chunk || chunk.length === 0) {
+        settleStreaming();
+        closeStream();
+        return;
+      }
       try { ctrl?.enqueue(new Uint8Array(chunk)); } catch { /* reader gone */ }
+      settleStreaming();
     };
+
     void invoke("proxy_localhost_stream_chunked", { url, method, body: body || null, onChunk: channel })
-      .then(() => { closed = true; try { ctrl?.close(); } catch { /* already closed */ } })
-      .catch((err: unknown) => { closed = true; try { ctrl?.error(err); } catch { /* already errored */ } });
-    return new Response(stream, { status: 200, headers: { "Content-Type": "application/x-ndjson" } });
+      .then(() => {
+        // Do NOT close here — the EOF marker does that (it may arrive after
+        // this resolves; see above). Grace fallback so a lost EOF can't leak
+        // the stream forever: anything still open 15s after the command
+        // returned closes with whatever was delivered by then.
+        settleStreaming();
+        setTimeout(closeStream, 15_000);
+      })
+      .catch((err: unknown) => {
+        const msg = String(err);
+        const httpErr = parseProxyHttpError(msg);
+        // Backend answered non-2xx (rejected before any chunk): faithful status.
+        // Transport failure (connection refused / validation): 503 so callers
+        // treat it as retryable instead of a deterministic 4xx.
+        settle(httpErr
+          ? new Response(httpErr.body, { status: httpErr.status })
+          : new Response(JSON.stringify({ error: msg }), { status: 503 }));
+        closed = true;
+        // If a reader is already consuming (mid-stream death), surface there too.
+        try { ctrl?.error(err instanceof Error ? err : new Error(msg)); } catch { /* no reader */ }
+      });
+
+    return await settled;
   } catch (chanErr) {
     // Channel unavailable → legacy buffered proxy (still works, just not streamed).
     log.warn('[localFetchStream] Channel stream unavailable, buffering via proxy', { err: String(chanErr) });
@@ -210,7 +329,11 @@ export async function localFetchStream(
       const uint8 = new Uint8Array(bytes);
       return new Response(uint8, { status: 200, headers: { "Content-Type": "application/x-ndjson" } });
     } catch (err) {
-      return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
+      const msg = String(err);
+      const httpErr = parseProxyHttpError(msg);
+      return httpErr
+        ? new Response(httpErr.body, { status: httpErr.status })
+        : new Response(JSON.stringify({ error: msg }), { status: 503 });
     }
   }
 }
@@ -247,6 +370,11 @@ export async function backendCall<T = any>(
     whisper_status: { path: "/local-api/transcribe-status" },
     install_whisper: { path: "/local-api/install-whisper", method: "POST" },
     install_whisper_status: { path: "/local-api/install-whisper" },
+    // Bug B10: TTS install has no real dev-server backend (Piper pip + voice
+    // download run only in the packaged app). Mapped so the browser surface gets
+    // an honest "desktop-only" status instead of "Unknown backend command".
+    install_tts: { path: "/local-api/install-tts", method: "POST" },
+    install_tts_status: { path: "/local-api/install-tts" },
     transcribe: { path: "/local-api/transcribe", method: "POST" },
     execute_code: { path: "/local-api/execute-code", method: "POST" },
     file_read: { path: "/local-api/file-read", method: "POST" },
@@ -428,7 +556,12 @@ export async function downloadComfyFile(filename: string, subfolder: string = ''
     return
   }
 
-  // Tauri mode: fetch bytes through proxy, create blob URL
+  // Tauri mode: fetch the bytes through the proxy, then a NATIVE Save-As dialog.
+  // The old blob-URL + anchor-click pattern is UNRELIABLE in WebView2 — the
+  // webview navigates to the blob URL instead of saving it, so clicking Download
+  // did nothing (David 2026-06-12: "der download button geht nicht für video und
+  // image mcp"). save_binary_file_dialog writes the real bytes to the chosen path
+  // (same native dialog the chat file-artifact card uses, which works).
   const invoke = await getInvoke()
   try {
     const bytes = await invoke('proxy_localhost_stream', {
@@ -436,24 +569,29 @@ export async function downloadComfyFile(filename: string, subfolder: string = ''
       method: 'GET',
       body: null,
     }) as number[]
-    const blob = new Blob([new Uint8Array(bytes)])
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(blobUrl)
+    const ext = filename.includes('.') ? filename.split('.').pop()! : 'bin'
+    // Returns the chosen path, or null if the user cancelled — nothing to do then.
+    await invoke('save_binary_file_dialog', {
+      bytes,
+      defaultName: filename,
+      extension: ext,
+      extLabel: ext.toUpperCase(),
+    })
   } catch (err) {
     log.error('[downloadComfyFile] Failed', { err })
-    // Fallback: try direct link
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
+    // Last-resort fallback: blob-anchor (unreliable in WebView2, but better than
+    // a silent no-op if the native dialog command is somehow unavailable).
+    try {
+      const bytes = await invoke('proxy_localhost_stream', { url, method: 'GET', body: null }) as number[]
+      const blobUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)]))
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+    } catch { /* give up */ }
   }
 }
 
@@ -533,4 +671,90 @@ export async function checkGitInstalled(): Promise<GitStatus> {
   }
   const invoke = await getInvoke()
   return (await invoke('check_git_installed')) as GitStatus
+}
+
+// ── LAN / private-host detection + proxy registration (Bug A / GH #49) ──────
+//
+// A LAN OpenAI-compat endpoint (LM Studio / vLLM bound to 0.0.0.0 and reached
+// over the network as e.g. http://192.168.1.50:1234) cannot be fetched directly
+// from the Tauri webview: the CSP `connect-src` only whitelists localhost +
+// 127.0.0.1, and the backend doesn't send CORS headers for the tauri.localhost
+// origin. So those requests must go through the Rust proxy, exactly like
+// Ollama/ComfyUI. These helpers classify a host (proxy vs direct fetch) and
+// register the host with the proxy's allow-list (validate_proxy_url).
+
+/** Strip IPv6 brackets and lowercase. */
+function _canonHost(hostname: string): string {
+  return hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '')
+}
+
+/** localhost / loopback — always proxy-allowed, no registration needed. */
+export function isLoopbackHost(hostname: string): boolean {
+  const h = _canonHost(hostname)
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1'
+    || h === '0.0.0.0' || h.endsWith('.localhost')
+}
+
+/**
+ * True for localhost AND private/LAN addresses: RFC1918 (10/8, 172.16/12,
+ * 192.168/16), CGNAT/Tailscale (100.64/10), IPv6 ULA (fc00::/7) + link-local
+ * (fe80::/10), the common LAN DNS suffixes, and bare machine names (no dots).
+ *
+ * Deliberately NOT treated as LAN: IPv4 link-local 169.254/16. It is never a
+ * real LLM backend and 169.254.169.254 is the classic cloud-metadata SSRF
+ * target — the Rust proxy hard-blocks it regardless.
+ */
+export function isPrivateOrLanHost(hostname: string): boolean {
+  const h = _canonHost(hostname)
+  if (!h) return false
+  if (isLoopbackHost(h)) return true
+  if (/\.(local|lan|internal|intra|home|home\.arpa)$/.test(h)) return true
+  const v4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (v4) {
+    const a = +v4[1], b = +v4[2]
+    if (a > 255 || b > 255 || +v4[3] > 255 || +v4[4] > 255) return false
+    if (a === 169 && b === 254) return false        // link-local / metadata: not LAN
+    if (a === 10) return true                        // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12
+    if (a === 192 && b === 168) return true          // 192.168.0.0/16
+    if (a === 127) return true                       // loopback
+    if (a === 100 && b >= 64 && b <= 127) return true // 100.64.0.0/10 CGNAT (Tailscale)
+    return false                                     // public IPv4
+  }
+  if (h.includes(':')) {                             // IPv6 literal
+    if (/^f[cd]/.test(h)) return true                // fc00::/7 unique-local
+    if (/^fe[89ab]/.test(h)) return true             // fe80::/10 link-local
+    return false                                     // public IPv6
+  }
+  if (!h.includes('.')) return true                  // bare LAN machine name (nas, mypc)
+  return false                                       // FQDN → public/cloud
+}
+
+/** Lowercase hostname from a URL, or '' if unparseable. */
+export function hostnameOf(url: string): string {
+  try { return _canonHost(new URL(url).hostname) } catch { return '' }
+}
+
+// Hosts already registered with the proxy this session (avoid duplicate IPC).
+const _registeredProxyHosts = new Set<string>()
+
+/**
+ * Ensure the Rust proxy's allow-list contains this endpoint's host so
+ * `proxy_localhost` will forward to a user-configured LAN backend. No-op for
+ * loopback (already allowed), in browser dev mode (no Rust proxy), and for
+ * hosts already registered this session. Best-effort: a failure (e.g. an older
+ * build without the command) is swallowed — the direct-fetch fallback applies.
+ */
+export async function ensureProxyAllowsHost(baseUrl: string): Promise<void> {
+  if (!isTauri()) return
+  const host = hostnameOf(baseUrl)
+  if (!host || isLoopbackHost(host)) return
+  if (_registeredProxyHosts.has(host)) return
+  try {
+    const invoke = await getInvoke()
+    await invoke('register_openai_host', { host })
+    _registeredProxyHosts.add(host)
+  } catch (err) {
+    log.warn('[ensureProxyAllowsHost] proxy host registration failed', { host, err: String(err) })
+  }
 }

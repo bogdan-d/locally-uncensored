@@ -28,6 +28,16 @@ export interface Settings {
    * Default false (big models are unaffected). Manual knob, not auto-forced.
    */
   smallModelMode: boolean
+  /**
+   * Chat-Tools (v2.5.3, David 2026-06-11). When on (default), PLAIN chat can
+   * use a curated set of five tools — web_search, web_fetch, file_write,
+   * image_generate, video_generate — without the user flipping the full Agent
+   * toggle. A lightweight intent detector routes only tool-worthy messages
+   * through the agent executor with that restricted allow-list + a chat-style
+   * prompt; ordinary conversation stays on the plain path. Off = plain chat is
+   * pure text (the pre-v2.5.3 behaviour); the full Agent toggle still works.
+   */
+  chatToolsEnabled: boolean
   cavemanMode: CavemanMode
   searchProvider: SearchProvider
   braveApiKey: string
@@ -140,6 +150,18 @@ export interface Settings {
    * messages. The AI's avatar is always the LU monogram (not user-settable).
    */
   userAvatarDataUrl: string
+  // ── v9 (v2.5.3) — Model-Picker preferences ────────────────────────
+  // Saved via the in-tool-call model picker's save icon ("für nächste
+  // Prompts übernommen"). '' = nothing saved → the picker shows before the
+  // VRAM swap on the next generation. Video keeps two slots because the
+  // capability sets are disjoint: SVD/FramePack can't do T2V, Wan 1.3B
+  // can't do I2V — one shared slot would silently mismatch.
+  /** Preferred ComfyUI checkpoint for image generation ('' = ask). */
+  preferredImageModel: string
+  /** Preferred text-to-video model ('' = ask). */
+  preferredVideoT2VModel: string
+  /** Preferred image-to-video model ('' = ask). */
+  preferredVideoI2VModel: string
 }
 
 export interface Persona {

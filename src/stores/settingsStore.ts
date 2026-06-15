@@ -17,7 +17,11 @@ import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 // while preserving every existing user value — existing users get it OFF.
 // v8: added settings.userAvatarDataUrl (user profile picture, default ''),
 // backfilled by the same additive merge — existing users keep the default icon.
-const STORE_VERSION = 8
+// v9 (v2.5.3): added the model-picker preferences preferredImageModel /
+// preferredVideoT2VModel / preferredVideoI2VModel (all default '' = "ask
+// before the VRAM swap"). Same additive merge path — existing users simply
+// see the picker on their next generation.
+const STORE_VERSION = 9
 
 interface SettingsState {
   settings: Settings
@@ -26,6 +30,9 @@ interface SettingsState {
   _version: number
   updateSettings: (partial: Partial<Settings>) => void
   resetSettings: () => void
+  /** GitHub #59 — reset only the given settings keys to their defaults
+   *  (per-section reset; leaves everything else untouched). */
+  resetSettingsKeys: (keys: (keyof Settings)[]) => void
   addPersona: (persona: Persona) => void
   removePersona: (id: string) => void
   updatePersona: (id: string, partial: Partial<Persona>) => void
@@ -45,6 +52,18 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({ settings: { ...state.settings, ...partial } })),
 
       resetSettings: () => set((state) => ({ settings: { ...DEFAULT_SETTINGS, onboardingDone: state.settings.onboardingDone } })),
+
+      resetSettingsKeys: (keys) =>
+        set((state) => {
+          const next = { ...state.settings }
+          for (const k of keys) {
+            // onboardingDone is a lifecycle marker, not a preference — never
+            // reset it (same guard the full resetSettings applies).
+            if (k === 'onboardingDone') continue
+            ;(next as Record<string, unknown>)[k] = DEFAULT_SETTINGS[k]
+          }
+          return { settings: next }
+        }),
 
       addPersona: (persona) =>
         set((state) => ({ personas: [...state.personas, persona] })),

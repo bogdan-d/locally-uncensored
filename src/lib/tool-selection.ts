@@ -15,7 +15,13 @@ interface ToolGroup {
 
 const TOOL_GROUPS: ToolGroup[] = [
   {
-    keywords: ['search', 'find online', 'look up', 'google', 'internet', 'news', 'latest', 'current'],
+    // Web search intents. German terms included (image group below has them
+    // too) — without them a German "such im internet nach…" never surfaced
+    // web_search and the model answered from stale training data instead.
+    keywords: ['search', 'find online', 'look up', 'google', 'bing', 'duckduckgo', 'internet',
+      'news', 'latest', 'current', 'web search', 'websearch', 'browse', 'website', 'webseite',
+      'url', 'http://', 'https://', 'weather', 'wetter',
+      'suche', 'such nach', 'such im', 'recherch', 'nachrichten', 'neueste', 'aktuell'],
     tools: ['web_search', 'web_fetch'],
   },
   {

@@ -4,6 +4,7 @@ import {
   recheckWhisperAvailable,
   recheckTtsAvailable,
   synthesizeNeural,
+  synthesizeExternal,
   playNeuralAudio,
   stopNeuralAudio,
   isSpeechSynthesisSupported,
@@ -34,6 +35,10 @@ export function useVoice() {
 
   // Reactive neural-TTS availability (Piper), same model as sttAvailable.
   const ttsAvailable = store.ttsAvailable;
+
+  // External HTTP TTS engine configured + selected (#58). Lets the read-aloud
+  // button light up even on a machine without Piper or browser voices.
+  const ttsExternalReady = store.ttsMode === "external" && !!store.externalTtsUrl.trim();
 
   // Re-probe Whisper on demand (mic mount / after install) and sync the store.
   const recheckStt = useCallback(async (): Promise<boolean> => {
@@ -140,11 +145,24 @@ export function useVoice() {
   const speakInternal = useCallback(
     async (text: string, streaming: boolean) => {
       if (!store.ttsEnabled) return;
-      if (!store.ttsAvailable && !ttsSupported) return;
+      // An external HTTP engine (#58) needs a configured URL; Piper needs to be
+      // installed; the browser path needs SpeechSynthesis. Bail only if none of
+      // the three can speak.
+      const externalReady = store.ttsMode === "external" && !!store.externalTtsUrl.trim();
+      if (!externalReady && !store.ttsAvailable && !ttsSupported) return;
 
       store.setSpeaking(true);
       try {
-        if (store.ttsAvailable) {
+        // External HTTP TTS engine takes precedence when selected + configured.
+        if (externalReady) {
+          try {
+            const url = await synthesizeExternal(text, store.externalTtsUrl.trim(), store.externalTtsVoice || undefined);
+            await playNeuralAudio(url);
+            return;
+          } catch (err) {
+            log.error("External TTS failed, falling back to browser voices", { err });
+          }
+        } else if (store.ttsAvailable) {
           try {
             const url = await synthesizeNeural(text, store.piperVoice);
             await playNeuralAudio(url);
@@ -190,6 +208,7 @@ export function useVoice() {
     sttSupported,
     ttsSupported,
     ttsAvailable,
+    ttsExternalReady,
     ttsEnabled: store.ttsEnabled,
     startRecording,
     stopRecording,

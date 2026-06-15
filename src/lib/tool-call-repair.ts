@@ -82,6 +82,22 @@ export function extractToolCallsFromContent(content: string): { name: string; ar
 }
 
 /**
+ * Does this text read as "the model wants to call a tool"? Used for the
+ * thought-only empty-reply case (live find 2026-06-11): gemma4, primed by
+ * remembered tool results, spends the whole turn reasoning "I need to use the
+ * web_search tool", emits zero content and stops — the REASONING is the only
+ * evidence of intent. Matches a structured call shape anywhere in the text or
+ * one of LU's builtin tool names used as an identifier.
+ */
+export function looksLikeToolIntent(text: string): boolean {
+  if (!text) return false
+  if (extractToolCallsFromContent(text).length > 0) return true
+  // name({...}) / name(query=…) call shapes, or an LU builtin named verbatim.
+  if (/\b[a-z][a-z0-9_]{2,}\s*\(\s*[{"']/.test(text)) return true
+  return /\b(web_search|web_fetch|image_generate|video_generate|file_read|file_write|file_list|file_search|shell_execute|system_info)\b/.test(text)
+}
+
+/**
  * Like extractToolCallsFromContent but also returns the `[startIdx, endIdx]`
  * range each tool-call occupies in `content`. Callers can use the ranges to
  * strip the raw JSON from the displayed content after extraction so the user

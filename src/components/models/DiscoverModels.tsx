@@ -173,6 +173,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   // diimmortalis described — empty list, no console output, looks like the
   // button did nothing.
   const [civitaiSearched, setCivitaiSearched] = useState(false)
+  // CivitAI mirror host (#53) — civitai.red for regions where .com is blocked.
+  const civitaiHost = useWorkflowStore((s) => s.civitaiHost)
+  const setCivitaiHost = useWorkflowStore((s) => s.setCivitaiHost)
   const [loading, setLoading] = useState(false)
   const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
   const [subTab, setSubTab] = useState<'uncensored' | 'mainstream'>('uncensored')
@@ -406,7 +409,8 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // finder. The model search and the workflow finder share the same backend
     // credential, so plumbing a separate input here would just confuse users.
     const apiKey = useWorkflowStore.getState().civitaiApiKey || undefined
-    const results = await searchCivitaiModels(civitaiQuery, 'Checkpoint', apiKey)
+    const host = useWorkflowStore.getState().civitaiHost
+    const results = await searchCivitaiModels(civitaiQuery, 'Checkpoint', apiKey, host)
     setCivitaiResults(results)
     setCivitaiSearching(false)
   }
@@ -821,7 +825,30 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       {/* CivitAI Search (Image & Video) */}
       {(isImage || isVideo) && (
         <GlassCard className="p-4 space-y-3">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Search CivitAI</h3>
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Search CivitAI</h3>
+            {/* Mirror toggle (#53) — civitai.red for regions where .com is blocked. */}
+            <div className="flex items-center gap-1 text-[10px]">
+              <span className="text-gray-400 dark:text-gray-500 mr-0.5">mirror</span>
+              {(['civitai.com', 'civitai.red'] as const).map((h) => (
+                <button
+                  key={h}
+                  onClick={() => setCivitaiHost(h)}
+                  title={h === 'civitai.red'
+                    ? 'Use the civitai.red mirror — for regions where civitai.com is blocked'
+                    : 'Use civitai.com (default)'}
+                  className={
+                    'px-1.5 py-0.5 rounded font-mono transition-colors ' +
+                    (civitaiHost === h
+                      ? 'bg-gray-200 dark:bg-white/15 text-gray-900 dark:text-white'
+                      : 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-200')
+                  }
+                >
+                  {h.replace('civitai', '')}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex gap-2 w-1/2 mx-auto">
             <input
               value={civitaiQuery}

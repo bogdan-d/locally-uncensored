@@ -6,13 +6,14 @@ interface Props {
 }
 
 export function SpeakerButton({ text }: Props) {
-  const { isSpeaking, ttsSupported, ttsAvailable, ttsEnabled, speakTextStreaming, stopSpeaking } = useVoice()
+  const { isSpeaking, ttsSupported, ttsAvailable, ttsExternalReady, ttsEnabled, speakTextStreaming, stopSpeaking } = useVoice()
 
   // Show the read-aloud button only when the feature is on AND some TTS engine
-  // is usable (local neural Piper, or the browser's system voices as fallback).
-  // Availability is reactive: the boot probe (App.tsx) and the Settings install
-  // both push it into the store, so this lights up without a per-message probe.
-  if (!ttsEnabled || (!ttsAvailable && !ttsSupported)) return null
+  // is usable: an external HTTP engine (#58), local neural Piper, or the
+  // browser's system voices as fallback. Availability is reactive: the boot
+  // probe (App.tsx) and the Settings install both push it into the store, so
+  // this lights up without a per-message probe.
+  if (!ttsEnabled || (!ttsExternalReady && !ttsAvailable && !ttsSupported)) return null
 
   const handleClick = () => {
     if (isSpeaking) {

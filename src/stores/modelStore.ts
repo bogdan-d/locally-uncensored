@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { AIModel, PullProgress, ModelCategory } from '../types/models'
 import { unloadModel } from '../api/ollama'
+import { unloadLmStudioModel } from '../api/lmstudio'
+import { isLmStudioProvider } from '../lib/hf-to-provider'
 import { isTauri } from '../api/backend'
 import { log } from '../lib/logger'
 
@@ -59,9 +61,31 @@ export const useModelStore = create<ModelState>()(
 
       setActiveModel: (name) => {
         const prev = get().activeModel
+        const prevModel = prev ? get().models.find((m) => m.name === prev) : undefined
         set({ activeModel: name })
-        if (prev && prev !== name && !prev.includes('::')) {
-          unloadModel(prev).catch((e) => log.warn('[modelStore] failed to unload previous model', { model: prev, err: e }))
+        if (!prev || prev === name) return
+        // Exactly ONE local model stays in VRAM at a time (David 2026-06-12:
+        // "darf niemals 2 gleichzeitig geladen sein, außer man macht Compare").
+        // Compare uses its own store + provider calls, NOT setActiveModel, so it
+        // is unaffected. Unload the PREVIOUS local model via the right provider.
+        //   - Ollama (no provider prefix)  → unloadModel
+        //   - LM Studio (openai:: + LM-Studio providerName) → unloadLmStudioModel
+        //   - Cloud (anthropic:: / OpenRouter / OpenAI etc.) → no local VRAM, skip
+        // The old `!prev.includes('::')` guard skipped LM Studio entirely, so
+        // switching AWAY from an LM Studio model left it loaded → two models in
+        // VRAM at once. (David live find.)
+        const prevIsLms = isLmStudioProvider(
+          (prevModel && 'providerName' in prevModel && prevModel.providerName) as string | undefined,
+        )
+        if (prevIsLms) {
+          const bareKey = prev.replace(/^[^:]+::/, '') // strip LU's routing prefix
+          unloadLmStudioModel(bareKey).catch((e) =>
+            log.warn('[modelStore] failed to unload previous LM Studio model', { model: prev, err: e }),
+          )
+        } else if (!prev.includes('::')) {
+          unloadModel(prev).catch((e) =>
+            log.warn('[modelStore] failed to unload previous model', { model: prev, err: e }),
+          )
         }
       },
 

@@ -318,6 +318,14 @@ export const COMPONENT_REGISTRY: Record<string, ComponentRequirements> = {
     clip: { patterns: ['umt5', 'wan'], downloadName: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders' },
     needsSeparateVAE: true, needsSeparateCLIP: true,
   },
+  wan22: {
+    loader: 'UNETLoader',
+    // Wan 2.2 5B uses its OWN VAE (higher compression than 2.1). Prefer the 2.2 file;
+    // 'wan' fallback covers a 2.1 VAE only as a last resort. CLIP is the shared UMT5.
+    vae: { patterns: ['wan2.2', 'wan2_2'], downloadName: 'wan2.2_vae.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors', subfolder: 'vae' },
+    clip: { patterns: ['umt5', 'wan'], downloadName: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders' },
+    needsSeparateVAE: true, needsSeparateCLIP: true,
+  },
   hunyuan: {
     loader: 'UNETLoader',
     vae: { patterns: ['hunyuanvideo', 'hunyuan'], downloadName: 'hunyuanvideo15_vae_fp16.safetensors', downloadUrl: 'https://huggingface.co/Comfy-Org/HunyuanVideo_1.5_repackaged/resolve/main/split_files/vae/hunyuanvideo15_vae_fp16.safetensors', subfolder: 'vae' },
@@ -1333,6 +1341,42 @@ export function getVideoBundles(): ModelBundle[] {
       ],
     },
     {
+      name: 'Wan 2.2 — TI2V 5B (Image + Text to Video)',
+      description: 'Wan 2.2 TI2V-5B — ONE model for both text-to-video and faithful image-to-video (the clip opens on your source image). Native 1280×704 @ 24 fps, smooth 2–7 s clips. The best-quality video model that fits 12 GB.',
+      tags: ['Wan 2.2', '720p', 'I2V', 'T2V', 'Quality'],
+      uncensored: true,
+      verified: true,
+      i2v: true,
+      hot: true,
+      totalSizeGB: 16.9,
+      vramRequired: '12+ GB',
+      workflow: 'wan22',
+      url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged',
+      files: [
+        {
+          name: 'Wan 2.2 TI2V 5B Model (FP16)',
+          description: 'The unified text + image-to-video model.',
+          pulls: '', tags: ['Model', '~9.3 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_ti2v_5B_fp16.safetensors',
+          filename: 'wan2.2_ti2v_5B_fp16.safetensors', subfolder: 'diffusion_models', sizeGB: 9.3,
+        },
+        {
+          name: 'Wan 2.2 VAE',
+          description: 'Required video encoder/decoder — the 2.2 VAE (NOT the 2.1 VAE: higher compression, different latent shape).',
+          pulls: '', tags: ['VAE', '~1.3 GB'], updated: 'New',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan2.2_vae.safetensors',
+          filename: 'wan2.2_vae.safetensors', subfolder: 'vae', sizeGB: 1.3,
+        },
+        {
+          name: 'Wan CLIP (UMT5-XXL FP8)',
+          description: 'Required text encoder — shared with Wan 2.1, so it is skipped if already installed.',
+          pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.3,
+        },
+      ],
+    },
+    {
       name: 'HunyuanVideo 1.5 T2V FP8 (High Quality)',
       description: 'Tencent HunyuanVideo 1.5 — excellent temporal consistency and visual quality. 480p text-to-video with CFG distillation.',
       tags: ['HunyuanVideo 1.5', '480p', 'Quality'],
@@ -1705,10 +1749,25 @@ export interface CivitAIModelResult {
   sourceUrl: string
 }
 
+export const CIVITAI_DEFAULT_HOST = 'civitai.com'
+
+/**
+ * Rewrite a civitai.com absolute URL to the chosen mirror host (GitHub #53).
+ * The CivitAI API returns absolute civitai.com download/source URLs even when
+ * it is queried through a mirror, so without this the actual file download
+ * still hits the blocked origin for users on civitai.red. No-op on the default
+ * host. Exported + pure for unit tests.
+ */
+export function civitaiHostSwap(url: string | undefined, host: string): string | undefined {
+  if (!url || !host || host === CIVITAI_DEFAULT_HOST) return url
+  return url.replace(/^(https?:\/\/)civitai\.com/i, `$1${host}`)
+}
+
 export async function searchCivitaiModels(
   query: string,
   type: 'Checkpoint' | 'LORA' | 'VAE' | 'TextualInversion' = 'Checkpoint',
-  apiKey?: string
+  apiKey?: string,
+  host: string = CIVITAI_DEFAULT_HOST
 ): Promise<CivitAIModelResult[]> {
   try {
     const params = new URLSearchParams({
@@ -1724,7 +1783,7 @@ export async function searchCivitaiModels(
     })
     // Adding the user's API key as a bearer token unlocks the full catalog and
     // lifts the per-IP rate limit. Falls back to anon access if no key is set.
-    const url = `https://civitai.com/api/v1/models?${params}${apiKey ? `&token=${encodeURIComponent(apiKey)}` : ''}`
+    const url = `https://${host}/api/v1/models?${params}${apiKey ? `&token=${encodeURIComponent(apiKey)}` : ''}`
     const text = await fetchExternal(url)
     const data = JSON.parse(text)
     const items: any[] = data.items ?? []
@@ -1761,13 +1820,13 @@ export async function searchCivitaiModels(
         description: descParts.join(' — '),
         type: type,
         thumbnailUrl: thumb,
-        downloadUrl,
+        downloadUrl: civitaiHostSwap(downloadUrl, host),
         filename,
         subfolder,
         sizeGB: sizeKB > 0 ? Math.round(sizeKB / 1024 / 1024 * 10) / 10 : undefined,
         stats: item.stats ? { downloads: item.stats.downloadCount || 0, likes: item.stats.thumbsUpCount || 0 } : undefined,
         creator: item.creator?.username,
-        sourceUrl: `https://civitai.com/models/${item.id}`,
+        sourceUrl: `https://${host}/models/${item.id}`,
       }
     })
   } catch (err) {

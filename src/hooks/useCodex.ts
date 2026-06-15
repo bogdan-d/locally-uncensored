@@ -10,11 +10,13 @@ import { usePermissionStore } from '../stores/permissionStore'
 import { getToolCallingStrategy } from '../lib/model-compatibility'
 import { buildHermesToolPrompt, buildHermesToolResult, parseHermesToolCalls, stripToolCallTags, hasToolCallTags } from '../api/hermes-tool-calling'
 import { chatNonStreaming } from '../api/agents'
-import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace } from '../api/agent-context'
+import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace, setActiveAgentModel } from '../api/agent-context'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { loadLurules, renderRulesSection, type RulesReader } from '../lib/lurules'
-import { backendCall } from '../api/backend'
+import { parseAgentCommand } from '../lib/agent-commands'
+import { useGenerationStore } from '../stores/generationStore'
+import { backendCall, isOllamaLocal } from '../api/backend'
 import { planWithArchitect, renderArchitectPlanSection } from '../api/agents/architect'
 import { fetchRepoMap, renderRepoMapSection } from '../api/agents/repo-map'
 import { isLocalModelByName } from '../api/agents/model-locality'
@@ -35,7 +37,7 @@ import { extractToolCallsWithRanges, stripRanges } from '../lib/tool-call-repair
 import { selectRelevantTools, selectRelevantToolsAsync } from '../lib/tool-selection'
 import { generateEmbeddings } from '../api/rag'
 import { truncateToolResult } from '../lib/truncate-tool-result'
-import { compactMessages, getModelMaxTokens } from '../lib/context-compaction'
+import { compactMessages, getModelMaxTokens, estimateTokens } from '../lib/context-compaction'
 import { useMemoryStore } from '../stores/memoryStore'
 import { extractMemoriesFromPair } from './useMemory'
 import type { OllamaChatMessage } from '../types/agent-mode'
@@ -57,7 +59,7 @@ const CODEX_REVIEW_SYSTEM_PROMPT = `You are the Coding Agent in REVIEW MODE — 
 
 REVIEW MODE CONTRACT (binding):
 - You MAY call: file_read, file_list, file_search, git_status, git_log, git_diff, system_info, process_list, get_current_time, web_fetch, web_search.
-- You MUST NOT call: file_write, shell_execute, code_execute, run_tests, git_commit, git_push, gh_pr_create, image_generate, run_workflow, screenshot, delegate_task. If you call them, the harness will reject the call and tell the model "review-only mode" — wasted budget.
+- You MUST NOT call: file_write, shell_execute, code_execute, run_tests, git_commit, git_push, gh_pr_create, image_generate, video_generate, run_workflow, screenshot, delegate_task. If you call them, the harness will reject the call and tell the model "review-only mode" — wasted budget.
 - Output format: a markdown report with sections "## Summary", "## Findings (priority order)", "## Suggested follow-ups". For each finding cite the file + line range (path:line or path:start-end).
 - Be direct. No flattery, no boilerplate. If the code is fine, say so in one sentence and stop.`
 
@@ -85,6 +87,7 @@ Rules:
 - Chain tool calls: after each tool result, if there is another step left, IMMEDIATELY call the next tool
 - If a command fails, diagnose and retry with a different approach — don't hand back to the user unless truly stuck
 - Be concise in text. All the work happens in tool calls.
+- Asset generation: when the task needs an image or a short video (placeholder art, hero image, demo clip), call image_generate / video_generate as a real tool call — ComfyUI runs locally. To animate a generated image, call video_generate with inputImage set to that image's filename.
 - FINISH with a short natural-language sentence summarising what you did or found. NEVER end your turn with only a raw JSON object or a bare code block — the user needs a human-readable answer, not a data dump.`
 
 // Small-Model Mode (Knob 2): a lean Codex prompt (~500 chars vs ~1700 above)
@@ -108,8 +111,11 @@ Rules:
 // without a code duplicate. Kept under the same name to minimise diff.
 const streamWithTools = streamOllamaChatWithTools
 
-// Coding-relevant tool categories
-const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web'] as const
+// Coding-relevant tool categories. image/video joined in v2.5.3 (David:
+// "Video generation auf simplen Prompt in Code und Agentmode") — they only
+// surface when the keyword router sees a creative intent in the prompt, so
+// pure coding turns keep the same lean tool list as before.
+const CODEX_CATEGORIES = ['filesystem', 'terminal', 'system', 'web', 'image', 'video'] as const
 
 // Tools blocked in Code-Review Mode (B13). The agent goes read-only —
 // it inspects the codebase and writes inline comments, but never
@@ -130,6 +136,7 @@ const REVIEW_MODE_FORBIDDEN_TOOLS = new Set([
   'gh_pr_create',
   'run_tests',
   'image_generate',
+  'video_generate',
   'run_workflow',
   // Parity with uselu's review blocklist — a reviewer must not capture the
   // screen or hand work off to a sub-agent that could mutate state.
@@ -180,9 +187,20 @@ export function useCodex() {
   const abortRef = useRef<AbortController | null>(null)
   const runningRef = useRef(false)
 
-  const sendInstruction = useCallback(async (instruction: string) => {
+  const sendInstruction = useCallback(async (rawInstruction: string, opts?: { displayContent?: string }) => {
     const { activeModel } = useModelStore.getState()
     if (!activeModel) return
+
+    // Coding-Agent slash commands (David 2026-06-12): "/review", "/commit",
+    // "/test", … live HERE, in the Code view — its full file_*/shell/git tools
+    // + working directory are exactly what these templates drive. Expand the
+    // command to the full instruction the model acts on; the raw "/cmd args" is
+    // shown as the user's message (displayContent). A non-command input passes
+    // through unchanged. (They were briefly wired into the normal chat — David
+    // moved them here, where they belong.)
+    const slash = parseAgentCommand(rawInstruction)
+    const instruction = slash ? slash.expanded : rawInstruction
+    const displayInstruction = slash ? rawInstruction : opts?.displayContent
 
     const store = useChatStore.getState()
     const codexStore = useCodexStore.getState()
@@ -239,14 +257,19 @@ export function useCodex() {
       id: uuid(), type: 'instruction', content: instruction, timestamp: Date.now(),
     })
 
-    // Add user message to chat store
+    // Add user message to chat store. For a slash command the UI shows the raw
+    // "/cmd args" (displayContent) while the model receives the expansion.
     useChatStore.getState().addMessage(convId, {
       id: uuid(), role: 'user', content: instruction, timestamp: Date.now(),
+      ...(displayInstruction ? { displayContent: displayInstruction } : {}),
     })
 
-    // Add empty assistant message
+    // Add empty assistant message. For a slash command, tag it so CodexView
+    // wraps the whole step transcript in a collapsible tool-call-style window
+    // (default collapsed; live-streams while running) — David 2026-06-12.
     const assistantMsg = {
       id: uuid(), role: 'assistant' as const, content: '', thinking: '', timestamp: Date.now(), agentBlocks: [],
+      ...(slash ? { slashCommand: slash.command.name } : {}),
     }
     useChatStore.getState().addMessage(convId, assistantMsg)
     let thinkingContent = ''
@@ -270,6 +293,17 @@ export function useCodex() {
       ? getToolCallingStrategy(activeModel)
       : 'native'
     const modelToUse = activeModel.includes('::') ? activeModel.split('::')[1] : activeModel
+
+    // Pin the text model driving this Codex run — parity with useAgentChat.
+    // The VRAM hand-off orchestrator (image/video generation in Code mode,
+    // v2.5.3) prefers this pin to pick its evict-then-reload target; without
+    // it the live-state fallback still evicts, but the pin guarantees the
+    // reload hits exactly the model this thread is using. Cleared in finally.
+    setActiveAgentModel({
+      name: modelToUse,
+      providerId,
+      remote: providerId === 'ollama' ? !isOllamaLocal() : false,
+    })
 
     // Build permissions — auto-approve reads, confirm writes
     const permissions = usePermissionStore.getState().getEffectivePermissions(convId)
@@ -394,6 +428,10 @@ export function useCodex() {
     runningRef.current = true
     setIsRunning(true)
     codexStore.setThreadStatus(convId, 'running')
+    // Bind the generating flag to THIS conversation so the typing indicator +
+    // realtime counter show only in the coding chat that's actually running,
+    // not in every chat the user switches to (David 2026-06-12). Cleared below.
+    useGenerationStore.getState().setGenerating(convId, true)
 
     // Architect / RepoMap pre-pass (B8 + B9). Both inject into the
     // system prompt BEFORE the first iteration and surface a visible
@@ -590,11 +628,12 @@ export function useCodex() {
 
         if (strategy === 'native') {
           const lastUserMsg = messages.filter(m => m.role === 'user').pop()?.content || ''
-          // CODEX_CATEGORIES filter: Codex is a CODING agent — image_generate,
-          // screenshot, process_list, run_workflow are distractions that pollute
-          // the tool list for small/3B models. Filter the registry by category
-          // BEFORE keyword routing so the model only ever sees filesystem,
-          // terminal, system, and web tools.
+          // CODEX_CATEGORIES filter: Codex is a CODING agent — screenshot,
+          // run_workflow etc. are distractions that pollute the tool list for
+          // small/3B models. Filter the registry by category BEFORE keyword
+          // routing. image/video are in the set since v2.5.3, but the keyword
+          // router below only surfaces them on creative intents, so plain
+          // coding turns keep the lean list.
           const codexToolsAll = toolRegistry.getAll().filter(
             (t) => (CODEX_CATEGORIES as readonly string[]).includes(t.category),
           )
@@ -662,6 +701,23 @@ export function useCodex() {
               if (echoRetriesRemaining > 0 && isSystemPromptEcho(c)) return
               useChatStore.getState().updateMessageContent(convId!, assistantMsg.id, fullContent ? fullContent + '\n\n' + c : c)
             }
+            // Token counter (David 2026-06-12): reflect the REAL prompt size —
+            // system prompt + tool defs + repo map + history — immediately, not a
+            // char/4 guess of just the visible messages. Provisional estimate that
+            // the model's exact count overwrites below; only (re)set while no real
+            // count has landed yet, so a real value is never downgraded.
+            {
+              const existingUsage = useChatStore.getState().conversations
+                .find((c) => c.id === convId)?.messages.find((m) => m.id === assistantMsg.id)?.usage
+              if (!existingUsage || existingUsage.estimated) {
+                const estPrompt =
+                  estimateTokens(messages.map((m) => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))).join('\n')) +
+                  estimateTokens(JSON.stringify(tools))
+                useChatStore.getState().updateMessageUsage(convId!, assistantMsg.id, {
+                  promptTokens: estPrompt, completionTokens: 0, totalTokens: estPrompt, estimated: true,
+                })
+              }
+            }
             try {
               void diagLog('streamWithTools-enter', { iter: i, messagesLen: messages.length, toolsCount: tools.length, thinking: chatOptions.thinking })
               turn = await streamWithTools(
@@ -706,6 +762,7 @@ export function useCodex() {
                 promptTokens: turn.promptEvalCount || 0,
                 completionTokens: turn.evalCount || 0,
                 totalTokens: (turn.promptEvalCount || 0) + (turn.evalCount || 0),
+                estimated: false,
               })
             }
             void diagLog('streamWithTools-return', {
@@ -902,7 +959,15 @@ export function useCodex() {
           // NOT match — only "verify the (correct) path/file/location" does.
           const asksForInfo = /\b(please provide|could you (?:please )?(?:provide|share|tell|give|specify|verify|confirm|clarify)|what(?:'s| is) the (?:path|file|name|location)|which file|can you (?:provide|share|specify|tell)|provide (?:the|me) (?:the )?(?:path|file|details|more)|(?:verify|confirm|clarify) (?:the )?(?:correct |right |exact |full )?(?:path|file ?path|location|directory|filename|file name)|need (?:the|more) (?:path|info|details|context))\b/i.test(turnContent)
           const emptyTurn = turnContent.trim().length === 0
-          if ((stalledNarration || asksForInfo || emptyTurn) && continueNudgesRemaining > 0) {
+          // Only nudge an empty turn when NOTHING has been produced yet (a true
+          // early stall). An empty turn AFTER a real answer means the model is
+          // finished — break immediately instead of spinning slow no-op nudge
+          // iterations that keep the typing dots up long after the answer is
+          // done (David 2026-06-12: "die punkte bleiben so lange obwohl keine
+          // antwort mehr kam"). Read-only report commands (/review, /explain …)
+          // legitimately end on a text answer + an empty follow-up turn.
+          const nudgeWorthy = stalledNarration || asksForInfo || (emptyTurn && !fullContent.trim())
+          if (nudgeWorthy && continueNudgesRemaining > 0) {
             continueNudgesRemaining--
             void diagLog('continue-nudge', { iter: i, remaining: continueNudgesRemaining, turnContentLen: turnContent.length })
             messages.push({
@@ -1033,14 +1098,27 @@ export function useCodex() {
           // (David 2026-06-04). For those, set the JS race ceiling just ABOVE
           // the tool's own timeout so the backend always wins; everything else
           // keeps the original 60s guard.
+          //
+          // Same bug class hit the generation tools when they joined Codex in
+          // v2.5.3 (live E2E 2026-06-10: five video_generate attempts all died
+          // at "timed out (60s)" mid-VRAM-handoff). image/video generation has
+          // its own settings-driven deadline (imageGen/videoGenTimeoutMinutes,
+          // enforced in vram-handoff's poll) — set the JS ceiling above it so
+          // the generation pipeline's own timeout always wins, exactly like
+          // the shell tools.
           const longRunning =
             name === 'shell_execute' || name === 'code_execute' ||
             name === 'shell_execute_background' || name === 'run_tests' ||
             name === 'git_commit' || name === 'git_push'
           const own = Number(args?.timeout)
-          const capMs = longRunning
-            ? (Number.isFinite(own) && own > 0 ? own + 15000 : 615000)
-            : 60000
+          const capMs =
+            name === 'image_generate'
+              ? (Math.max(1, Number(settings.imageGenTimeoutMinutes) || 20) * 60_000 + 120_000)
+              : name === 'video_generate'
+                ? (Math.max(1, Number(settings.videoGenTimeoutMinutes) || 60) * 60_000 + 120_000)
+                : longRunning
+                  ? (Number.isFinite(own) && own > 0 ? own + 15000 : 615000)
+                  : 60000
           return Promise.race([
             toolRegistry.execute(name, args),
             new Promise<string>((_, reject) =>
@@ -1336,6 +1414,7 @@ export function useCodex() {
       }
 
       setIsRunning(false)
+      useGenerationStore.getState().setGenerating(convId, false)
       runningRef.current = false
       abortRef.current = null
       clearActiveChatId()

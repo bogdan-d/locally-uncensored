@@ -11,6 +11,9 @@ interface WorkflowState {
   modelNameAssignments: Record<string, string>
   // CivitAI API key for downloads
   civitaiApiKey: string
+  // CivitAI host — civitai.com by default; swappable to a mirror like
+  // civitai.red for regions where civitai.com is blocked (GitHub #53).
+  civitaiHost: string
 
   installWorkflow: (wf: WorkflowTemplate) => void
   removeWorkflow: (id: string) => void
@@ -20,6 +23,7 @@ interface WorkflowState {
   unassignModelName: (modelName: string) => void
   getWorkflowForModel: (modelName: string, modelType: ModelType) => WorkflowTemplate | null
   setCivitaiApiKey: (key: string) => void
+  setCivitaiHost: (host: string) => void
 }
 
 export const useWorkflowStore = create<WorkflowState>()(
@@ -29,6 +33,7 @@ export const useWorkflowStore = create<WorkflowState>()(
       modelTypeAssignments: {},
       modelNameAssignments: {},
       civitaiApiKey: '',
+      civitaiHost: 'civitai.com',
 
       installWorkflow: (wf) => set((s) => ({
         installedWorkflows: [wf, ...s.installedWorkflows.filter(w => w.id !== wf.id)],
@@ -72,6 +77,11 @@ export const useWorkflowStore = create<WorkflowState>()(
       }),
 
       setCivitaiApiKey: (key) => set({ civitaiApiKey: key }),
+
+      // Accept "civitai.red", "https://civitai.red/", etc. — store the bare
+      // host. Empty falls back to the canonical civitai.com (#53).
+      setCivitaiHost: (host) =>
+        set({ civitaiHost: (host || 'civitai.com').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '') || 'civitai.com' }),
 
       getWorkflowForModel: (modelName, modelType) => {
         const state = get()

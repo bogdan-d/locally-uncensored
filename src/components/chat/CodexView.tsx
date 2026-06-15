@@ -1,6 +1,7 @@
 import { useCodex } from '../../hooks/useCodex'
 import { useCodexStore } from '../../stores/codexStore'
 import { useChatStore } from '../../stores/chatStore'
+import { useGenerationStore } from '../../stores/generationStore'
 import { ChatInput } from './ChatInput'
 import { ToolCallBlock } from './ToolCallBlock'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -14,7 +15,8 @@ import { TypingIndicator } from './TypingIndicator'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
 import { StagedChangesPanel } from './StagedChangesPanel'
-import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder } from 'lucide-react'
+import { SlashStepsBlock } from './SlashStepsBlock'
+import { User, Code, Eye, GitBranch, Download, RefreshCw, RotateCcw, Folder, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { checkGitInstalled, openExternal, type GitStatus } from '../../api/backend'
 import { extractToolCallsWithRanges, stripRanges } from '../../lib/tool-call-repair'
@@ -74,6 +76,39 @@ function stripChannelTags(text: string): string {
 // chatty small model can't stack the same line. (The old CollapsibleAnswer
 // one-line-preview component was removed.)
 
+// One-time hint that "/" opens the coding commands (David 2026-06-12: "kleiner
+// hinweis über dem prompt fenster … nur im coding bereich … mit x zum wegdrücken,
+// soll nur einmal erscheinen"). Persisted in localStorage so it never returns
+// after dismissal. Code-view only — it's rendered solely inside CodexView.
+const SLASH_HINT_KEY = 'lu-coding-slash-hint-dismissed'
+function CodingCommandsHint() {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return localStorage.getItem(SLASH_HINT_KEY) === '1' } catch { return false }
+  })
+  if (dismissed) return null
+  // Outer matches the ChatInput container (max-w-[70%] mx-auto) so the inner
+  // w-[60%] is 60 % of the REAL prompt width, centered (David 2026-06-12: "60%
+  // so breit wie das prompt fenster, in der mitte"). Monochrome — no colour, no
+  // icon — and an English UI string (David 2026-06-12: "in deutsch? … farbe weg
+  // … emoji weg").
+  return (
+    <div className="w-full max-w-[70%] mx-auto px-3 pt-1 flex justify-center">
+      <div className="w-[60%] flex items-center gap-1.5 px-2 py-1 rounded-md border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.03]">
+        <span className="flex-1 text-center text-[0.55rem] text-gray-500 dark:text-gray-400 leading-tight">
+          New — type <span className="font-mono px-1 rounded bg-gray-200/70 dark:bg-white/10">/</span> for coding commands: /review, /commit, /test, /fix …
+        </span>
+        <button
+          onClick={() => { try { localStorage.setItem(SLASH_HINT_KEY, '1') } catch { /* private mode — just hide it for this session */ } setDismissed(true) }}
+          title="Dismiss"
+          className="flex items-center justify-center w-4 h-4 rounded text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors shrink-0"
+        >
+          <X size={11} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function CodexView() {
   const { sendInstruction, stopCodex, isRunning } = useCodex()
   const activeConversationId = useChatStore((s) => s.activeConversationId)
@@ -84,8 +119,31 @@ export function CodexView() {
   const conversation = conversations.find(c => c.id === activeConversationId)
   const messages = conversation?.messages || []
 
+  // Per-conversation generating flag (David 2026-06-12): the typing indicator
+  // + realtime counter + a message's live-stream state must follow the coding
+  // chat that's ACTUALLY running — not every chat the user switches to. The
+  // hook's `isRunning` is global (kept for the input, which guards shared stream
+  // refs); the visual bits below read this conversation-scoped flag instead.
+  const generatingMap = useGenerationStore((s) => s.generating)
+  const codexGenerating = !!activeConversationId && !!generatingMap[activeConversationId]
+
+  // Smart auto-scroll (David 2026-06-12: "kann nicht scrollen, bin locked, jumpt
+  // zurück auf ganz unten"). A scroll listener records whether the user is at the
+  // bottom; we only auto-pin when they are — so scrolling UP to read earlier
+  // output is never yanked back down, even when a chunky tool-call block streams
+  // in. Mirrors the normal chat's useAutoScroll, which already behaves this way.
+  const shouldAutoScroll = useRef(true)
   useEffect(() => {
-    if (scrollRef.current) {
+    const el = scrollRef.current
+    if (!el) return
+    const onScroll = () => {
+      shouldAutoScroll.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
+    }
+    el.addEventListener('scroll', onScroll)
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
+  useEffect(() => {
+    if (shouldAutoScroll.current && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages, thread?.events])
@@ -224,7 +282,10 @@ export function CodexView() {
           ) : (
             <div className="py-1">
               {messages.filter(msg => !msg.hidden).map((msg) => {
-                const cleanContent = msg.content ? stripChannelTags(msg.content) : ''
+                // Slash commands: the user typed "/review", but msg.content holds
+                // the expanded instruction the model ran on — show displayContent.
+                const rawForDisplay = msg.role === 'user' ? (msg.displayContent || msg.content) : msg.content
+                const cleanContent = rawForDisplay ? stripChannelTags(rawForDisplay) : ''
                 return (
                   <div
                     key={msg.id}
@@ -247,130 +308,197 @@ export function CodexView() {
                       {msg.role === 'assistant' && msg.thinking && (
                         <ThinkingBlock
                           thinking={msg.thinking}
-                          streaming={isRunning && msg.id === messages[messages.length - 1]?.id && !cleanContent.trim()}
+                          streaming={codexGenerating && msg.id === messages[messages.length - 1]?.id && !cleanContent.trim()}
                         />
                       )}
-                      {/* Reflection blocks (Architect plan, RepoMap
-                          context, etc.) — rendered above the tool calls
-                          in chronological order so the user can see what
-                          context primed the editor model before it
-                          started fetching tools. */}
-                      {msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0 && (
-                        <div className="space-y-1">
-                          {msg.agentBlocks
-                            .filter((b) => b.phase === 'reflection' && b.content)
-                            .map((block) => (
-                              <div
-                                key={block.id}
-                                className="px-2 py-1.5 rounded border border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] text-[0.7rem] text-gray-700 dark:text-gray-300"
-                              >
-                                <MarkdownRenderer content={block.content} />
-                              </div>
-                            ))}
-                        </div>
-                      )}
-                      {/* Interleaved blocks (Codex 2026-05) — when the
-                          assistant turn produced per-iteration 'answer'
-                          blocks, render tool_call + answer blocks in
-                          chronological order so commentary sits BETWEEN tool
-                          calls instead of all text bunching at the bottom.
-                          Falls back to the legacy split (tool-calls only,
-                          full text below) for older chats that have only
-                          tool_call blocks. */}
-                      {msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0
-                        ? (() => {
-                            const hasAnswerBlock = msg.agentBlocks!.some(
-                              (b) => b.phase === 'answer' && b.content.trim(),
-                            )
-                            if (hasAnswerBlock) {
-                              // Interleave tool_call + answer blocks strictly by
-                              // timestamp so the transcript reads tool → answer →
-                              // tool → tool → answer … in the real order the
-                              // model produced them — provider/LLM-agnostic
-                              // (David 2026-06-02 r2). Drop answer blocks that
-                              // strip to empty so they can't be the "latest".
-                              const ordered = [...msg.agentBlocks!]
-                                .filter(
-                                  (b) =>
-                                    (b.phase === 'tool_call' && b.toolCall) ||
-                                    (b.phase === 'answer' && stripChannelTags(b.content)),
-                                )
-                                .sort((a, b) => a.timestamp - b.timestamp)
-                              return (
-                                <div className="space-y-1">
-                                  {ordered.map((block, idx) => {
-                                    if (block.phase === 'tool_call' && block.toolCall) {
-                                      return <ToolCallBlock key={block.id} toolCall={block.toolCall} />
-                                    }
-                                    if (block.phase === 'answer') {
-                                      const answer = stripChannelTags(block.content)
-                                      if (!answer) return null
-                                      // Render EVERY answer normally + always
-                                      // visible (David 2026-06-04: "kein Collapse,
-                                      // ganz normal wie eine Antwort"). Skip only a
-                                      // verbatim repeat of the previous answer so
-                                      // chatty small models don't stack duplicates.
-                                      const prev = ordered
-                                        .slice(0, idx)
-                                        .reverse()
-                                        .find((b) => b.phase === 'answer' && stripChannelTags(b.content))
-                                      if (prev && stripChannelTags(prev.content) === answer) return null
-                                      return (
-                                        <div key={block.id} className="px-1 py-0.5">
-                                          <div className="text-[0.75rem] leading-relaxed">
-                                            <MarkdownRenderer content={answer} />
+                      {(() => {
+                        const running = codexGenerating && msg.id === messages[messages.length - 1]?.id
+                        const hasBlocks = !!(msg.role === 'assistant' && msg.agentBlocks && msg.agentBlocks.length > 0)
+                        const stepCount = msg.agentBlocks?.filter((b) => b.phase === 'tool_call' && b.toolCall).length ?? 0
+                        const hasAnswerBlock = !!(msg.agentBlocks && msg.agentBlocks.some((b) => b.phase === 'answer' && b.content.trim()))
+
+                        // Reflection blocks (Architect plan, RepoMap context) —
+                        // shown above the tool calls so the user sees what context
+                        // primed the editor model before it started fetching tools.
+                        const reflection = hasBlocks ? (
+                          <div className="space-y-1">
+                            {msg.agentBlocks!
+                              .filter((b) => b.phase === 'reflection' && b.content)
+                              .map((block) => (
+                                <div
+                                  key={block.id}
+                                  className="px-2 py-1.5 rounded border border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] text-[0.7rem] text-gray-700 dark:text-gray-300"
+                                >
+                                  <MarkdownRenderer content={block.content} />
+                                </div>
+                              ))}
+                          </div>
+                        ) : null
+
+                        // Interleaved tool_call + answer blocks (Codex 2026-05) so
+                        // commentary sits BETWEEN tool calls, else the legacy
+                        // tool-only split. Identical logic to before — just hoisted
+                        // into a value so a slash run can wrap it in the window.
+                        const transcript = !hasBlocks
+                          ? null
+                          : hasAnswerBlock
+                            ? (() => {
+                                // Interleave strictly by timestamp: tool → answer →
+                                // tool → tool → answer … in the real order produced
+                                // (provider/LLM-agnostic, David 2026-06-02 r2). Drop
+                                // answer blocks that strip to empty.
+                                const ordered = [...msg.agentBlocks!]
+                                  .filter(
+                                    (b) =>
+                                      (b.phase === 'tool_call' && b.toolCall) ||
+                                      (b.phase === 'answer' && stripChannelTags(b.content)),
+                                  )
+                                  .sort((a, b) => a.timestamp - b.timestamp)
+                                return (
+                                  <div className="space-y-1">
+                                    {ordered.map((block, idx) => {
+                                      if (block.phase === 'tool_call' && block.toolCall) {
+                                        return <ToolCallBlock key={block.id} toolCall={block.toolCall} />
+                                      }
+                                      if (block.phase === 'answer') {
+                                        const answer = stripChannelTags(block.content)
+                                        if (!answer) return null
+                                        // Render EVERY answer normally + visible
+                                        // (David 2026-06-04: "kein Collapse, ganz
+                                        // normal wie eine Antwort"). Skip only a
+                                        // verbatim repeat of the previous answer.
+                                        const prev = ordered
+                                          .slice(0, idx)
+                                          .reverse()
+                                          .find((b) => b.phase === 'answer' && stripChannelTags(b.content))
+                                        if (prev && stripChannelTags(prev.content) === answer) return null
+                                        return (
+                                          <div key={block.id} className="px-1 py-0.5">
+                                            <div className="text-[0.75rem] leading-relaxed">
+                                              <MarkdownRenderer content={answer} />
+                                            </div>
                                           </div>
-                                        </div>
-                                      )
-                                    }
-                                    return null
-                                  })}
+                                        )
+                                      }
+                                      return null
+                                    })}
+                                  </div>
+                                )
+                              })()
+                            : (
+                                <div className="space-y-0">
+                                  {msg.agentBlocks!
+                                    .filter((b) => b.phase === 'tool_call' && b.toolCall)
+                                    .map((block) => (
+                                      <ToolCallBlock key={block.id} toolCall={block.toolCall!} />
+                                    ))}
                                 </div>
                               )
-                            }
-                            return (
-                              <div className="space-y-0">
-                                {msg.agentBlocks!
-                                  .filter((b) => b.phase === 'tool_call' && b.toolCall)
-                                  .map((block) => (
-                                    <ToolCallBlock key={block.id} toolCall={block.toolCall!} />
-                                  ))}
-                              </div>
-                            )
-                          })()
-                        : null}
 
-                      {/* Text content — user bubble always; assistant only
-                          when there are no per-iteration answer blocks (the
-                          interleave path above already rendered them inline).
-                          Assistant drops the bubble entirely to match the
-                          regular Chat view; user keeps theirs as the
-                          right-aligned anchor. */}
-                      {cleanContent && (msg.role === 'user' ||
-                        !(msg.agentBlocks && msg.agentBlocks.some((b) => b.phase === 'answer' && b.content.trim()))) && (
-                        <div className={
-                          msg.role === 'user'
-                            ? 'rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
-                            : 'px-1 py-0.5'
-                        }>
-                          <div className="text-[0.75rem] leading-relaxed">
-                            {msg.role === 'user' ? (
-                              <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{cleanContent}</p>
-                            ) : (
-                              <MarkdownRenderer content={cleanContent} />
-                            )}
+                        // Text content — user bubble always; assistant only when
+                        // there are no per-iteration answer blocks (interleave
+                        // already rendered those). Assistant drops the bubble to
+                        // match the regular Chat view; user keeps the right anchor.
+                        const textContent = cleanContent && (msg.role === 'user' || !hasAnswerBlock) ? (
+                          <div className={
+                            msg.role === 'user'
+                              ? 'rounded-lg px-2.5 py-1.5 bg-gray-100 dark:bg-white/[0.06] border border-gray-200 dark:border-white/[0.08]'
+                              : 'px-1 py-0.5'
+                          }>
+                            <div className="text-[0.75rem] leading-relaxed">
+                              {msg.role === 'user' ? (
+                                <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{cleanContent}</p>
+                              ) : (
+                                <MarkdownRenderer content={cleanContent} />
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        ) : null
+
+                        // Slash command (David 2026-06-12): the STEPS (tool calls +
+                        // intermediate commentary) go in the collapsible window;
+                        // the FINAL answer renders OUTSIDE it, normal + readable —
+                        // "die finale antwort soll nicht im tool call sein, nur die
+                        // letzte". Same block shape for Ollama + LM Studio, so this
+                        // is backend-agnostic. The final answer = the last 'answer'
+                        // block, or msg.content when the model never emitted one.
+                        if (msg.role === 'assistant' && msg.slashCommand) {
+                          const blocks = msg.agentBlocks || []
+                          const answerBlocks = blocks
+                            .filter((b) => b.phase === 'answer' && stripChannelTags(b.content))
+                            .sort((a, b) => a.timestamp - b.timestamp)
+                          const finalAnswerBlock = answerBlocks[answerBlocks.length - 1]
+                          const finalAnswerText = finalAnswerBlock
+                            ? stripChannelTags(finalAnswerBlock.content)
+                            : (!hasAnswerBlock && cleanContent ? cleanContent : '')
+                          // Steps = tool calls + every answer EXCEPT the final one.
+                          const stepsOrdered = [...blocks]
+                            .filter(
+                              (b) =>
+                                (b.phase === 'tool_call' && b.toolCall) ||
+                                (b.phase === 'answer' &&
+                                  stripChannelTags(b.content) &&
+                                  b.id !== finalAnswerBlock?.id),
+                            )
+                            .sort((a, b) => a.timestamp - b.timestamp)
+                          return (
+                            <>
+                              {(stepCount > 0 || running) && (
+                                <SlashStepsBlock command={msg.slashCommand} stepCount={stepCount} running={running}>
+                                  <div className="space-y-1">
+                                    {reflection}
+                                    <div className="space-y-1">
+                                      {stepsOrdered.map((block, idx) => {
+                                        if (block.phase === 'tool_call' && block.toolCall) {
+                                          return <ToolCallBlock key={block.id} toolCall={block.toolCall} />
+                                        }
+                                        const answer = stripChannelTags(block.content)
+                                        if (!answer) return null
+                                        const prev = stepsOrdered
+                                          .slice(0, idx)
+                                          .reverse()
+                                          .find((b) => b.phase === 'answer' && stripChannelTags(b.content))
+                                        if (prev && stripChannelTags(prev.content) === answer) return null
+                                        return (
+                                          <div key={block.id} className="px-1 py-0.5">
+                                            <div className="text-[0.75rem] leading-relaxed">
+                                              <MarkdownRenderer content={answer} />
+                                            </div>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  </div>
+                                </SlashStepsBlock>
+                              )}
+                              {finalAnswerText && (
+                                <div className="px-1 py-0.5">
+                                  <div className="text-[0.75rem] leading-relaxed">
+                                    <MarkdownRenderer content={finalAnswerText} />
+                                  </div>
+                                </div>
+                              )}
+                            </>
+                          )
+                        }
+
+                        return (
+                          <>
+                            {reflection}
+                            {transcript}
+                            {textContent}
+                          </>
+                        )
+                      })()}
                     </div>
                   </div>
                 )
               })}
-              {/* 3-dot indicator while Codex is mid-loop — parity with
-                  the Chat tab so users on long Gemma 4 / Codex runs
-                  see "still thinking" instead of staring at a frozen
-                  pane between iterations. */}
-              {isRunning && (
+              {/* 3-dot indicator while THIS coding chat is mid-loop. Bound to
+                  the per-conversation flag so switching to another (idle) chat
+                  doesn't show its dots — David 2026-06-12 ("die drei ladepunkte
+                  kommen in vorherigen chats auch"). */}
+              {codexGenerating && (
                 <TypingIndicator />
               )}
             </div>
@@ -378,13 +506,17 @@ export function CodexView() {
         </div>
 
         {/* Realtime counter */}
-        <RealtimeCounter isRunning={isRunning} />
+        <RealtimeCounter isRunning={codexGenerating} />
+
+        {/* One-time "/" hint, directly above the prompt (Code view only). */}
+        <CodingCommandsHint />
 
         {/* Input */}
         <ChatInput
           onSend={(content) => sendInstruction(content)}
           onStop={stopCodex}
           isGenerating={isRunning}
+          slashCommands
         />
       </div>
 

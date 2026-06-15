@@ -28,6 +28,32 @@ export function __setMemoryEmbedFn(fn?: MemoryEmbedFn): void {
 function embedText(m: Pick<MemoryFile, 'title' | 'content'>): string {
   return `${m.title}\n${m.content}`
 }
+
+// ── Injection options ──────────────────────────────────────────────
+export interface MemoryInjectOpts {
+  /**
+   * Drop memories that are raw TOOL RESULTS (extracted from agent sessions as
+   * "web_search result: web_search({...}) → …"). Injected into a PLAIN chat
+   * they read as worked tool-call examples and prime the model to attempt a
+   * tool call it was never offered — gemma4 then spends the whole turn in its
+   * thinking channel deciding to "use the web_search tool", emits zero
+   * content, and the user stares at a silent empty bubble (live find
+   * 2026-06-11, David's no-answer report). Agent chats keep them: there the
+   * tools actually exist.
+   */
+  excludeToolResults?: boolean
+}
+
+/**
+ * A memory whose content (or title) is a verbatim tool RESULT from an agent
+ * session. The extractor writes them in the stable shape
+ * "<tool_name> result: …" / title "<tool_name> result".
+ * Exported + pure for the unit tests.
+ */
+export function isToolResultMemory(m: Pick<MemoryFile, 'title' | 'content'>): boolean {
+  const probe = `${m.title || ''}\n${m.content || ''}`
+  return /\b[a-z][a-z0-9_]* result:/i.test(probe)
+}
 function hashContent(s: string): string {
   let h = 5381
   for (let i = 0; i < s.length; i++) h = (h * 33) ^ s.charCodeAt(i)
@@ -210,9 +236,9 @@ interface MemoryState {
 
   // Search & Inject
   searchMemories: (query: string, options?: { type?: MemoryType; limit?: number }) => MemoryFile[]
-  getMemoriesForPrompt: (query: string, contextTokens: number) => string
+  getMemoriesForPrompt: (query: string, contextTokens: number, opts?: MemoryInjectOpts) => string
   /** Embedding-first retrieval; falls back to getMemoriesForPrompt on any error. */
-  getMemoriesForPromptAsync: (query: string, contextTokens: number) => Promise<string>
+  getMemoriesForPromptAsync: (query: string, contextTokens: number, opts?: MemoryInjectOpts) => Promise<string>
 
   // Write-decision + embedding maintenance (Feature FF)
   applyWriteDecision: (decision: ResolutionDecision, ctx?: { newId?: string }) => void
@@ -383,7 +409,7 @@ export const useMemoryStore = create<MemoryState>()(
       // This is the OFFLINE-SAFE fallback path. It never touches Ollama or
       // IndexedDB. getMemoriesForPromptAsync below layers embedding-blended
       // ordering on top and degrades to exactly this output on any error.
-      getMemoriesForPrompt: (query, contextTokens) => {
+      getMemoriesForPrompt: (query, contextTokens, opts) => {
         const budget = effectiveMemoryBudget(contextTokens, get().settings.maxMemoriesOverride)
 
         // No budget for tiny models
@@ -391,6 +417,9 @@ export const useMemoryStore = create<MemoryState>()(
 
         const words = query.toLowerCase().split(/\s+/).filter(w => w.length > 2)
         let candidates = get().entries.filter(e => !isStale(e))
+        if (opts?.excludeToolResults) {
+          candidates = candidates.filter(e => !isToolResultMemory(e))
+        }
 
         // Filter by allowed types for this tier
         if (budget.typesAllowed !== 'all') {
@@ -417,8 +446,8 @@ export const useMemoryStore = create<MemoryState>()(
       // (Ollama unreachable, nomic missing, IDB absent, dim mismatch) falls
       // back to the keyword result. Offline correctness invariant: this never
       // returns empty/incorrect when the sync path would have returned text.
-      getMemoriesForPromptAsync: async (query, contextTokens) => {
-        const fallback = () => get().getMemoriesForPrompt(query, contextTokens)
+      getMemoriesForPromptAsync: async (query, contextTokens, opts) => {
+        const fallback = () => get().getMemoriesForPrompt(query, contextTokens, opts)
         try {
           const budget = effectiveMemoryBudget(contextTokens, get().settings.maxMemoriesOverride)
           // No-op cases (no budget, no candidates, empty query) must return
@@ -428,6 +457,9 @@ export const useMemoryStore = create<MemoryState>()(
           if (budget.budgetTokens === 0 || budget.maxMemories === 0) return fallback()
 
           let candidates = get().entries.filter(e => !isStale(e))
+          if (opts?.excludeToolResults) {
+            candidates = candidates.filter(e => !isToolResultMemory(e))
+          }
           if (budget.typesAllowed !== 'all') {
             candidates = candidates.filter(e => (budget.typesAllowed as MemoryType[]).includes(e.type))
           }

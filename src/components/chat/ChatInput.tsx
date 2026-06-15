@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion } from 'framer-motion'
-import { Send, Square, Paperclip, X, Brain } from 'lucide-react'
+import { Send, Square, Paperclip, X, Brain, Terminal } from 'lucide-react'
+import { matchAgentCommands, type AgentCommand } from '../../lib/agent-commands'
 import { VoiceButton } from './VoiceButton'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -17,6 +18,11 @@ interface Props {
   onApprove?: () => void
   onReject?: () => void
   disabled?: boolean
+  /**
+   * Enable the "/command" typeahead. Only the Coding Agent (Code view) sets this
+   * — slash commands belong there, not in the normal chat (David 2026-06-12).
+   */
+  slashCommands?: boolean
 }
 
 function fileToImageAttachment(file: File): Promise<ImageAttachment> {
@@ -32,11 +38,15 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
   })
 }
 
-export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject, disabled }: Props) {
+export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject, disabled, slashCommands }: Props) {
   const [input, setInput] = useState('')
   const [images, setImages] = useState<ImageAttachment[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [isVoiceRecording, setIsVoiceRecording] = useState(false)
+  // Slash-command autocomplete (v2.5.3). When the input is a lone "/token", show
+  // the matching agent commands; ↑/↓ to move, Enter/Tab to pick, Esc to dismiss.
+  const [cmdMenu, setCmdMenu] = useState<AgentCommand[]>([])
+  const [cmdIndex, setCmdIndex] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // Text already in the box when dictation started. Interim + final transcripts
@@ -88,10 +98,53 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
     onSend(trimmed || '(image)', images.length > 0 ? images : undefined)
     setInput('')
     setImages([])
+    setCmdMenu([])
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
   }
 
+  // Update the input + the slash-command typeahead together. The typeahead is
+  // Coding-Agent-only — in the normal chat (slashCommands unset) "/foo" is just
+  // text and no menu appears.
+  const updateInput = (value: string) => {
+    setInput(value)
+    const matches = slashCommands ? matchAgentCommands(value) : []
+    setCmdMenu(matches)
+    setCmdIndex(0)
+  }
+
+  // Fill the input with the chosen command (trailing space so args can follow)
+  // and dismiss the menu. The user then types any args and presses Enter.
+  const pickCommand = (cmd: AgentCommand) => {
+    setInput(`/${cmd.name} `)
+    setCmdMenu([])
+    setCmdIndex(0)
+    textareaRef.current?.focus()
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Slash-command menu navigation takes precedence while it's open.
+    if (cmdMenu.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setCmdIndex((i) => (i + 1) % cmdMenu.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setCmdIndex((i) => (i - 1 + cmdMenu.length) % cmdMenu.length)
+        return
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault()
+        pickCommand(cmdMenu[cmdIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setCmdMenu([])
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       if (isVoiceRecording || isTranscribing) return
@@ -141,7 +194,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           they belong to. ChatView owns the Enter/Esc keyboard layer. */}
 
       <div
-        className={`flex flex-col rounded-lg border px-2.5 py-1 transition-colors ${
+        className={`relative flex flex-col rounded-lg border px-2.5 py-1 transition-colors ${
           isDragOver
             ? 'bg-blue-500/5 border-blue-500/30'
             : 'bg-gray-50 dark:bg-white/[0.03] border-gray-200 dark:border-white/[0.06]'
@@ -150,6 +203,29 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        {/* Slash-command autocomplete — floats above the composer */}
+        {cmdMenu.length > 0 && (
+          <div className="absolute bottom-full left-0 right-0 mb-1.5 z-50 max-h-64 overflow-y-auto scrollbar-thin rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-[#1f1f1f] shadow-xl py-1">
+            <div className="px-2.5 py-1 flex items-center gap-1 text-[0.5rem] uppercase tracking-widest text-gray-400 dark:text-gray-600">
+              <Terminal size={9} /> Coding commands
+            </div>
+            {cmdMenu.map((cmd, i) => (
+              <button
+                key={cmd.name}
+                onMouseDown={(e) => { e.preventDefault(); pickCommand(cmd) }}
+                onMouseEnter={() => setCmdIndex(i)}
+                className={`w-full text-left px-2.5 py-1 flex items-baseline gap-2 transition-colors ${
+                  i === cmdIndex ? 'bg-gray-100 dark:bg-white/[0.07]' : 'hover:bg-gray-50 dark:hover:bg-white/[0.04]'
+                }`}
+              >
+                <span className="text-[0.72rem] font-medium text-gray-800 dark:text-gray-100 shrink-0">/{cmd.name}</span>
+                {cmd.argHint && <span className="text-[0.6rem] text-gray-400 dark:text-gray-500 shrink-0">{cmd.argHint}</span>}
+                <span className="text-[0.6rem] text-gray-500 dark:text-gray-400 truncate ml-auto">{cmd.summary}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Image previews */}
         {images.length > 0 && (
           <div className="flex gap-1.5 mb-1.5 flex-wrap">
@@ -210,8 +286,9 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => updateInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onBlur={() => setTimeout(() => setCmdMenu([]), 120)}
             onPaste={handlePaste}
             placeholder={disabled ? "Unavailable" : isDragOver ? "Drop images here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
             disabled={disabled}

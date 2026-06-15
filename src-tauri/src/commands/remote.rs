@@ -509,7 +509,9 @@ async fn handle_agent_tool(
                 .and_then(|v| v.as_u64())
                 .map(|n| n as usize);
             if query.is_empty() { Err("web_search needs a non-empty `query` argument.".into()) }
-            else { crate::commands::search::web_search(query, count, app_state).await }
+            // Remote clients carry no provider settings — None/None/None =
+            // 'auto' without keys, i.e. the free tiers (pre-2.5.3 behaviour).
+            else { crate::commands::search::web_search(query, count, None, None, None, app_state).await }
         }
         "web_fetch" => {
             let url = body.args.get("url").and_then(|v| v.as_str()).unwrap_or("").to_string();

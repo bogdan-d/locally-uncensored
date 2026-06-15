@@ -115,9 +115,25 @@ export const usePermissionStore = create<PermissionState>()(
           modeScope: 'agent',
         }),
     }),
-    { name: 'locally-uncensored-permissions' }
+    {
+      name: 'locally-uncensored-permissions',
+      version: 2,
+      migrate: migratePermissionState,
+    }
   )
 )
+
+/** v2 (v2.5.3): video generation went live — the category was 'blocked'
+ *  AND UI-locked since 2026-06-04, so a persisted 'blocked' can only be the
+ *  old default, never a user's choice (the toggle was disabled). Lift exactly
+ *  that value to the new default; everything else persists. Exported for
+ *  direct unit-testing (the persist internals aren't reachable in vitest). */
+export function migratePermissionState(persisted: any, version: number) {
+  if (version < 2 && persisted?.globalPermissions?.video === 'blocked') {
+    persisted.globalPermissions.video = DEFAULT_PERMISSIONS.video
+  }
+  return persisted
+}
 
 /**
  * Tool categories allowed by each mode scope (Phase 12). Keep these

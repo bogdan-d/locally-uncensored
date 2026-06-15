@@ -7,12 +7,13 @@ import { ToolCallBlock } from './ToolCallBlock'
 import { ReflectionBlock } from './ReflectionBlock'
 import { VramSwitchCard } from './VramSwitchCard'
 import { SpeakerButton } from './SpeakerButton'
+import { ChatArtifactCard } from './ChatArtifactCard'
 import type { Message } from '../../types/chat'
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { extractToolCallsFromContent } from '../../lib/tool-call-repair'
+import { extractToolCallsFromContent, looksLikeToolIntent } from '../../lib/tool-call-repair'
 import { isAgentCompatible } from '../../lib/model-compatibility'
 
 interface Props {
@@ -62,6 +63,19 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
     return isAgentCompatible(activeModel)
   }, [isUser, isAgentActive, activeConversationId, activeModel, message.content])
 
+  // Thought-only completion (live find 2026-06-11): the model reasoned —
+  // usually about calling a tool it doesn't have in a non-agent chat — and
+  // stopped without ONE visible token. useChat persisted the reasoning onto
+  // message.thinking; without this the bubble is silent dead air forever.
+  // The last bubble additionally needs usage (set by the done chunk) so the
+  // banner can't flash mid-stream while a visible thinking phase runs.
+  const thoughtOnly = !isUser && !(message.content || '').trim() && !!(message.thinking || '').trim()
+    && (!isLast || !!message.usage)
+  const thoughtOnlyToolIntent = useMemo(
+    () => thoughtOnly && !isAgentActive && looksLikeToolIntent(message.thinking || ''),
+    [thoughtOnly, isAgentActive, message.thinking],
+  )
+
   useEffect(() => {
     if (isEditing && editRef.current) {
       editRef.current.focus()
@@ -77,7 +91,8 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
   }
 
   const startEdit = () => {
-    setEditContent(message.content)
+    // Edit the short slash command, not its expanded instruction.
+    setEditContent(message.displayContent || message.content)
     setIsEditing(true)
   }
 
@@ -122,7 +137,7 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
         {/* Thinking block — auto-expands while this (last) turn is still
             producing so the reasoning streams LIVE, then collapses (David 2026-06-04). */}
         {!isUser && message.thinking && (
-          <ThinkingBlock thinking={message.thinking} streaming={!!isLast && !message.content?.trim()} />
+          <ThinkingBlock thinking={message.thinking} streaming={!!isLast && !message.content?.trim() && !message.usage} />
         )}
 
         {/* Agent Mode: render tool_call + reflection + answer blocks
@@ -229,7 +244,9 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
               </div>
             </div>
           ) : isUser ? (
-            <p className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{message.content}</p>
+            // Slash command: show the short "/commit" (displayContent), not the
+            // long expanded instruction held in content (which drives the model).
+            <p className="text-[0.78rem] leading-relaxed text-gray-800 dark:text-gray-200 whitespace-pre-wrap">{message.displayContent || message.content}</p>
           ) : (
             // Answer-blocks (when present) already rendered the per-iteration
             // text chronologically above; skip message.content here to avoid
@@ -243,6 +260,27 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
               return (
                 <div className="text-[0.78rem] leading-relaxed">
                   <MarkdownRenderer content={message.content} />
+                  {thoughtOnly && (
+                    thoughtOnlyToolIntent && activeModel && isAgentCompatible(activeModel) ? (
+                      <div className="mt-1 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 text-[0.65rem] text-amber-700 dark:text-amber-200">
+                        <Wrench size={11} className="mt-0.5 shrink-0" />
+                        <div className="flex-1">
+                          <p className="font-medium">The model spent its whole reply deciding to call a tool — but Agent Mode is off, so it never said anything.</p>
+                          <p className="opacity-80 mt-0.5">Turn Agent Mode on and ask again to let it actually run the tool (search the web, generate media, read files). Its reasoning is in the thinking block above.</p>
+                        </div>
+                        <button
+                          onClick={() => activeConversationId && toggleAgentMode(activeConversationId)}
+                          className="shrink-0 px-2 py-0.5 rounded border border-amber-400/40 hover:bg-amber-500/20 transition-colors font-medium"
+                        >
+                          Enable Agent
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-[0.65rem] italic text-gray-500 dark:text-gray-400">
+                        The model only produced internal reasoning and no answer — see the thinking block above, or rephrase and try again.
+                      </p>
+                    )
+                  )}
                   {suggestAgent && (
                     <div className="mt-2 flex items-start gap-2 px-2 py-1.5 rounded-md border border-amber-400/30 bg-amber-500/10 text-[0.65rem] text-amber-700 dark:text-amber-200">
                       <Wrench size={11} className="mt-0.5 shrink-0" />
@@ -264,6 +302,16 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
           )}
 
         </div>
+
+        {/* Chat-tools artifacts (David 2026-06-12): files the model "wrote" in
+            plain chat — rendered inline with preview + Download, never on disk. */}
+        {!isUser && message.artifacts && message.artifacts.length > 0 && (
+          <div className="space-y-1">
+            {message.artifacts.map((a) => (
+              <ChatArtifactCard key={a.id} artifact={a} />
+            ))}
+          </div>
+        )}
 
         {/* Action bar UNDER the message (David 2026-06-06: "eigene Leiste unter
             der Nachricht" instead of cramped hover-icons in the corner). Bigger

@@ -19,6 +19,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // Small-Model Mode (v2.5.0) — lean profile for 3B-8B local models.
   // Default OFF: big models behave exactly as before until the user flips it.
   smallModelMode: false,
+  // Chat-Tools (v2.5.3) — curated web/file/image/video tools in plain chat.
+  // Default ON so the capabilities "just work" without the Agent toggle; only
+  // tool-worthy messages route through the executor (see chat-tool-intent.ts).
+  chatToolsEnabled: true,
   cavemanMode: 'off',
   searchProvider: 'auto',
   braveApiKey: '',
@@ -58,6 +62,11 @@ export const DEFAULT_SETTINGS: Settings = {
   defaultWorkspace: null,
   // v8: user-uploaded profile picture (base64 data URL, ≤256px). '' = default icon.
   userAvatarDataUrl: '',
+  // v9: model-picker preferences (saved via the in-tool-call picker's save
+  // icon). '' = no saved choice → picker shows before the VRAM swap.
+  preferredImageModel: '',
+  preferredVideoT2VModel: '',
+  preferredVideoI2VModel: '',
 }
 
 /** Caveman mode system prompt prefixes — credit: github.com/JuliusBrussee/caveman (MIT) */

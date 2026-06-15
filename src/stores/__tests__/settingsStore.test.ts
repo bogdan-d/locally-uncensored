@@ -72,6 +72,46 @@ describe('settingsStore', () => {
     })
   })
 
+  // ── resetSettingsKeys (GitHub #59 per-section reset) ───────
+
+  describe('resetSettingsKeys', () => {
+    it('resets only the listed keys to defaults', () => {
+      useSettingsStore.getState().updateSettings({ temperature: 0.1, theme: 'light', apiEndpoint: 'http://10.0.0.5:1234' })
+      useSettingsStore.getState().resetSettingsKeys(['temperature', 'theme'])
+      const s = useSettingsStore.getState().settings
+      expect(s.temperature).toBe(DEFAULT_SETTINGS.temperature)
+      expect(s.theme).toBe(DEFAULT_SETTINGS.theme)
+      // Not in the list → untouched
+      expect(s.apiEndpoint).toBe('http://10.0.0.5:1234')
+    })
+
+    it('never resets onboardingDone even when listed', () => {
+      useSettingsStore.getState().updateSettings({ onboardingDone: true })
+      useSettingsStore.getState().resetSettingsKeys(['onboardingDone', 'temperature'])
+      expect(useSettingsStore.getState().settings.onboardingDone).toBe(true)
+    })
+
+    it('is a no-op for an empty key list', () => {
+      useSettingsStore.getState().updateSettings({ topK: 7 })
+      useSettingsStore.getState().resetSettingsKeys([])
+      expect(useSettingsStore.getState().settings.topK).toBe(7)
+    })
+
+    it('does not touch personas', () => {
+      useSettingsStore.getState().addPersona(makePersona('keep-me'))
+      useSettingsStore.getState().resetSettingsKeys(['temperature', 'searchProvider', 'braveApiKey'])
+      expect(useSettingsStore.getState().personas.find(p => p.id === 'keep-me')).toBeDefined()
+    })
+
+    it('resets array/object-valued keys by default value (gpuIndices, defaultWorkspace)', () => {
+      useSettingsStore.getState().updateSettings({ gpuIndices: [1, 2], defaultWorkspace: { path: 'C:/tmp', label: 'tmp' } as any })
+      useSettingsStore.getState().resetSettingsKeys(['gpuIndices', 'defaultWorkspace'])
+      const s = useSettingsStore.getState().settings
+      expect(s.gpuIndices).toEqual(DEFAULT_SETTINGS.gpuIndices)
+      expect(s.defaultWorkspace).toBe(DEFAULT_SETTINGS.defaultWorkspace)
+    })
+  })
+
   // ── addPersona ─────────────────────────────────────────────
 
   describe('addPersona', () => {

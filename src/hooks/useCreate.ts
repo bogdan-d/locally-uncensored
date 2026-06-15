@@ -242,10 +242,10 @@ export function useCreate() {
       mode, prompt, negativePrompt, imageModel, videoModel,
       sampler, scheduler, steps, cfgScale, width, height, seed, batchSize, frames, fps, denoise, i2iImage, i2vImage,
       // F2 + F3 (cinemazverev / vanja-san GH#4) — extended params surfaced
-      // in ParamPanel. selectedLora === '' / clipSkip === 0 / vae === 'auto'
+      // in ParamPanel. selectedLoras === [] / clipSkip === 0 / vae === 'auto'
       // are the "do nothing extra" defaults; the workflow builder skips
       // adding nodes for those values.
-      selectedLora, loraStrength, selectedVae, clipSkip,
+      selectedLoras, selectedVae, clipSkip,
       setIsGenerating, setProgress, setCurrentPromptId, setError, addToGallery, addToPromptHistory,
     } = state
 
@@ -291,7 +291,9 @@ export function useCreate() {
         ...(isI2I && i2iImage ? { inputImage: i2iImage, denoise } : {}),
         // F2/F3 — only thread the param when the user actually picked one.
         // Empty / 'auto' / 0 means "skip this node".
-        ...(selectedLora ? { lora: selectedLora, loraStrength } : {}),
+        ...(selectedLoras.length > 0
+          ? { lora: selectedLoras.map((l) => l.name), loraStrength: selectedLoras.map((l) => l.strength) }
+          : {}),
         ...(selectedVae && selectedVae !== 'auto' ? { vae: selectedVae } : {}),
         ...(clipSkip > 0 ? { clipSkip } : {}),
       }

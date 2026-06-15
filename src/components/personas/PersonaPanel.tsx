@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Pencil } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { PersonaCard } from './PersonaCard'
 import { SystemPromptEditor } from './SystemPromptEditor'
@@ -9,6 +9,9 @@ export function PersonaPanel() {
   const personasEnabled = useSettingsStore((s) => s.settings.personasEnabled)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const [showEditor, setShowEditor] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  const editingPersona = editingId ? personas.find((p) => p.id === editingId) : undefined
 
   return (
     <div className="w-full max-w-2xl">
@@ -60,17 +63,27 @@ export function PersonaPanel() {
               onClick={() => setActivePersona(persona.id)}
             />
             {!persona.isBuiltIn && (
-              <button
-                onClick={() => removePersona(persona.id)}
-                className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500/80 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Trash2 size={10} />
-              </button>
+              <div className="absolute -top-1 -right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  onClick={() => { setEditingId(persona.id); setShowEditor(false) }}
+                  title="Edit persona"
+                  className="w-5 h-5 rounded-full bg-gray-600/90 text-white flex items-center justify-center hover:bg-gray-500"
+                >
+                  <Pencil size={10} />
+                </button>
+                <button
+                  onClick={() => { removePersona(persona.id); if (editingId === persona.id) setEditingId(null) }}
+                  title="Delete persona"
+                  className="w-5 h-5 rounded-full bg-red-500/80 text-white flex items-center justify-center hover:bg-red-500"
+                >
+                  <Trash2 size={10} />
+                </button>
+              </div>
             )}
           </div>
         ))}
         <button
-          onClick={() => setShowEditor(!showEditor)}
+          onClick={() => { setShowEditor(!showEditor); setEditingId(null) }}
           className="flex flex-col items-center gap-2 p-4 rounded-xl bg-gray-50 dark:bg-white/[0.02] border border-gray-300 dark:border-white/10 hover:border-gray-400 dark:hover:border-white/15 transition-all cursor-pointer"
         >
           <div className="w-10 h-10 rounded-lg flex items-center justify-center bg-gray-100 dark:bg-white/5">
@@ -80,7 +93,19 @@ export function PersonaPanel() {
         </button>
       </div>
 
-      {showEditor && <SystemPromptEditor />}
+      {/* Edit mode (GitHub #55) takes precedence over create mode. The `key`
+          remounts the editor per persona so its seeded fields refresh. */}
+      {editingPersona ? (
+        <SystemPromptEditor
+          key={editingPersona.id}
+          editingId={editingPersona.id}
+          initialName={editingPersona.name}
+          initialPrompt={editingPersona.systemPrompt}
+          onDone={() => setEditingId(null)}
+        />
+      ) : showEditor ? (
+        <SystemPromptEditor onDone={() => setShowEditor(false)} />
+      ) : null}
     </div>
   )
 }

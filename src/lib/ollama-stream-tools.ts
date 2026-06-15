@@ -113,40 +113,60 @@ export async function streamOllamaChatWithTools(
     for (const line of lines) {
       const trimmed = line.trim()
       if (!trimmed) continue
+      // Parse and process are separated on purpose: the catch only covers the
+      // JSON.parse (partial lines are normal in a chunked stream), while a
+      // real `{"error":...}` line must THROW past it.
+      let j: any
       try {
-        const j = JSON.parse(trimmed)
-        if (j.message) {
-          if (j.message.content) {
-            content += j.message.content
-            onContent(content)
-          }
-          if (j.message.thinking) {
-            thinking += j.message.thinking
-            onThinking(thinking)
-          }
-          if (j.message.tool_calls && Array.isArray(j.message.tool_calls)) {
-            toolCalls = [
-              ...toolCalls,
-              ...j.message.tool_calls.map((tc: any) => ({
-                function: {
-                  name: tc.function.name,
-                  arguments: repairToolCallArgs(tc.function.arguments),
-                },
-              })),
-            ]
-          }
-        }
-        if (typeof j.prompt_eval_count === 'number') promptEvalCount = j.prompt_eval_count
-        if (typeof j.eval_count === 'number') evalCount = j.eval_count
+        j = JSON.parse(trimmed)
       } catch {
-        // partial JSON line — skip
+        continue // partial JSON line — skip
       }
+      // Ollama reports mid-stream failures (runner crash, OOM, context
+      // overflow on some builds) as an NDJSON line `{"error":"..."}` inside
+      // an HTTP-200 stream. Swallowing it produced an EMPTY turn — the agent
+      // loop then surfaced a bare "Agent error" with zero context (rikki
+      // Discord 2026-06-10). Throw so the caller's retry/classify logic runs.
+      if (typeof j.error === 'string' && j.error) {
+        throw new Error(`Ollama: ${j.error}`)
+      }
+      if (j.message) {
+        if (j.message.content) {
+          content += j.message.content
+          onContent(content)
+        }
+        if (j.message.thinking) {
+          thinking += j.message.thinking
+          onThinking(thinking)
+        }
+        if (j.message.tool_calls && Array.isArray(j.message.tool_calls)) {
+          toolCalls = [
+            ...toolCalls,
+            ...j.message.tool_calls.map((tc: any) => ({
+              function: {
+                name: tc.function.name,
+                arguments: repairToolCallArgs(tc.function.arguments),
+              },
+            })),
+          ]
+        }
+      }
+      if (typeof j.prompt_eval_count === 'number') promptEvalCount = j.prompt_eval_count
+      if (typeof j.eval_count === 'number') evalCount = j.eval_count
     }
   }
 
   if (buf.trim()) {
+    let j: any
     try {
-      const j = JSON.parse(buf.trim())
+      j = JSON.parse(buf.trim())
+    } catch {
+      j = null // ignore tail-buffer parse errors
+    }
+    if (j) {
+      if (typeof j.error === 'string' && j.error) {
+        throw new Error(`Ollama: ${j.error}`)
+      }
       if (j.message?.tool_calls && Array.isArray(j.message.tool_calls)) {
         toolCalls = [
           ...toolCalls,
@@ -168,8 +188,6 @@ export async function streamOllamaChatWithTools(
       }
       if (typeof j.prompt_eval_count === 'number') promptEvalCount = j.prompt_eval_count
       if (typeof j.eval_count === 'number') evalCount = j.eval_count
-    } catch {
-      // ignore tail-buffer parse errors
     }
   }
 

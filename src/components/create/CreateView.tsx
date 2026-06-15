@@ -285,6 +285,21 @@ export function CreateView() {
     }
   }, [connected])
 
+  // Flash-attention availability (David 2026-06-11): measured 4-5x faster
+  // WAN-class video sampling vs pytorch SDPA on a 12 GB 3060. The backend
+  // probes the SAME python that runs ComfyUI (cached, real import test) and
+  // start_comfyui auto-passes --use-flash-attention when present — this hint
+  // only nudges users who don't have it. One check per connect.
+  const [flashAttn, setFlashAttn] = useState<{ available: boolean; reason?: string } | null>(null)
+  useEffect(() => {
+    if (connected !== true || flashAttn !== null) return
+    let cancelled = false
+    backendCall('check_flash_attention')
+      .then((r: { available: boolean; reason?: string }) => { if (!cancelled) setFlashAttn(r) })
+      .catch(() => { /* probe unavailable — show nothing */ })
+    return () => { cancelled = true }
+  }, [connected, flashAttn])
+
   // Track when ComfyUI loading actually started (Bug B). Reset on connect.
   const isStartingNow = status?.starting || status?.processAlive
   useEffect(() => {
@@ -671,19 +686,19 @@ export function CreateView() {
             <div className="flex gap-0.5 p-0.5 bg-gray-100 dark:bg-white/5 rounded-lg">
               <button
                 onClick={() => setMode('image')}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 h-[24px] rounded-md text-[0.65rem] font-medium transition-all ${
                   mode === 'image' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
-                <Image size={12} /> Image
+                <Image size={11} /> Image
               </button>
               <button
                 onClick={() => setMode('video')}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 h-[24px] rounded-md text-[0.65rem] font-medium transition-all ${
                   mode === 'video' ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
-                <Video size={12} /> Video
+                <Video size={11} /> Video
               </button>
             </div>
 
@@ -710,10 +725,10 @@ export function CreateView() {
                 title={showParams ? 'Hide advanced settings' : 'Show advanced settings'}
                 aria-expanded={showParams}
                 aria-label="Toggle advanced settings"
-                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${showParams ? 'bg-gray-200 dark:bg-white/10 text-gray-800 dark:text-gray-200' : 'hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500'}`}
+                className={`flex items-center gap-1 px-2 h-[24px] rounded-md text-[0.65rem] font-medium transition-colors ${showParams ? 'bg-gray-200 dark:bg-white/10 text-gray-800 dark:text-gray-200' : 'hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500'}`}
               >
                 Advanced Settings
-                <ChevronDown size={14} className={`transition-transform ${showParams ? 'rotate-180' : ''}`} />
+                <ChevronDown size={13} className={`transition-transform ${showParams ? 'rotate-180' : ''}`} />
               </button>
             </div>
           </div>
@@ -756,13 +771,13 @@ export function CreateView() {
           {!showNoModelsEmptyState && connected === true && modelsLoaded && preflightReady !== null && (
             <>
               {preflightReady && preflightWarnings.length === 0 && (
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10 text-emerald-400 text-[10px]">
+                <div className="w-full max-w-[70%] mx-auto flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10 text-emerald-400 text-[10px]">
                   <CheckCircle2 size={11} />
                   Ready to generate
                 </div>
               )}
               {preflightReady && preflightWarnings.length > 0 && (
-                <div className="space-y-1">
+                <div className="w-full max-w-[70%] mx-auto space-y-1">
                   {preflightWarnings.map((w, i) => (
                     <div key={i} className="flex items-start gap-2 px-3 py-1.5 rounded-lg bg-yellow-500/5 border border-yellow-500/10 text-yellow-400 text-[10px]">
                       <AlertTriangle size={11} className="shrink-0 mt-0.5" />
@@ -772,7 +787,7 @@ export function CreateView() {
                 </div>
               )}
               {!preflightReady && preflightErrors.length > 0 && (
-                <div className="space-y-1">
+                <div className="w-full max-w-[70%] mx-auto space-y-1">
                   {preflightErrors.map((e, i) => (
                     <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-500/5 border border-red-500/10 text-red-400 text-[10px]">
                       <XCircle size={11} className="shrink-0" />
@@ -789,10 +804,28 @@ export function CreateView() {
 
           {/* Video info — suppressed when empty-state is showing (redundant) */}
           {!showNoModelsEmptyState && mode === 'video' && (videoBackend === 'none' || videoModels.length === 0) && connected === true && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/5 border border-yellow-500/10 text-yellow-400 text-[11px]">
+            <div className="w-full max-w-[70%] mx-auto flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/5 border border-yellow-500/10 text-yellow-400 text-[11px]">
               <AlertTriangle size={12} />
               No video models found
             </div>
+          )}
+
+          {/* Flash-attention nudge — deliberately colorless/minimal (David
+              2026-06-11). Only when the probe POSITIVELY said it's missing;
+              remote ComfyUI is excluded (we can't see that python). */}
+          {!showNoModelsEmptyState && mode === 'video' && connected === true && flashAttn?.available === false && flashAttn.reason !== 'remote' && (
+            <p className="w-full max-w-[70%] mx-auto px-1 text-[10px] leading-relaxed text-gray-500">
+              flash attention is not installed in ComfyUI's Python — video generation runs ~4× slower without it.{' '}
+              <a
+                href="https://huggingface.co/lldacing/flash-attention-windows-wheel"
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-gray-400"
+              >
+                prebuilt wheels
+              </a>
+              {' '}· pick the file matching your torch/CUDA/Python, pip install it into ComfyUI's Python, restart ComfyUI
+            </p>
           )}
 
           {/* I2V Image Upload — shown when SVD or FramePack model is selected */}
@@ -801,7 +834,7 @@ export function CreateView() {
               onDragOver={(e) => { e.preventDefault(); setI2vDragOver(true) }}
               onDragLeave={() => setI2vDragOver(false)}
               onDrop={handleI2vDrop}
-              className={`relative rounded-lg border-2 transition-colors ${
+              className={`relative w-full max-w-[70%] mx-auto rounded-lg border-2 transition-colors ${
                 i2vDragOver
                   ? 'border-blue-400 bg-blue-500/10'
                   : i2vImage
@@ -862,7 +895,7 @@ export function CreateView() {
 
           {/* I2I Image Upload + Denoise Slider — shown when Image sub-tab is "Image to Image" */}
           {!showNoModelsEmptyState && mode === 'image' && imageSubMode === 'img2img' && connected === true && (
-            <div className="space-y-2">
+            <div className="w-full max-w-[70%] mx-auto space-y-2">
               <div
                 onDragOver={(e) => { e.preventDefault(); setI2iDragOver(true) }}
                 onDragLeave={() => setI2iDragOver(false)}
@@ -946,9 +979,10 @@ export function CreateView() {
             </div>
           )}
 
-          {/* Output area */}
+          {/* Output area — slightly wider than the composer below it, both
+              centered like the chat column (David 2026-06-11) */}
           {!showNoModelsEmptyState && (
-            <div className="flex-1 min-h-0 rounded-xl border border-gray-200 dark:border-white/5 bg-gray-100 dark:bg-white/[0.03] overflow-hidden flex flex-col">
+            <div className="flex-1 min-h-0 w-full max-w-[80%] mx-auto rounded-xl border border-gray-200 dark:border-white/5 bg-gray-100 dark:bg-white/[0.03] overflow-hidden flex flex-col">
               <OutputDisplay />
               <Gallery />
             </div>
@@ -956,7 +990,7 @@ export function CreateView() {
 
           {/* Error */}
           {!showNoModelsEmptyState && error && (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/10 text-red-400 text-[11px]">
+            <div className="w-full max-w-[70%] mx-auto flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/10 text-red-400 text-[11px]">
               <AlertTriangle size={12} className="shrink-0" />
               <span className="truncate">{error}</span>
             </div>

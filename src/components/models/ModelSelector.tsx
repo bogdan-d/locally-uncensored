@@ -279,6 +279,31 @@ export function shouldAutoLoadForSelect(
   return isLms && !loaded.has(lmsIdOf(model))
 }
 
+/**
+ * Context window (tokens) to request when LU auto-loads an LM Studio model.
+ *
+ * `lms load` WITHOUT `-c` pins the instance at LM Studio's small default
+ * (4096 on current builds). That silently breaks tool use: the chat-tools
+ * system prompt + the 5 curated tool schemas — let alone the full agent
+ * catalog — overflow 4K, and LM Studio answers /v1/chat/completions with a
+ * context-overflow error that surfaces as the opaque "LM Studio: Request
+ * failed", with NO retry (it's a 4xx). Proven live 2026-06-12: gemma-3-4b
+ * @4096 failed every chat-tools / agent turn; the identical turn @16384
+ * worked first try. So we always request a usable window — capped by the
+ * model's real max so we never ask for more than it supports (an 8K model
+ * stays 8K). 16K is enough for the tool schemas + a real conversation while
+ * keeping the KV-cache VRAM modest for the small local models LU targets.
+ */
+export const LMS_AUTOLOAD_CONTEXT = 16384
+
+export function lmsAutoLoadContext(model: AIModel): number {
+  const max =
+    'contextLength' in model && typeof model.contextLength === 'number' && model.contextLength > 0
+      ? model.contextLength
+      : LMS_AUTOLOAD_CONTEXT
+  return Math.min(max, LMS_AUTOLOAD_CONTEXT)
+}
+
 // ── Load toggle (On / Off) ────────────────────────────────────
 //
 // Per-row VRAM load indicator + control for LOCAL models (Ollama AND
@@ -341,25 +366,27 @@ export function ModelSelector() {
   const [togglingOllama, setTogglingOllama] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Refresh LM Studio loaded-models snapshot whenever the dropdown
-  // opens. Cheap — single HTTP call. We don't poll while the dropdown
-  // is open because the user is about to click something anyway and
-  // staleness is at most a few seconds.
+  // Keep the per-row On/Off LOAD state LIVE while the dropdown is open
+  // (David 2026-06-12: "on und offload button sehr delayed und nicht immer
+  // akkurat — gemma4b ist geladen laut ollama aber in LU steht off"). The old
+  // code fetched the loaded set ONCE on open, so a model that loaded after the
+  // open — or a slow/transiently-failed first fetch — showed the wrong state
+  // until the user reopened. Now: fetch immediately, then poll /api/ps + LM
+  // Studio every 1.5 s so the toggle self-corrects within a beat. Both calls are
+  // cheap loopback requests; we only poll while the panel is actually open.
   useEffect(() => {
     if (!open) return
     setSelectError(null) // fresh open — drop any stale auto-load error
     let cancelled = false
-    void listLoadedLmStudioModels().then((list) => {
-      if (cancelled) return
-      setLmsLoaded(new Set(list))
-    })
-    // Ollama loaded set (/api/ps) — drives the on/off load toggle on Ollama rows.
-    void listRunningModels().then((list) => {
-      if (cancelled) return
-      setOllamaLoaded(new Set(list))
-    }).catch(() => { /* Ollama unreachable → no Ollama toggles, fine */ })
+    const refresh = () => {
+      void listLoadedLmStudioModels().then((list) => { if (!cancelled) setLmsLoaded(new Set(list)) }).catch(() => {})
+      void listRunningModels().then((list) => { if (!cancelled) setOllamaLoaded(new Set(list)) }).catch(() => {})
+    }
+    refresh()
+    const id = setInterval(refresh, 1500)
     return () => {
       cancelled = true
+      clearInterval(id)
     }
   }, [open])
 
@@ -382,7 +409,7 @@ export function ModelSelector() {
       if (lmsLoaded.has(id)) {
         await unloadLmStudioModel(id)
       } else {
-        await loadLmStudioModel(id)
+        await loadLmStudioModel(id, lmsAutoLoadContext(model))
       }
       const list = await listLoadedLmStudioModels()
       setLmsLoaded(new Set(list))
@@ -439,7 +466,7 @@ export function ModelSelector() {
       setSelectError(null)
       setSelectingLms(id)
       try {
-        await loadLmStudioModel(id)
+        await loadLmStudioModel(id, lmsAutoLoadContext(model))
         // Confirm it actually loaded before we route chat at it.
         const list = await listLoadedLmStudioModels()
         const loaded = new Set(list)

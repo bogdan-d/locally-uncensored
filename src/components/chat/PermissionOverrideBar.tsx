@@ -4,11 +4,10 @@ import type { ToolCategory } from '../../api/mcp/types'
 import { useImageToolNoti } from '../../hooks/useImageToolNoti'
 import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, Film, GitBranch, Lock } from 'lucide-react'
 
-// Image generation is LIVE (chat agent → ComfyUI). Video generation is turned
-// OFF for now (David 2026-06-04): it stays in the menu but greyed-out,
-// struck-through and not clickable via the LOCKED set, and `video` defaults to
-// 'blocked' in DEFAULT_PERMISSIONS so the tool is never offered to the model.
-const LOCKED: Set<ToolCategory> = new Set(['video'])
+// Image AND video generation are LIVE (chat agent → ComfyUI; video unlocked
+// in v2.5.3 — T2V via Wan/Hunyuan/AnimateDiff, I2V via SVD/FramePack). The
+// LOCKED set stays as the mechanism for future not-yet-shipped categories.
+const LOCKED: Set<ToolCategory> = new Set()
 
 const CATEGORIES: { key: ToolCategory; icon: typeof Globe; label: string }[] = [
   { key: 'web', icon: Globe, label: 'Web' },

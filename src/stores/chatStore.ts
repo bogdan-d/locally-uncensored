@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { v4 as uuid } from 'uuid'
-import type { Conversation, Message } from '../types/chat'
+import type { Conversation, Message, ChatArtifact } from '../types/chat'
 import type { AgentBlock } from '../types/agent-mode'
 import { idbStorage } from '../lib/idbStorage'
 import { migrateBlockInPlace } from '../api/agents/block-helpers'
@@ -42,8 +42,9 @@ interface ChatState {
   insertMessageBefore: (conversationId: string, beforeId: string, message: Message) => void
   updateMessageContent: (conversationId: string, messageId: string, content: string) => void
   updateMessageThinking: (conversationId: string, messageId: string, thinking: string) => void
-  updateMessageUsage: (conversationId: string, messageId: string, usage: { promptTokens: number; completionTokens: number; totalTokens: number }) => void
+  updateMessageUsage: (conversationId: string, messageId: string, usage: { promptTokens: number; completionTokens: number; totalTokens: number; estimated?: boolean }) => void
   updateMessageAgentBlocks: (conversationId: string, messageId: string, blocks: AgentBlock[]) => void
+  updateMessageArtifacts: (conversationId: string, messageId: string, artifacts: ChatArtifact[]) => void
   deleteMessagesAfter: (conversationId: string, messageId: string) => void
   getActiveConversation: () => Conversation | undefined
   searchConversations: (query: string) => Conversation[]
@@ -189,6 +190,19 @@ export const useChatStore = create<ChatState>()(
               ? {
                 ...c,
                 messages: c.messages.map((m) => (m.id === messageId ? { ...m, agentBlocks } : m)),
+                updatedAt: Date.now(),
+              }
+              : c
+          ),
+        })),
+
+      updateMessageArtifacts: (conversationId, messageId, artifacts) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === conversationId
+              ? {
+                ...c,
+                messages: c.messages.map((m) => (m.id === messageId ? { ...m, artifacts } : m)),
                 updatedAt: Date.now(),
               }
               : c

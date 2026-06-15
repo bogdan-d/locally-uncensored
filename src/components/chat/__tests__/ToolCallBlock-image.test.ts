@@ -11,7 +11,7 @@
  * Run: npx vitest run src/components/chat/__tests__/ToolCallBlock-image.test.ts
  */
 import { describe, it, expect, afterEach } from 'vitest'
-import { comfyViewUrlFromResult, isInlineVideoUrl } from '../ToolCallBlock'
+import { comfyViewUrlFromResult, isInlineVideoUrl, comfyViewParams } from '../ToolCallBlock'
 import { setComfyHost, getComfyHost } from '../../../api/backend'
 
 describe('comfyViewUrlFromResult', () => {
@@ -128,5 +128,30 @@ describe('isInlineVideoUrl', () => {
   })
   it('detects a .mp4 on the relative /comfyui/view proxy path', () => {
     expect(isInlineVideoUrl('/comfyui/view?filename=clip.mp4&subfolder=&type=output')).toBe(true)
+  })
+})
+
+// David 2026-06-12: the inline image/video gets a Download button that pulls the
+// ComfyUI filename/subfolder/type back out of the /view URL.
+describe('comfyViewParams', () => {
+  it('parses an absolute /view URL (drops the cache-buster)', () => {
+    expect(comfyViewParams('http://localhost:8188/view?filename=apple.png&subfolder=&type=output&t=123'))
+      .toEqual({ filename: 'apple.png', subfolder: '', type: 'output' })
+  })
+
+  it('keeps a non-empty subfolder', () => {
+    expect(comfyViewParams('http://localhost:8188/view?filename=clip.mp4&subfolder=vids&type=output'))
+      .toEqual({ filename: 'clip.mp4', subfolder: 'vids', type: 'output' })
+  })
+
+  it('parses the relative /comfyui/view proxy path and defaults type to output', () => {
+    expect(comfyViewParams('/comfyui/view?filename=foo.webp&subfolder='))
+      .toEqual({ filename: 'foo.webp', subfolder: '', type: 'output' })
+  })
+
+  it('returns null without a filename or url', () => {
+    expect(comfyViewParams('http://localhost:8188/view?subfolder=&type=output')).toBeNull()
+    expect(comfyViewParams(null)).toBeNull()
+    expect(comfyViewParams('')).toBeNull()
   })
 })

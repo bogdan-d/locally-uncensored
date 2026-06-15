@@ -35,7 +35,17 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.5.0 — Current Release
+## v2.5.3 — Current Release
+
+A maintenance and features patch on top of v2.5.0. Your chats, memories, and gallery carry over automatically, and auto-update prompts on next launch.
+
+**New:** edit your custom personas, a **civitai.red** mirror toggle for regions where civitai.com is blocked, and an **external TTS engine** option — point LU at any OpenAI-compatible endpoint like Kokoro.
+
+**Fixed:** LM Studio and Lemonade are reachable across your LAN, the Windows 11 "agent error" mid-chat, the app always showing a window after a bad state, multi-LoRA in the agent, FLUX on current ComfyUI, a clearer hint for the Windows "paging file too small" error, and a batch of smaller issues.
+
+---
+
+## v2.5.0 — The big one
 
 **The biggest update since launch.** v2.5.0 isn't about new app categories — chat, image & video generation, the coding agent and the model manager were already here — it's a deep upgrade to all of them, plus several genuinely new tools. Everything still runs 100% on your own machine, and your chats, models, and settings carry over automatically.
 

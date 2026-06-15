@@ -81,7 +81,7 @@ vi.mock('../agent-context', () => ({
 // settingsStore is the real module — pure, no services. The orchestrator reads
 // settings.exclusiveVramMode through it; default DEFAULT_SETTINGS = 'auto'.
 
-import { decideUnload, vramHandoffGenerate, pollGone, resolveClip, resolveModelName } from '../vram-handoff'
+import { decideUnload, vramHandoffGenerate, pollGone, resolveClip, resolveModelName, resolveI2VResolution, comfyErrorHint } from '../vram-handoff'
 import { useSettingsStore } from '../../stores/settingsStore'
 
 const GB = 1024 * 1024 * 1024
@@ -213,6 +213,72 @@ describe('resolveClip', () => {
 
   it('FramePack clamps a runaway request to the 600-frame safety ceiling', () => {
     expect(resolveClip({ prompt: 'x', seconds: 60, fps: 40 }, FRAMEPACK).frames).toBe(600)
+  })
+})
+
+// ── resolveI2VResolution: pick native res from source aspect (David 2026-06-11:
+//    "I2V results are never what the source image showed" — portrait stills came
+//    back as squished 768×448 landscape) ──
+describe('resolveI2VResolution', () => {
+  it('SVD square source → landscape 1024×576 (square is closer to landscape; center-crop fills it)', () => {
+    expect(resolveI2VResolution('svd', 1024, 1024)).toEqual({ width: 1024, height: 576 })
+  })
+
+  it('SVD portrait source → portrait native 576×1024 (no more squish to landscape)', () => {
+    expect(resolveI2VResolution('svd', 1024, 1536)).toEqual({ width: 576, height: 1024 })
+  })
+
+  it('SVD landscape source → landscape native 1024×576', () => {
+    expect(resolveI2VResolution('svd', 1920, 1080)).toEqual({ width: 1024, height: 576 })
+  })
+
+  it('SVD unknown dimensions → safe landscape default', () => {
+    expect(resolveI2VResolution('svd', 0, 0)).toEqual({ width: 1024, height: 576 })
+  })
+
+  it('FramePack keeps the source aspect, snapped to a 16-multiple under the 768 cap', () => {
+    // 1024×1024 → scaled to 768×768 (cap), already 16-aligned.
+    expect(resolveI2VResolution('framepack', 1024, 1024)).toEqual({ width: 768, height: 768 })
+    // 1920×1080 → long edge 1920>768 → ×0.4 → 768×432 (both 16-aligned).
+    expect(resolveI2VResolution('framepack', 1920, 1080)).toEqual({ width: 768, height: 432 })
+  })
+
+  it('FramePack small source is not upscaled past its size, just 16-snapped', () => {
+    const r = resolveI2VResolution('framepack', 500, 500)
+    expect(r.width % 16).toBe(0)
+    expect(r.height % 16).toBe(0)
+    expect(r.width).toBeLessThanOrEqual(512)
+  })
+})
+
+// ── comfyErrorHint: actionable hints for cryptic ComfyUI node errors ──
+describe('comfyErrorHint', () => {
+  it('FramePack HyVideoModel error → points at the custom-node, not LU', () => {
+    const h = comfyErrorHint('FramePackSampler', 'AttributeError', "'HyVideoModel' object has no attribute 'diffusion_model'")
+    expect(h).toMatch(/FramePackWrapper/)
+    expect(h).toMatch(/not in Locally Uncensored/i)
+    expect(h).toMatch(/SVD|Wan 2\.2/)
+  })
+
+  it('OOM error → actionable VRAM advice', () => {
+    expect(comfyErrorHint('KSampler', 'torch.OutOfMemoryError', 'Allocation on device')).toMatch(/GPU memory/i)
+    expect(comfyErrorHint(undefined, undefined, 'CUDA out of memory')).toMatch(/GPU memory/i)
+  })
+
+  it('Windows pagefile too small (os error 1455) → virtual-memory advice, not an LU bug (#61)', () => {
+    const h = comfyErrorHint('CLIPLoader', undefined, 'The paging file is too small for this operation to complete. (os error 1455)')
+    expect(h).toMatch(/virtual memory|page file/i)
+    expect(h).toMatch(/not a Locally Uncensored bug/i)
+    // matches on the bare os-error code too, regardless of node
+    expect(comfyErrorHint(undefined, undefined, 'os error 1455')).toMatch(/virtual memory/i)
+  })
+
+  it('unknown error → no hint (verbatim error stands alone)', () => {
+    expect(comfyErrorHint('KSampler', 'ValueError', 'something weird')).toBe('')
+  })
+
+  it('does not false-positive the FramePack hint on an unrelated node', () => {
+    expect(comfyErrorHint('KSampler', 'AttributeError', 'diffusion_model missing')).toBe('')
   })
 })
 

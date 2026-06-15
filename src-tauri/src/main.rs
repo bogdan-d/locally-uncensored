@@ -93,6 +93,7 @@ fn main() {
             // Process management
             commands::process::start_ollama,
             commands::process::start_comfyui,
+            commands::process::check_flash_attention,
             commands::process::stop_comfyui,
             commands::process::comfyui_status,
             commands::process::find_comfyui,
@@ -131,6 +132,7 @@ fn main() {
             // Piper neural TTS
             commands::tts::tts_status,
             commands::tts::synthesize,
+            commands::tts::synthesize_external,
             commands::tts::download_voice,
             commands::tts::installed_piper_voices,
             // Agent tools (legacy)
@@ -148,6 +150,7 @@ fn main() {
             commands::filesystem::fs_search,
             commands::filesystem::fs_info,
             commands::filesystem::save_text_file_dialog,
+            commands::filesystem::save_binary_file_dialog,
             // System
             commands::system::system_info,
             commands::system::process_list,
@@ -203,6 +206,7 @@ fn main() {
             commands::proxy::proxy_localhost,
             commands::proxy::proxy_localhost_stream,
             commands::proxy::proxy_localhost_stream_chunked,
+            commands::proxy::register_openai_host,
             commands::proxy::pull_model_stream,
             commands::proxy::cancel_model_pull,
             // Cloud "Hosted LU Workflows" waitlist — opt-in email capture
@@ -233,6 +237,33 @@ fn main() {
             #[cfg(target_os = "windows")]
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.set_shadow(false);
+            }
+
+            // ─── Bug D (surfingbird1010): force-show fallback ───
+            // The window starts hidden (visible:false in tauri.conf.json) and is
+            // normally revealed by the frontend's invoke('show_window') once React
+            // mounts (App.tsx). If the WebView never loads, or a render/hydration
+            // throw happens before that effect runs (corrupt persisted state,
+            // GPU/WebView2 fault), the window would stay hidden forever and the app
+            // looks like it "runs with no window". Reveal it unconditionally after a
+            // timeout so the user always gets a window. The frontend's earlier
+            // show_window is idempotent, so a healthy launch sees no double-show /
+            // flicker. 10 s is comfortably longer than a normal cold React mount
+            // (~1-2 s) yet short enough not to feel broken on a slow i7/8 GB box.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(10));
+                    if let Some(window) = handle.get_webview_window("main") {
+                        // Treat "unknown" as hidden → show (a redundant show on an
+                        // already-visible window is a harmless no-op).
+                        if !window.is_visible().unwrap_or(false) {
+                            println!("[Window] Force-show fallback fired (frontend never called show_window)");
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                });
             }
 
             // ─── System Tray ───

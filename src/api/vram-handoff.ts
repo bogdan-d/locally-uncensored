@@ -59,6 +59,7 @@ import {
   getImageUrl,
   classifyModel,
   isI2VModel,
+  isT2VCapable,
   uploadImage,
   buildTxt2VidWorkflow,
   snapToVideoGrid,
@@ -362,6 +363,93 @@ async function ensureComfyRunning(timeoutMs = 90_000): Promise<boolean> {
  * released the VRAM defeats the whole point — the two would briefly co-exist
  * and OOM. 15 s is generous; a `keep_alive:0` evict is usually sub-second.
  */
+// ── LM Studio text-model juggling (v2.5.3) ───────────────────────
+
+export interface LmsTextModel {
+  /** Bare LM Studio model id (no `openai::` routing prefix). */
+  id: string
+  /** Context length it was loaded with — restored on reload via `lms load -c`. */
+  contextLength: number | null
+}
+
+/** Empirically detect whether the active 'openai' provider model is a LOCAL
+ *  LM Studio model currently holding VRAM. Asks the local LM Studio REST
+ *  (lmstudio_model_context → state === 'loaded'); anything else — cloud
+ *  OpenAI, other openai-compat endpoints, LM Studio not running — returns
+ *  null and the orchestrator skips juggling exactly as before. */
+export async function detectLmsTextModel(
+  active: { name: string; providerId: string } | null,
+): Promise<LmsTextModel | null> {
+  if (!active || active.providerId !== 'openai' || !active.name) return null
+  const bare = active.name.startsWith('openai::')
+    ? active.name.slice('openai::'.length)
+    : active.name
+  try {
+    const info = await backendCall<{ loaded: number | null; state: string | null }>(
+      'lmstudio_model_context',
+      { model: bare },
+    )
+    if (info && info.state === 'loaded') {
+      return { id: bare, contextLength: typeof info.loaded === 'number' ? info.loaded : null }
+    }
+  } catch { /* LM Studio absent → no local VRAM held */ }
+  return null
+}
+
+/** Live-truth fallback (v2.5.3 follow-up): whatever the LOCAL LM Studio REST
+ *  reports as loaded holds VRAM — regardless of which provider the chat uses
+ *  or whether the agent-loop pin survived (rolldown chunk duplication ate it
+ *  in the release build, and Codex never pinned). Returns the first loaded
+ *  model with its loaded context length, or null when LM Studio is absent /
+ *  nothing is loaded. */
+export async function detectAnyLoadedLmsModel(): Promise<LmsTextModel | null> {
+  try {
+    const list = await backendCall<{ loaded: string[] }>('lmstudio_list_loaded', {})
+    const id = Array.isArray(list?.loaded) ? list.loaded.find((m) => typeof m === 'string' && m) : undefined
+    if (!id) return null
+    let contextLength: number | null = null
+    try {
+      const info = await backendCall<{ loaded: number | null }>('lmstudio_model_context', { model: id })
+      contextLength = typeof info?.loaded === 'number' ? info.loaded : null
+    } catch { /* context unknown — reload without -c */ }
+    return { id, contextLength }
+  } catch {
+    return null
+  }
+}
+
+/** Pure pick: which resident Ollama model is the evict-then-reload target?
+ *  The pinned agent-loop model wins when it is actually resident; otherwise
+ *  the largest resident one (in practice: the chat model). Exported for the
+ *  unit tests — the live-state fallback this feeds exists because the pin
+ *  alone proved unreliable (chunk duplication / unpinned callers). */
+export function pickResidentOllamaTarget(
+  resident: { name: string; sizeVram?: number }[],
+  active: { name: string; providerId: string; remote: boolean } | null,
+): { name: string; sizeVram?: number } | null {
+  if (resident.length === 0) return null
+  const preferred =
+    active && active.providerId === 'ollama' && active.remote === false
+      ? resident.find((m) => m.name === active.name)
+      : undefined
+  return (
+    preferred ??
+    resident.reduce((a, b) => (((b.sizeVram ?? 0) > (a.sizeVram ?? 0)) ? b : a))
+  )
+}
+
+/** Rough VRAM estimate for an LM Studio text model from its id's parameter
+ *  count ("…-7b…" → ~5.3 GB at Q4 + context overhead). LM Studio's REST has
+ *  no VRAM figure, so this feeds decideUnload the same way Ollama's
+ *  sizeVram does; no parseable size → undefined → safe no-evict in 'auto'. */
+export function estimateLmsTextVramBytes(id: string): number | undefined {
+  const m = id.toLowerCase().match(/(\d+(?:\.\d+)?)\s*b\b/)
+  if (!m) return undefined
+  const params = parseFloat(m[1])
+  if (!Number.isFinite(params) || params <= 0) return undefined
+  return Math.round(params * 0.75 * 1e9)
+}
+
 export async function pollGone(modelName: string, timeoutMs = 15_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   // Check immediately first (cheap) before sleeping.
@@ -503,11 +591,12 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
         }
         videoBackend = backend
       } else {
-        // Text-to-video must NOT pick an image-to-video-only checkpoint (SVD /
+        // Text-to-video must NOT pick an image-to-video-ONLY checkpoint (SVD /
         // FramePack) — those load via ImageOnlyCheckpointLoader, so feeding one
         // into a Wan/UNet T2V workflow yields ComfyUI "UNETLoader: value not in
-        // list" (gemma4 live, scenario 3c). Prefer a real T2V model.
-        const t2vModels = models.filter((m) => !isI2VModel(m.name))
+        // list" (gemma4 live, scenario 3c). isT2VCapable keeps Wan 2.2 TI2V (dual
+        // T2V/I2V) in the list while still excluding the I2V-only checkpoints.
+        const t2vModels = models.filter((m) => isT2VCapable(m.name))
         if (t2vModels.length === 0 || backend === 'none') {
           emitHandoff('error', { kind, detail: 'no text-to-video model installed' })
           return 'Error: No text-to-video model installed. Download one from Models → Discover (e.g. "Wan 2.1 — 1.3B (Lightweight)" for 8-10 GB VRAM or "HunyuanVideo 1.5 T2V FP8" for 12+ GB) — or generate an image first and animate it with an I2V model like "SVD-XT 1.1".'
@@ -532,45 +621,83 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
     return `Error: Could not query ComfyUI models — ${e instanceof Error ? e.message : String(e)}. Is ComfyUI installed and reachable?`
   }
 
-  // Which text model do we reload afterwards? From the active agent loop.
+  // Which text model do we reload afterwards? The pinned agent-loop model is
+  // the PREFERENCE — but the pin has proven fragile in the wild (the rolldown
+  // build duplicated agent-context so the pin read null in the release app,
+  // and Codex never pinned at all; live E2E 2026-06-11). What actually holds
+  // VRAM is authoritative, so the decision now starts from the LIVE state:
+  // /api/ps for a local Ollama, the LM Studio REST for a local LM Studio.
+  // Cloud providers / remote bases never show up in either probe, so they
+  // skip juggling exactly as before.
   const active = getActiveAgentModel()
-  // Cloud (openai/anthropic/openrouter/...) OR a remote Ollama base hold NO
-  // local VRAM — there is nothing to free or restore, so skip all juggling and
-  // just generate. `active.remote` is set by useAgentChat from the Ollama base
-  // host; providerId !== 'ollama' covers the cloud providers.
-  const textIsLocalOllama =
-    !!active && active.providerId === 'ollama' && active.remote === false && isOllamaLocal()
-  const textModel = textIsLocalOllama ? active!.name : null
 
-  // ── Decide unload (only relevant for a local Ollama text model) ──
-  let willUnload = false
-  if (textModel) {
+  // ── Ollama side (live): resident models from /api/ps ──────────────
+  let textModel: string | null = null
+  let textVramBytes: number | undefined
+  if (isOllamaLocal()) {
     try {
-      const [resident, footprint, systemVram, mode] = await Promise.all([
-        getResidentModels(),
+      const resident = await getResidentModels()
+      const candidate = pickResidentOllamaTarget(resident, active)
+      if (candidate) {
+        textModel = candidate.name
+        textVramBytes = candidate.sizeVram
+      }
+    } catch {
+      // /api/ps unreachable → treat as nothing resident (no Ollama to juggle).
+    }
+  }
+
+  // ── LM Studio side (live): pinned context first, then list_loaded ──
+  // detectLmsTextModel covers the pinned 'openai' chat model; the fallback
+  // covers everything the pin misses (Codex, cloud chat with a stray loaded
+  // LMS model, lost pin). Both only ever match the LOCAL LM Studio REST.
+  let lmsTarget = await detectLmsTextModel(active)
+  if (!lmsTarget) lmsTarget = await detectAnyLoadedLmsModel()
+  const lmsVramBytes = lmsTarget ? estimateLmsTextVramBytes(lmsTarget.id) : undefined
+
+  // ── Decide: one shared fits/doesn't-fit call over EVERYTHING resident.
+  // If the sum doesn't co-exist with the generation footprint, free BOTH
+  // sides — over-evicting is lossless (both reload in the finally), while
+  // under-evicting risks the exact 11.9/12 GB thrash this exists to avoid.
+  let willUnload = false
+  let willUnloadLms = false
+  if (textModel || lmsTarget) {
+    try {
+      const [footprint, systemVram, mode] = await Promise.all([
         Promise.resolve(estimateModelFootprintGB(targetModel)),
         getSystemVRAM(),
         Promise.resolve(getExclusiveVramMode()),
       ])
-      const textEntry = resident.find((m) => m.name === textModel)
+      const residentBytes = (textVramBytes ?? 0) + (lmsVramBytes ?? 0)
       const decision = decideUnload({
-        textVramBytes: textEntry?.sizeVram,
+        textVramBytes: residentBytes > 0 ? residentBytes : undefined,
         modelFootprintGB: footprint,
         systemVramGB: systemVram,
         mode,
       })
-      willUnload = decision.unload
-      log.info('vram_handoff.decision', { kind, targetModel, textModel, ...decision })
+      willUnload = decision.unload && !!textModel
+      willUnloadLms = decision.unload && !!lmsTarget
+      log.info('vram_handoff.decision', {
+        kind,
+        targetModel,
+        textModel,
+        lmsModel: lmsTarget?.id ?? null,
+        textVramBytes,
+        lmsVramBytes,
+        ...decision,
+      })
     } catch (e) {
       // Decision probe failed — default to NOT unloading (safer; attempt gen).
       log.warn('vram_handoff.decision_failed', { err: String(e) })
       willUnload = false
+      willUnloadLms = false
     }
   }
 
   // Capture resident text models BEFORE unload so the reload target is honest
   // even if `active` was somehow stale.
   let evictedModel: string | null = null
+  let evictedLms: LmsTextModel | null = null
 
   try {
     // ── (b) HANDOFF-OUT — only if we decided to unload ─────────────
@@ -602,6 +729,29 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
       }
     }
 
+    // ── (b2) HANDOFF-OUT for a local LM Studio text model ──────────
+    if (willUnloadLms && lmsTarget) {
+      emitHandoff('freeing_vram', { kind, detail: lmsTarget.id })
+      try {
+        await backendCall('lmstudio_unload_model', { model: lmsTarget.id })
+        evictedLms = lmsTarget
+        // Race guard, mirroring pollGone: wait until the REST stops reporting
+        // 'loaded' before ComfyUI starts grabbing VRAM.
+        for (let i = 0; i < 10; i++) {
+          const info = await backendCall<{ state: string | null }>(
+            'lmstudio_model_context',
+            { model: lmsTarget.id },
+          ).catch(() => null)
+          if (!info || info.state !== 'loaded') break
+          await new Promise((r) => setTimeout(r, 1000))
+        }
+      } catch (e) {
+        // Same policy as the Ollama path: never block the generation on a
+        // failed unload — ComfyUI may still OOM and that surfaces verbatim.
+        log.warn('vram_handoff.lms_unload_failed', { lmsModel: lmsTarget.id, err: String(e) })
+      }
+    }
+
     // ── (c) GENERATE ───────────────────────────────────────────────
     emitHandoff('loading_image_model', { kind, detail: targetModel })
     const up = await ensureComfyRunning()
@@ -622,7 +772,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
     // Free ComfyUI's VRAM first (so the text model has room to reload), then
     // best-effort reload the text model. The reload is non-fatal: if it throws,
     // Ollama will lazy-load on the user's next message anyway.
-    emitHandoff('restoring_text', { kind, detail: evictedModel ?? undefined })
+    emitHandoff('restoring_text', { kind, detail: evictedModel ?? evictedLms?.id ?? undefined })
     try {
       await freeMemory()
     } catch { /* best effort */ }
@@ -631,6 +781,19 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
         await loadModel(evictedModel)
       } catch (e) {
         log.warn('vram_handoff.reload_failed', { textModel: evictedModel, err: String(e) })
+      }
+    }
+    if (evictedLms) {
+      try {
+        // Restore with the SAME context length it was loaded with (the REST
+        // reported it at detect time) — `lms load` without -c would fall back
+        // to the model default and silently shrink long chats.
+        await backendCall('lmstudio_load_model', {
+          model: evictedLms.id,
+          ...(evictedLms.contextLength ? { contextLength: evictedLms.contextLength } : {}),
+        })
+      } catch (e) {
+        log.warn('vram_handoff.lms_reload_failed', { lmsModel: evictedLms.id, err: String(e) })
       }
     }
     emitHandoff('done', { kind })
@@ -660,7 +823,7 @@ async function generateImage(prompt: string, model: string, args: VramHandoffArg
     let inputImage: string | undefined
     let denoise: number | undefined
     if (typeof args.inputImage === 'string' && args.inputImage) {
-      inputImage = await resolveInputImage(args.inputImage)
+      inputImage = (await resolveInputImage(args.inputImage)).name
       denoise = clampFloat(args.denoise, 0.6, 0.05, 1.0)
     }
     const workflow = await buildDynamicWorkflow(
@@ -676,8 +839,19 @@ async function generateImage(prompt: string, model: string, args: VramHandoffArg
         height,
         seed,
         batchSize,
-        ...(typeof a.lora === 'string' && a.lora ? { lora: a.lora as string } : {}),
-        ...(typeof a.loraStrength === 'number' ? { loraStrength: a.loraStrength as number } : {}),
+        // Multi-LoRA (konata): accept a single name, an array, or a comma-
+        // joined string; same for strengths. buildDynamicWorkflow normalizes
+        // and chains them — invalid shapes are simply dropped here.
+        ...(typeof a.lora === 'string' && a.lora
+          ? { lora: a.lora as string }
+          : Array.isArray(a.lora) && (a.lora as unknown[]).some((x) => typeof x === 'string' && x)
+            ? { lora: (a.lora as unknown[]).filter((x): x is string => typeof x === 'string' && !!x) }
+            : {}),
+        ...(typeof a.loraStrength === 'number'
+          ? { loraStrength: a.loraStrength as number }
+          : Array.isArray(a.loraStrength) && (a.loraStrength as unknown[]).some((x) => typeof x === 'number')
+            ? { loraStrength: (a.loraStrength as unknown[]).filter((x): x is number => typeof x === 'number') }
+            : {}),
         ...(typeof a.vae === 'string' && a.vae ? { vae: a.vae as string } : {}),
         ...(typeof a.clipSkip === 'number' ? { clipSkip: a.clipSkip as number } : {}),
         ...(inputImage ? { inputImage, denoise } : {}),
@@ -715,6 +889,84 @@ async function generateVideo(
     // Capability-aware (decision 2): real per-model limits/enums from ComfyUI.
     const caps = await fetchCaps(model, 'video')
 
+    // ── Wan 2.2 TI2V-5B: one model, both modes ─────────────────────
+    // Wan22ImageToVideoLatent takes an OPTIONAL start_image, so a single dynamic
+    // path serves text-to-video (no still) AND image-to-video (still → the clip
+    // opens on it). Handle it HERE, before the SVD/FramePack I2V branch — wan22 now
+    // matches isI2VModel(), but that branch's 25-frame / 8-fps tuning would butcher
+    // it (wan22 is 24 fps, up to ~7 s). buildDynamicWorkflow routes to buildWan22.
+    if (type === 'wan22') {
+      const { buildDynamicWorkflow } = await import('./dynamic-workflow')
+      const d = MODEL_TYPE_DEFAULTS.wan22
+      const av = args as Record<string, unknown>
+
+      // Optional source still (I2V). A wrong/hallucinated name falls back to the
+      // last image LU produced this session — same recovery as the SVD path.
+      let inputImage: string | undefined
+      let srcW = 0
+      let srcH = 0
+      if (typeof args.inputImage === 'string' && args.inputImage) {
+        let resolved: ResolvedInputImage
+        try {
+          resolved = await resolveInputImage(args.inputImage)
+        } catch (e) {
+          if (_lastImageFilename) {
+            log.warn('vram_handoff.i2v_input_fallback', { bad: String(args.inputImage), fallback: _lastImageFilename })
+            resolved = await resolveInputImage(_lastImageFilename)
+          } else {
+            throw e
+          }
+        }
+        inputImage = resolved.name
+        srcW = resolved.width
+        srcH = resolved.height
+      }
+
+      const frameRej = videoFrameReject(model, args, caps)
+      if (frameRej) return frameRej
+      // 24 fps native; up to ~7 s (169 frames). resolveClip honors `seconds`/`frames`.
+      const vMax = caps?.frameRange?.max ?? 169
+      const { frames, fps } = resolveClip(args, { defFps: d.fps, defFrames: d.frames, maxFrames: vMax })
+      const tun = resolveTunables(args, caps, { steps: d.steps, cfg: d.cfg, sampler: d.sampler, scheduler: d.scheduler })
+      if (tun.reject) return `Cannot generate: ${tun.reject}`
+      // resolveTunables falls back to the generic KSampler caps default (cfg 8 /
+      // 20 steps) over our model default. Wan 2.2 5B over-cooks at cfg 8 — its
+      // known-good sampling is cfg ~5 / ~30 steps. Honor an explicit user ask,
+      // else force the Wan default (David 2026-06-11: "Qualität muss stimmen").
+      const avq = args as Record<string, unknown>
+      const tunSteps = avq.steps !== undefined ? tun.steps : d.steps
+      const tunCfg = (avq.cfg ?? avq.cfg_scale ?? avq.cfgScale) !== undefined ? tun.cfg : d.cfg
+
+      // I2V → resolution from the source aspect (faithful framing); T2V → model default.
+      const base = inputImage ? resolveI2VResolution('wan22', srcW, srcH) : { width: d.width, height: d.height }
+      const snapped = snapToVideoGrid(clampInt(av.width, base.width, 64, 2048), clampInt(av.height, base.height, 64, 2048))
+      const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
+
+      const workflow = await buildDynamicWorkflow(
+        {
+          prompt,
+          negativePrompt: typeof args.negativePrompt === 'string' ? args.negativePrompt : '',
+          model,
+          sampler: tun.sampler,
+          scheduler: tun.scheduler,
+          steps: tunSteps,
+          cfgScale: tunCfg,
+          width: snapped.width,
+          height: snapped.height,
+          seed,
+          batchSize: 1,
+          frames,
+          fps,
+          ...(inputImage ? { inputImage } : {}),
+        },
+        type,
+      )
+      log.info('vram_handoff.video.submit', { model, mode: inputImage ? 'i2v' : 't2v', wan22: true, steps: tunSteps, cfg: tunCfg })
+      const promptId = await submitWorkflow(workflow)
+      log.info('vram_handoff.video.submitted', { promptId })
+      return await pollAndExtract(promptId, prompt, label('video'), getVideoTimeoutMs())
+    }
+
     // ── Image-to-video (SVD / FramePack) ───────────────────────────
     // Resolve the still into ComfyUI's input folder and route through the
     // dynamic builder's I2V strategy. Conservative size + low frame count keep
@@ -723,17 +975,18 @@ async function generateVideo(
       const { buildDynamicWorkflow } = await import('./dynamic-workflow')
       // Resolve the source still; if the model gave a wrong/hallucinated name,
       // fall back to the last image LU actually produced this session.
-      let inputImage: string
+      let resolved: ResolvedInputImage
       try {
-        inputImage = await resolveInputImage(args.inputImage)
+        resolved = await resolveInputImage(args.inputImage)
       } catch (e) {
         if (_lastImageFilename) {
           log.warn('vram_handoff.i2v_input_fallback', { bad: String(args.inputImage), fallback: _lastImageFilename })
-          inputImage = await resolveInputImage(_lastImageFilename)
+          resolved = await resolveInputImage(_lastImageFilename)
         } else {
           throw e
         }
       }
+      const inputImage = resolved.name
       // SVD-XT genuinely caps ~25 frames. FramePack PACKS long video, so its real
       // ceiling comes from getModelCapabilities (request-driven — David 2026-06-04:
       // "FramePacks frame cap anheben durch input von uns"). REJECT (not clamp) an
@@ -746,8 +999,17 @@ async function generateVideo(
       const tun = resolveTunables(args, caps, { steps: type === 'framepack' ? 25 : 20, cfg: 3, sampler: 'euler', scheduler: 'normal' })
       if (tun.reject) return `Cannot generate: ${tun.reject}`
       const av = args as Record<string, unknown>
-      const snapped = snapToVideoGrid(clampInt(av.width, 768, 64, 2048), clampInt(av.height, 448, 64, 2048))
+      // Resolution from the SOURCE aspect ratio (David 2026-06-11: portrait
+      // stills came back as squished landscape that no longer matched the
+      // input). An explicit user width/height still wins; otherwise we pick the
+      // model's native bucket and an ImageScale(crop:center) fills it cleanly.
+      const native = resolveI2VResolution(type, resolved.width, resolved.height)
+      const snapped = snapToVideoGrid(
+        clampInt(av.width, native.width, 64, 2048),
+        clampInt(av.height, native.height, 64, 2048),
+      )
       const seed = (typeof av.seed === 'number' && Number.isFinite(av.seed)) ? Math.floor(av.seed) : -1
+      const motionBucketId = clampInt(av.motionBucketId ?? av.motion_bucket_id, 90, 1, 255)
       const workflow = await buildDynamicWorkflow(
         {
           prompt,
@@ -764,6 +1026,7 @@ async function generateVideo(
           frames,
           fps,
           inputImage,
+          motionBucketId,
         },
         type,
       )
@@ -838,11 +1101,16 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
       return `${kindLabel} generation completed but no output produced.`
     }
     if (history?.status?.status_str === 'error') {
-      // Verbatim ComfyUI error — could be an OOM, a missing node, a bad VAE…
-      const msg = history.status.messages?.map((m: any) => m?.[1]?.message).filter(Boolean).join(' | ')
+      // Pull the richest detail ComfyUI gives us: an execution_error carries
+      // node_type + exception_type + exception_message (the plain `message`
+      // field is usually empty for node errors — David 2026-06-11, FramePack).
+      const errEntry = history.status.messages?.find((m: any) => m?.[0] === 'execution_error')?.[1]
+      const rawMsg = errEntry?.exception_message
+        || history.status.messages?.map((m: any) => m?.[1]?.message).filter(Boolean).join(' | ')
         || history.status.messages?.[0]?.[1]?.message
         || 'Unknown ComfyUI error'
-      return `${kindLabel} generation failed: ${msg}`
+      const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(rawMsg))
+      return `${kindLabel} generation failed: ${rawMsg}${hint ? `\n\n${hint}` : ''}`
     }
   }
   const mins = Math.round(timeoutMs / 60000)
@@ -850,6 +1118,34 @@ async function pollAndExtract(promptId: string, prompt: string, kindLabel: strin
 }
 
 // ── Small helpers ─────────────────────────────────────────────────
+
+/**
+ * Map a known-cryptic ComfyUI node error to an actionable hint (C-fix pattern).
+ * Returns '' when we have nothing better to add than the verbatim error.
+ * Exported + pure for the unit tests.
+ */
+export function comfyErrorHint(nodeType: string | undefined, _excType: string | undefined, message: string): string {
+  const m = message.toLowerCase()
+  // FramePack wrapper version mismatch (David 2026-06-11, RTX 3060): the
+  // installed ComfyUI-FramePackWrapper's LoadFramePackModel produces a
+  // HyVideoModel its OWN FramePackSampler can't consume. Upstream custom-node
+  // bug — independent of LU's workflow (which now loads without OOM).
+  if ((nodeType === 'FramePackSampler' || /framepack/i.test(nodeType ?? '')) &&
+      m.includes('hyvideomodel') && m.includes('diffusion_model')) {
+    return 'This is a bug in the installed ComfyUI-FramePackWrapper custom node (its model loader and sampler are out of sync), not in Locally Uncensored. Update the node from ComfyUI Manager (search "FramePack"), or pick a different image-to-video model (SVD works on 12 GB; Wan 2.2 5B is the recommended higher-quality option).'
+  }
+  if (m.includes('out of memory') || m.includes('outofmemory') || _excType === 'torch.OutOfMemoryError') {
+    return 'Ran out of GPU memory. Try a shorter clip / lower resolution, set VRAM hand-off to "always" in Settings so the chat model is evicted first, or pick a lighter model.'
+  }
+  // Windows "paging file is too small" (os error 1455, bear5real0o0 GH #61):
+  // ComfyUI couldn't commit enough memory while loading a node (often the text
+  // encoder / CLIPLoader) because the OS ran out of RAM + pagefile. This is a
+  // Windows virtual-memory setting, not an LU bug — point the user at the fix.
+  if (m.includes('paging file') || m.includes('os error 1455')) {
+    return 'Windows ran out of virtual memory while loading the model (its paging file is too small). This is a Windows setting, not a Locally Uncensored bug. Let Windows manage the page file, or raise it: Settings → System → About → Advanced system settings → Performance → Settings → Advanced → Virtual memory → Change, set a larger custom size, then reboot. Closing other heavy apps or picking a smaller model also helps.'
+  }
+  return ''
+}
 
 function label(kind: 'image' | 'video'): string {
   return kind === 'video' ? 'Video' : 'Image'
@@ -1004,7 +1300,15 @@ export function resolveClip(
  * Generated images live in ComfyUI's *output* folder, but LoadImage reads from
  * *input* — so we fetch the referenced image and re-upload it via /upload/image.
  */
-async function resolveInputImage(ref: string): Promise<string> {
+interface ResolvedInputImage {
+  /** Filename in ComfyUI's input folder, ready for a LoadImage node. */
+  name: string
+  /** Source pixel dimensions (0 when they could not be probed). */
+  width: number
+  height: number
+}
+
+async function resolveInputImage(ref: string): Promise<ResolvedInputImage> {
   let url: string
   let name: string
   if (/^https?:\/\//i.test(ref)) {
@@ -1018,8 +1322,80 @@ async function resolveInputImage(ref: string): Promise<string> {
   const resp = await fetch(url)
   if (!resp.ok) throw new Error(`could not read input image "${ref}" (HTTP ${resp.status})`)
   const blob = await resp.blob()
+  // Probe the source dimensions so the I2V path can pick the model's native
+  // aspect ratio (David 2026-06-11: a portrait still forced into 768×448
+  // landscape no longer resembled the source). Best-effort — a probe failure
+  // just yields 0×0 and the caller falls back to a sane default.
+  let width = 0
+  let height = 0
+  try {
+    const bmp = await createImageBitmap(blob)
+    width = bmp.width
+    height = bmp.height
+    bmp.close()
+  } catch { /* dimensions unknown → caller uses defaults */ }
   const file = new File([blob], name, { type: blob.type || 'image/png' })
-  return await uploadImage(file)
+  const uploaded = await uploadImage(file)
+  return { name: uploaded, width, height }
+}
+
+/**
+ * Pick the generation resolution for an image-to-video model from the SOURCE
+ * still's aspect ratio. SVD-XT was trained ONLY at 1024×576 (landscape) and
+ * 576×1024 (portrait); feeding it the old fixed 768×448 squished every source
+ * and the clip stopped resembling the input. We match the source ORIENTATION
+ * to the nearest native bucket; an ImageScale(crop:center) in the workflow
+ * then fills it exactly (aspect-fill, no squish). FramePack is far more
+ * resolution-flexible, so it just gets a tidy 16-multiple of the source.
+ *
+ * Exported + pure for the unit tests.
+ */
+export function resolveI2VResolution(
+  type: string,
+  srcW: number,
+  srcH: number,
+): { width: number; height: number } {
+  const landscapeDefault = { width: 1024, height: 576 }
+  if (!srcW || !srcH || srcW <= 0 || srcH <= 0) {
+    return (type === 'svd' || type === 'wan22') ? landscapeDefault : { width: 768, height: 768 }
+  }
+  const aspect = srcW / srcH
+  if (type === 'svd') {
+    // Square is closer to landscape than portrait; center-crop handles the rest.
+    return aspect >= 0.95 ? { width: 1024, height: 576 } : { width: 576, height: 1024 }
+  }
+  if (type === 'wan22') {
+    // Wan 2.2 5B trains at 1280×704 / 704×1280. Keep the SOURCE aspect (faithful
+    // framing) and snap to 32 (the latent grid); an ImageScale(crop:center) in
+    // the builder fills it. Budget by TOTAL PIXELS, not the long edge: a square
+    // 1024² still (1.05 M px) sits at the VRAM ceiling on a 12 GB 3060 and can't
+    // do 5-7 s, while a 16:9 1024×576 (0.59 M px) runs the whole matrix. ~0.6 M
+    // px keeps every aspect tractable on 12 GB (David 2026-06-11: 5B I2V must be
+    // PRACTICAL + good, not just native-res-but-OOM).
+    const BUDGET_PX = 600_000
+    let w = srcW
+    let h = srcH
+    const px = w * h
+    if (px > BUDGET_PX) {
+      const s = Math.sqrt(BUDGET_PX / px)
+      w = Math.round(w * s)
+      h = Math.round(h * s)
+    }
+    const snap = (v: number) => Math.max(64, Math.round(v / 32) * 32)
+    return { width: snap(w), height: snap(h) }
+  }
+  // FramePack / others: keep the real aspect, snap to a 16-multiple, cap the
+  // long edge so a 12 GB card stays safe.
+  const cap = 768
+  let w = srcW
+  let h = srcH
+  if (Math.max(w, h) > cap) {
+    const s = cap / Math.max(w, h)
+    w = Math.round(w * s)
+    h = Math.round(h * s)
+  }
+  const snap = (v: number) => Math.max(64, Math.round(v / 16) * 16)
+  return { width: snap(w), height: snap(h) }
 }
 
 function getImageTimeoutMs(): number {

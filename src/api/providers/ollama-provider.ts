@@ -142,6 +142,14 @@ export class OllamaProvider implements ProviderClient {
     for await (const chunk of parseNDJSONStream<OllamaChatChunk>(res)) {
       if (options?.signal?.aborted) break
 
+      // Mid-stream `{"error":"..."}` line (runner crash, OOM) inside an
+      // HTTP-200 stream — surface it instead of yielding a silent empty
+      // chat turn (rikki Discord 2026-06-10, Win11 proxy path).
+      const errLine = (chunk as { error?: unknown }).error
+      if (typeof errLine === 'string' && errLine) {
+        throw new Error(`Ollama: ${errLine}`)
+      }
+
       const toolCalls: ToolCall[] | undefined = chunk.message?.tool_calls?.map(tc => ({
         function: { name: tc.function.name, arguments: tc.function.arguments },
       }))

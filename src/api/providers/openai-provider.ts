@@ -16,24 +16,15 @@ import type {
 import { ProviderError } from './types'
 import { parseSSEStream } from '../sse'
 import { repairJson } from '../../lib/tool-call-repair'
-import { localFetch, localFetchStream } from '../backend'
+import { localFetch, localFetchStream, isPrivateOrLanHost, hostnameOf, ensureProxyAllowsHost } from '../backend'
 
-/**
- * Local OpenAI-compat backends (LM Studio, vLLM, llama.cpp, KoboldCpp, etc.)
- * are hit over plain HTTP on localhost. From the Tauri webview that triggers
- * CORS, so use `localFetch`/`localFetchStream` which bypass via the Rust
- * proxy (with direct-fetch fallback).
- * Cloud endpoints (OpenAI, OpenRouter, Groq, Together, etc.) don't need the
- * proxy and skip it via a simple host check.
- */
-function isLocalUrl(baseUrl: string): boolean {
-  try {
-    const h = new URL(baseUrl).hostname.toLowerCase()
-    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0'
-  } catch {
-    return false
-  }
-}
+// Local/LAN vs cloud routing now lives in the `useLocalProxy` getter (below)
+// plus the shared host helpers in backend.ts (isPrivateOrLanHost/hostnameOf).
+// A local OR LAN OpenAI-compat backend (LM Studio/vLLM bound to 0.0.0.0,
+// reached over the network) is hit through the Rust proxy to bypass CORS + the
+// webview CSP; cloud endpoints use a direct fetch. Fixes GH #49 (LAN endpoint
+// "Test" failed because a 192.168.x.x host fell back to a CSP/CORS-blocked
+// direct fetch).
 
 // ── OpenAI API Types ───────────────────────────────────────────
 
@@ -70,10 +61,6 @@ interface OpenAIModelEntry {
   object: string
   created?: number
   owned_by?: string
-}
-
-interface OpenAIError {
-  error?: { message?: string; type?: string; code?: string }
 }
 
 // ── Known context lengths for popular models ───────────────────
@@ -144,6 +131,18 @@ export class OpenAIProvider implements ProviderClient {
     return this.config.baseUrl.replace(/\/+$/, '')
   }
 
+  /**
+   * Whether requests must go through the Rust proxy instead of a direct webview
+   * fetch. True for any local/LAN endpoint — declared by the preset
+   * (`config.isLocal`) OR detected from the host (localhost, RFC1918, CGNAT,
+   * IPv6 ULA/link-local, .local, bare machine name). Cloud endpoints (public
+   * hostnames, isLocal=false) use a direct fetch. Fixes GH #49 where a LAN LM
+   * Studio (e.g. 192.168.1.50) used a direct fetch and was CSP/CORS-blocked.
+   */
+  private get useLocalProxy(): boolean {
+    return this.config.isLocal === true || isPrivateOrLanHost(hostnameOf(this.baseUrl))
+  }
+
   private get headers(): Record<string, string> {
     const h: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -181,9 +180,10 @@ export class OpenAIProvider implements ProviderClient {
     else if (options?.thinking === false) body.reasoning_effort = 'minimal'
     // Ask LM Studio / local openai-compat servers for REAL token usage in a
     // final stream chunk (choices:[] + usage:{...}). Dropped on 400 below.
-    if (isLocalUrl(this.baseUrl)) body.stream_options = { include_usage: true }
+    if (this.useLocalProxy) body.stream_options = { include_usage: true }
 
-    const fetcher = isLocalUrl(this.baseUrl) ? localFetchStream : fetch
+    if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
+    const fetcher = this.useLocalProxy ? localFetchStream : fetch
     let res = await fetcher(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers,
@@ -303,7 +303,8 @@ export class OpenAIProvider implements ProviderClient {
     if (options?.thinking === true) body.reasoning_effort = 'high'
     else if (options?.thinking === false) body.reasoning_effort = 'minimal'
 
-    const fetcher = isLocalUrl(this.baseUrl) ? localFetch : fetch
+    if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
+    const fetcher = this.useLocalProxy ? localFetch : fetch
     let res = await fetcher(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: this.headers,
@@ -348,7 +349,8 @@ export class OpenAIProvider implements ProviderClient {
   }
 
   async listModels(): Promise<ProviderModel[]> {
-    const fetcher = isLocalUrl(this.baseUrl) ? localFetch : fetch
+    if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
+    const fetcher = this.useLocalProxy ? localFetch : fetch
     const res = await fetcher(`${this.baseUrl}/models`, {
       headers: this.headers,
     } as any)
@@ -364,7 +366,7 @@ export class OpenAIProvider implements ProviderClient {
     // Context-Limit vom Server. Sonst zeigen wir 8K obwohl das Modell 32K+
     // kann. Probes laufen parallel; bei Cloud-Providers (OpenAI/OpenRouter)
     // wuerde N+1 zu Rate-Limits fuehren, deshalb nur KNOWN_CONTEXT/Heuristik.
-    if (isLocalUrl(this.baseUrl)) {
+    if (this.useLocalProxy) {
       return Promise.all(models.map(async m => ({
         id: m.id,
         name: m.id,
@@ -390,7 +392,8 @@ export class OpenAIProvider implements ProviderClient {
 
   async checkConnection(): Promise<boolean> {
     try {
-      const fetcher = isLocalUrl(this.baseUrl) ? localFetch : fetch
+      if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
+      const fetcher = this.useLocalProxy ? localFetch : fetch
       const res = await fetcher(`${this.baseUrl}/models`, {
         headers: this.headers,
       } as any)
@@ -416,7 +419,7 @@ export class OpenAIProvider implements ProviderClient {
    * Returnt `null` wenn nichts gefunden, damit Callers cascaden koennen.
    */
   private async probeContextFromServer(model: string): Promise<number | null> {
-    if (!isLocalUrl(this.baseUrl)) return null
+    if (!this.useLocalProxy) return null
 
     // 1. LM Studio Enhanced API: /api/v0/models/<id>
     //    Base-URL ist typischerweise http://localhost:1234/v1 — wir tauschen
@@ -536,10 +539,23 @@ export class OpenAIProvider implements ProviderClient {
     let code: string = 'network'
 
     try {
-      const data: OpenAIError = await res.json()
-      if (data.error?.message) message = data.error.message
-      if (data.error?.code) code = data.error.code
-    } catch { /* use default */ }
+      const data = await res.json() as { error?: unknown; message?: string }
+      const err = data.error
+      // OpenAI & most servers: { error: { message, code } }. But LM Studio and
+      // llama.cpp commonly send a BARE string ({ error: "..." }) or a top-level
+      // { message: "..." }. The old object-only read missed both → the real
+      // reason (e.g. a context-window overflow) was swallowed and the user saw
+      // the opaque "Request failed". Handle all three shapes.
+      if (typeof err === 'string' && err.trim()) {
+        message = err
+      } else if (err && typeof err === 'object') {
+        const eo = err as { message?: string; code?: string }
+        if (eo.message) message = eo.message
+        if (eo.code) code = eo.code
+      } else if (typeof data.message === 'string' && data.message.trim()) {
+        message = data.message
+      }
+    } catch { /* non-JSON body → keep default */ }
 
     // Map HTTP status to error code
     if (res.status === 401 || res.status === 403) {

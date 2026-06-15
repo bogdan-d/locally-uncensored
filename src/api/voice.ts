@@ -253,6 +253,18 @@ export async function synthesizeNeural(text: string, voice?: string): Promise<st
   return `data:${data.mime || "audio/wav"};base64,${data.audio_base64}`;
 }
 
+/**
+ * Synthesize text via a user-configured external HTTP TTS engine (GitHub #58).
+ * `url` is an OpenAI-compatible endpoint (e.g. Kokoro-FastAPI at
+ * http://localhost:8880/v1/audio/speech); `voice` is that engine's voice name.
+ * Returns a playable data URL (the Rust side honors the returned audio type).
+ */
+export async function synthesizeExternal(text: string, url: string, voice?: string): Promise<string> {
+  const data = await backendCall<{ audio_base64?: string; mime?: string }>("synthesize_external", { text, url, voice });
+  if (!data?.audio_base64) throw new Error("external TTS returned no audio");
+  return `data:${data.mime || "audio/wav"};base64,${data.audio_base64}`;
+}
+
 /** Download a Piper voice model on demand. Blocks until done (~63 MB). */
 export async function downloadPiperVoice(voice: string): Promise<void> {
   await backendCall("download_voice", { voice });

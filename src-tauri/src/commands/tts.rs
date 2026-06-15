@@ -223,3 +223,88 @@ pub fn synthesize(
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(serde_json::json!({ "audio_base64": b64, "mime": "audio/wav" }))
 }
+
+/// Synthesize `text` via a user-configured external HTTP TTS engine and return
+/// it base64-encoded for the frontend to play (GitHub #58). The endpoint is an
+/// OpenAI-compatible `/v1/audio/speech` URL — e.g. Kokoro-FastAPI on
+/// `http://localhost:8880/v1/audio/speech`, or any OpenAI-compatible TTS server.
+///
+/// SSRF note: unlike `proxy::fetch_external`, this deliberately does NOT run the
+/// localhost/private-IP block. The endpoint comes from the Settings UI (the
+/// user's own voice config), never from model output or chat content, so there
+/// is no attacker-controlled-URL vector — and pointing at a LOCAL engine
+/// (localhost:8880) is the entire point, exactly like LU's local Ollama /
+/// ComfyUI / LM Studio connections.
+#[tauri::command]
+pub async fn synthesize_external(
+    text: String,
+    url: String,
+    voice: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("empty text".to_string());
+    }
+
+    // Light validation only — must be a well-formed http(s) URL. Localhost/LAN
+    // is allowed on purpose (see the SSRF note above).
+    let parsed = url::Url::parse(url.trim()).map_err(|e| format!("invalid TTS endpoint URL: {}", e))?;
+    match parsed.scheme() {
+        "http" | "https" => {}
+        other => return Err(format!("TTS endpoint must be http or https, got '{}'", other)),
+    }
+
+    // OpenAI-compatible engines require a voice. Default to OpenAI's "alloy";
+    // Kokoro users set their own (e.g. "af_bella") in Settings.
+    let voice = voice
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "alloy".to_string());
+
+    let client = reqwest::Client::builder()
+        .user_agent("LocallyUncensored/2.0")
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    // OpenAI-compatible TTS request body. Kokoro-FastAPI + OpenAI both accept it.
+    let body = serde_json::json!({
+        "model": "tts-1",
+        "input": text,
+        "voice": voice,
+        "response_format": "wav",
+    });
+
+    let resp = client
+        .post(parsed.as_str())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("external TTS request failed: {}", e))?;
+
+    if !resp.status().is_success() {
+        let code = resp.status().as_u16();
+        let detail = resp.text().await.unwrap_or_default();
+        let snippet: String = detail.chars().take(200).collect();
+        return Err(format!("external TTS HTTP {}: {}", code, snippet));
+    }
+
+    // Honor whatever audio type the engine returns (wav/mp3/…). The browser
+    // <audio> element plays both from a data URL, so pass the Content-Type
+    // through as the mime instead of forcing a single format.
+    let mime = resp
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(';').next().unwrap_or(s).trim().to_string())
+        .filter(|s| s.starts_with("audio/"))
+        .unwrap_or_else(|| "audio/wav".to_string());
+
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    if bytes.is_empty() {
+        return Err("external TTS returned no audio".to_string());
+    }
+
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(serde_json::json!({ "audio_base64": b64, "mime": mime }))
+}

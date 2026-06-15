@@ -19,6 +19,7 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   flux2:   { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
   zimage:  { steps: 12, cfgScale: 3.5, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
   wan:     { steps: 25, cfgScale: 5.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 49, fps: 16 },
+  wan22:   { steps: 30, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
   hunyuan: { steps: 30, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 45, fps: 15 },
   ltx:     { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 768,  height: 512, frames: 97, fps: 24 },
   unknown: { steps: 20, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1024, height: 1024 },
@@ -70,9 +71,11 @@ interface CreateState {
   frames: number
   fps: number
   denoise: number  // Denoise strength for I2I (0.0–1.0)
-  // F2 (cinemazverev GH#4) — 1 LoRA slot. Empty string = none.
-  selectedLora: string
-  loraStrength: number  // 0..2, mirrors LoraLoader's `strength_model` slider
+  // F2 (cinemazverev GH#4), multi-LoRA (konata 2026-06-09) — ordered LoRA
+  // stack. Each entry chains another LoraLoader in the workflow; per-entry
+  // strength mirrors LoraLoader's `strength_model` slider (0..2 in the UI).
+  // Empty array = no LoRA. Session-only (not in partialize), like before.
+  selectedLoras: { name: string; strength: number }[]
   // F3 (vanja-san GH#4) — top extended ComfyUI params surfaced in
   // the param panel. selectedVae = 'auto' lets the checkpoint's
   // bundled VAE win; an explicit pick overrides with a VAELoader.
@@ -123,8 +126,11 @@ interface CreateState {
   setFrames: (frames: number) => void
   setFps: (fps: number) => void
   setDenoise: (denoise: number) => void
-  setSelectedLora: (name: string) => void
-  setLoraStrength: (strength: number) => void
+  /** Toggle a LoRA in/out of the stack (added at the end, default 0.8). */
+  toggleLora: (name: string) => void
+  /** Set the strength of one stacked LoRA (clamped 0..2 like the old slider). */
+  setLoraStrengthFor: (name: string, strength: number) => void
+  clearLoras: () => void
   setSelectedVae: (name: string) => void
   setClipSkip: (skip: number) => void
   setI2iImage: (image: string | null) => void
@@ -167,8 +173,7 @@ export const useCreateStore = create<CreateState>()(
       frames: 24,
       fps: 8,
       denoise: 0.7,
-      selectedLora: '',
-      loraStrength: 0.8,
+      selectedLoras: [],
       selectedVae: 'auto',
       clipSkip: 0,
       i2iImage: null,
@@ -258,8 +263,24 @@ export const useCreateStore = create<CreateState>()(
       setFrames: (frames) => set({ frames: Math.max(1, Math.min(120, Math.floor(frames))) }),
       setFps: (fps) => set({ fps: Math.max(1, Math.min(60, Math.floor(fps))) }),
       setDenoise: (denoise) => set({ denoise: Math.max(0, Math.min(1, denoise)) }),
-      setSelectedLora: (name) => set({ selectedLora: name || '' }),
-      setLoraStrength: (strength) => set({ loraStrength: Math.max(0, Math.min(2, strength)) }),
+      // Explicit param types: this file's creator lost contextual typing long
+      // ago (pre-existing TS2740 on MODEL_TYPE_DEFAULTS) — without these the
+      // params would be implicit-any like the older setters around them.
+      toggleLora: (name: string) => set((s: CreateState) => {
+        if (!name) return {}
+        const exists = s.selectedLoras.some((l) => l.name === name)
+        return {
+          selectedLoras: exists
+            ? s.selectedLoras.filter((l) => l.name !== name)
+            : [...s.selectedLoras, { name, strength: 0.8 }],
+        }
+      }),
+      setLoraStrengthFor: (name: string, strength: number) => set((s: CreateState) => ({
+        selectedLoras: s.selectedLoras.map((l) =>
+          l.name === name ? { ...l, strength: Math.max(0, Math.min(2, strength)) } : l,
+        ),
+      })),
+      clearLoras: () => set({ selectedLoras: [] }),
       setSelectedVae: (name) => set({ selectedVae: name || 'auto' }),
       setClipSkip: (skip) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(skip))) }),
       setI2iImage: (image) => set({ i2iImage: image }),

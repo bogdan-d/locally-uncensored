@@ -4,7 +4,14 @@ import { MessageBubble } from './MessageBubble'
 import { TypingIndicator } from './TypingIndicator'
 
 interface Props {
+  /** GLOBAL generating flag — guards regenerate/edit so a second concurrent
+   *  send (which shares the chat hook's stream refs) can't corrupt an in-flight
+   *  turn. Stays global on purpose. */
   isGenerating: boolean
+  /** Per-conversation generating flag — drives the 3-dot typing indicator so it
+   *  shows ONLY in the chat that is actually generating, not in every chat the
+   *  user switches to (David 2026-06-12). Falls back to isGenerating. */
+  isThisChatGenerating?: boolean
   isLoadingModel?: boolean
   onRegenerate?: (conversationId: string, assistantMessageId: string) => void
   onEdit?: (conversationId: string, messageId: string, newContent: string) => void
@@ -15,7 +22,8 @@ interface Props {
   onReject?: () => void
 }
 
-export function MessageList({ isGenerating, isLoadingModel, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject }: Props) {
+export function MessageList({ isGenerating, isThisChatGenerating, isLoadingModel, onRegenerate, onEdit, pendingApprovalId, onApprove, onReject }: Props) {
+  const showTyping = isThisChatGenerating ?? isGenerating
   const conversation = useChatStore((s) => {
     if (!s.activeConversationId) return undefined
     return s.conversations.find((c) => c.id === s.activeConversationId)
@@ -61,7 +69,7 @@ export function MessageList({ isGenerating, isLoadingModel, onRegenerate, onEdit
           final answer is streaming. Previously it only showed when the
           last assistant message was empty, which made multi-turn agent
           runs look frozen between iterations (per user feedback). */}
-      {isGenerating && lastMessage?.role === 'assistant' && (
+      {showTyping && lastMessage?.role === 'assistant' && (
         <TypingIndicator label={isLoadingModel ? 'Loading model...' : undefined} />
       )}
     </div>

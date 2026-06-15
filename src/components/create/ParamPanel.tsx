@@ -46,9 +46,11 @@ const TYPE_BADGE: Record<ModelType, { label: string; color: string }> = {
   flux: { label: 'FLUX', color: 'bg-purple-500/15 text-purple-300' },
   flux2: { label: 'FLUX 2', color: 'bg-purple-500/15 text-purple-300' },
   zimage: { label: 'Z-Image', color: 'bg-rose-500/15 text-rose-300' },
+  ernie_image: { label: 'ERNIE', color: 'bg-sky-500/15 text-sky-300' },
   sdxl: { label: 'SDXL', color: 'bg-blue-500/15 text-blue-300' },
   sd15: { label: 'SD 1.5', color: 'bg-green-500/15 text-green-300' },
   wan: { label: 'Wan', color: 'bg-orange-500/15 text-orange-300' },
+  wan22: { label: 'Wan 2.2', color: 'bg-orange-500/15 text-orange-300' },
   hunyuan: { label: 'Hunyuan', color: 'bg-red-500/15 text-red-300' },
   ltx: { label: 'LTX', color: 'bg-cyan-500/15 text-cyan-300' },
   mochi: { label: 'Mochi', color: 'bg-pink-500/15 text-pink-300' },
@@ -344,30 +346,51 @@ function ExtendedComfyParams() {
     <div className="space-y-2 pt-1 border-t border-gray-200 dark:border-white/5">
       <div className="text-[0.55rem] uppercase tracking-widest text-gray-500">Extended</div>
 
-      {/* LoRA (F2) — single slot, no chain. Empty option = no LoRA. */}
+      {/* LoRA stack (F2 + multi-LoRA, konata 2026-06-09) — click to stack;
+          applied in click order via chained LoraLoader nodes, each with its
+          own strength slider. */}
       <div>
-        <label className={lbl}>LoRA {!loaded && <span className="text-gray-400">(loading…)</span>}</label>
-        <select
-          value={store.selectedLora}
-          onChange={(e) => store.setSelectedLora(e.target.value)}
-          className={sel}
-          disabled={!loaded}
-        >
-          <option value="">— none —</option>
-          {loras.map((l) => (
-            <option key={l} value={l}>{l}</option>
-          ))}
-        </select>
-        {store.selectedLora && (
-          <SliderControl
-            label="LoRA strength"
-            value={store.loraStrength}
-            min={0}
-            max={2}
-            step={0.05}
-            onChange={store.setLoraStrength}
-          />
+        <label className={lbl}>
+          LoRAs {!loaded && <span className="text-gray-400">(loading…)</span>}
+          {store.selectedLoras.length > 1 && (
+            <span className="ml-1 text-gray-400">— {store.selectedLoras.length} stacked, applied in order</span>
+          )}
+        </label>
+        {loaded && loras.length === 0 && (
+          <div className="text-[0.6rem] text-gray-500">No LoRAs installed (ComfyUI/models/loras)</div>
         )}
+        <div className="space-y-1 max-h-44 overflow-y-auto scrollbar-thin pr-0.5">
+          {loras.map((l) => {
+            const active = store.selectedLoras.find((x) => x.name === l)
+            return (
+              <div key={l}>
+                <button
+                  type="button"
+                  onClick={() => store.toggleLora(l)}
+                  disabled={!loaded}
+                  className={`w-full text-left px-2 py-1 rounded border text-[0.65rem] transition-colors truncate ${
+                    active
+                      ? 'border-blue-400/40 bg-blue-500/10 text-gray-900 dark:text-gray-100'
+                      : 'border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/[0.04] text-gray-600 dark:text-gray-400 hover:border-gray-300 dark:hover:border-white/20'
+                  }`}
+                  title={l}
+                >
+                  {active ? '✓ ' : ''}{l}
+                </button>
+                {active && (
+                  <SliderControl
+                    label="strength"
+                    value={active.strength}
+                    min={0}
+                    max={2}
+                    step={0.05}
+                    onChange={(v) => store.setLoraStrengthFor(l, v)}
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       {/* VAE override (F3) */}

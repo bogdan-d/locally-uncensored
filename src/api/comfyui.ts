@@ -36,10 +36,14 @@ export interface GenerateParams {
   batchSize: number
   inputImage?: string   // I2I source image filename (uploaded to ComfyUI)
   denoise?: number      // I2I denoise strength (0.0–1.0, default 1.0 = full txt2img)
-  // F2 (cinemazverev GH#4): a single LoRA slot. Empty = no LoRA.
-  // `loraStrength` mirrors LoraLoader's `strength_model` (0..2 typical).
-  lora?: string
-  loraStrength?: number
+  // F2 (cinemazverev GH#4), extended for multi-LoRA (konata 2026-06-09:
+  // "agent cannot load multiple loras"): one filename or an ordered list.
+  // Multiple LoRAs are CHAINED — LoraLoader N feeds (model, clip) into
+  // LoraLoader N+1, exactly like stacking them in the ComfyUI graph editor.
+  // `loraStrength` mirrors LoraLoader's `strength_model` (0..2 typical):
+  // a single number applies to every LoRA, an array maps per-LoRA by index.
+  lora?: string | string[]
+  loraStrength?: number | number[]
   // F3 (vanja-san GH#4): override the checkpoint's bundled VAE with an
   // explicit VAELoader. 'auto' / undefined / empty = keep the
   // checkpoint VAE.
@@ -54,6 +58,10 @@ export interface VideoParams extends GenerateParams {
   frames: number
   fps: number
   inputImage?: string  // Uploaded image filename for I2V models (SVD, FramePack)
+  // SVD motion strength (motion_bucket_id, 1–255). Lower = more faithful to the
+  // source still / calmer motion; 127 (SVD default) drifts hard. We default ~90
+  // for I2V fidelity (David 2026-06-11). Honoured only by the SVD path.
+  motionBucketId?: number
 }
 
 export interface ComfyUIOutput {
@@ -103,7 +111,7 @@ export function extractComfyOutputFiles(nodeOutput: unknown): ComfyUIOutput[] {
   return found
 }
 
-export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
+export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -147,6 +155,10 @@ export function classifyModel(name: string | null | undefined): ModelType {
   if (lower.includes('allegro')) return 'allegro'
   if (lower.includes('svd') || lower.includes('stable-video-diffusion')) return 'svd'
   if (lower.includes('pyramid') && (lower.includes('flow') || lower.includes('dit'))) return 'pyramidflow'
+  // Wan 2.2 TI2V-5B — unified text+image-to-video. Detect BEFORE the generic Wan
+  // match: it needs its own latent node (Wan22ImageToVideoLatent), the Wan 2.2 VAE
+  // and the dual T2V/I2V path, none of which the Wan 2.1 'unet_video' strategy has.
+  if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return 'wan22'
   if (lower.includes('wan')) return 'wan'
   if (lower.includes('hunyuan')) return 'hunyuan'
   if (lower.includes('ltx')) return 'ltx'
@@ -182,14 +194,34 @@ export function isImageModelType(type: ModelType): boolean {
 }
 
 export function isVideoModelType(type: ModelType): boolean {
-  return type === 'wan' || type === 'hunyuan' || type === 'ltx' || type === 'mochi' || type === 'cosmos'
+  return type === 'wan' || type === 'wan22' || type === 'hunyuan' || type === 'ltx' || type === 'mochi' || type === 'cosmos'
     || type === 'cogvideo' || type === 'svd' || type === 'framepack' || type === 'pyramidflow' || type === 'allegro'
 }
 
-/** Check if a model filename is an Image-to-Video model (needs input image) */
+/**
+ * Can this model accept a source still (image-to-video)? True for explicit i2v
+ * tags, SVD, FramePack, and Wan 2.2 TI2V (which is dual T2V/I2V). Used to build
+ * the I2V picker list and to route an inputImage to the I2V branch.
+ */
 export function isI2VModel(name: string): boolean {
   const lower = name.toLowerCase()
   return lower.includes('i2v') || lower.includes('svd') || lower.includes('framepack')
+    || lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')
+}
+
+/**
+ * Can this model do TEXT-to-video (no source image required)? Everything EXCEPT
+ * the I2V-ONLY checkpoints: SVD and FramePack load via image-only/wrapper loaders,
+ * and a CogVideoX *I2V* checkpoint needs a still — none can run a T2V graph. Wan 2.2
+ * TI2V is dual-capable, so it stays in the T2V list too (the `ti2v`/`wan2.2` guard
+ * wins over the generic `i2v` substring). Keeps wan22 selectable for both modes.
+ */
+export function isT2VCapable(name: string): boolean {
+  const lower = name.toLowerCase()
+  if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return true
+  if (lower.includes('svd') || lower.includes('framepack')) return false
+  if (lower.includes('i2v')) return false
+  return true
 }
 
 // ─── Default generation parameters per model type ───
@@ -207,6 +239,10 @@ export interface ModelTypeDefaults {
 
 export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   wan: { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal', width: 832, height: 480, frames: 81, fps: 16 },
+  // Wan 2.2 TI2V-5B — native 1280×704 @ 24 fps, unified T2V/I2V. Default to a
+  // VRAM-/speed-friendly 1024×576 16:9 on 12 GB cards (native res is still available
+  // by setting width/height); 49 frames ≈ 2 s, the duration matrix runs up to ~7 s.
+  wan22: { steps: 30, cfg: 5.0, sampler: 'euler', scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
   hunyuan: { steps: 30, cfg: 6.0, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 45, fps: 24 },
   ltx: { steps: 20, cfg: 3.0, sampler: 'euler', scheduler: 'normal', width: 768, height: 512, frames: 97, fps: 24 },
   mochi: { steps: 30, cfg: 4.5, sampler: 'euler', scheduler: 'normal', width: 848, height: 480, frames: 84, fps: 24 },
@@ -651,10 +687,25 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
     throw new Error(`No HunyuanVideo VAE found. Download "hunyuanvideo15_vae_fp16.safetensors" from the Model Manager.`)
   }
   if (modelType === 'wan') {
-    const match = vaes.find(v => lower(v).includes('wan'))
+    // Wan 2.1 latents are 16-channel; the Wan 2.2 VAE is 48-channel — decoding
+    // 2.1 output with it fails ("expected input to have 48 channels, but got
+    // 16"). Live regression 2026-06-11: right after the Wan 2.2 bundle install,
+    // wan2.2_vae sorted BEFORE wan_2.1_vae in the enum and the first
+    // .includes('wan') hit broke every Wan 2.1 generation. Prefer the 2.1 file
+    // explicitly and never fall into a 2.2 one.
+    const isWan22Vae = (v: string) => /wan[._]?2[._]?2/.test(lower(v))
+    const match = vaes.find(v => /wan[._]?2[._]?1/.test(lower(v)))
+      || vaes.find(v => lower(v).includes('wan') && !isWan22Vae(v))
       || vaes.find(v => lower(v).includes('hunyuan'))
     if (match) return match
     throw new Error(`No Wan VAE found. Download "wan_2.1_vae.safetensors" from the Model Manager.`)
+  }
+  if (modelType === 'wan22') {
+    // Defense in depth — the wan22 builder pins its VAE by name, but if this
+    // resolver is ever hit, ONLY the 2.2 VAE is valid (48-channel latents).
+    const match = vaes.find(v => /wan[._]?2[._]?2/.test(lower(v)))
+    if (match) return match
+    throw new Error(`No Wan 2.2 VAE found. Download "wan2.2_vae.safetensors" from the Model Manager.`)
   }
   if (modelType === 'ltx') {
     const match = vaes.find(v => lower(v).includes('ltx'))
@@ -688,6 +739,26 @@ export async function findMatchingVAE(modelType: ModelType): Promise<string> {
   }
   // SVD / Allegro use checkpoint-embedded VAE, SDXL/SD1.5 too — any VAE works as fallback
   return vaes[0]
+}
+
+/**
+ * Resolve the FLUX v1 text-encoder PAIR for DualCLIPLoader (C2, aldrich
+ * follow-up): modern ComfyUI removed 'flux' from the single CLIPLoader's type
+ * enum, so FLUX v1 conditioning must come from DualCLIPLoader, which needs
+ * BOTH encoders — clip_name1 = T5-XXL, clip_name2 = CLIP-L. Throws the same
+ * actionable "download <file> from the Model Manager" errors as
+ * findMatchingCLIP so buildDynamicWorkflow surfaces a fix path per missing
+ * encoder instead of a raw ComfyUI rejection.
+ */
+export async function findFluxCLIPPair(): Promise<{ t5: string; clipL: string }> {
+  const clips = await getCLIPModels()
+  if (clips.length === 0) throw new Error('No text encoder models found. Download a CLIP/T5 model for your model type from the Model Manager.')
+  const lower = (s: string) => s.toLowerCase()
+  const t5 = clips.find(c => lower(c).includes('t5') && !lower(c).includes('umt5') && !lower(c).includes('oldt5'))
+  const clipL = clips.find(c => lower(c).includes('clip_l'))
+  if (!t5) throw new Error(`No FLUX text encoder (T5) found. Download "t5xxl_fp8_e4m3fn.safetensors" from the Model Manager.`)
+  if (!clipL) throw new Error(`No FLUX CLIP-L text encoder found. Download "clip_l.safetensors" from the Model Manager.`)
+  return { t5, clipL }
 }
 
 /**
@@ -1060,16 +1131,20 @@ export async function buildWanVideoWorkflow(params: VideoParams): Promise<Record
     '8': { class_type: 'VAEDecode', inputs: { samples: ['7', 0], vae: ['3', 0] } },
   }
 
-  // Use SaveAnimatedWEBP if available, otherwise fall back to SaveImage (frame sequence)
+  // Use SaveAnimatedWEBP if available, otherwise fall back to SaveImage (frame
+  // sequence). Prompt-based prefix (David 2026-06-11) — the dynamic builder got
+  // this in c40d13f, this legacy T2V path still wrote locally_uncensored_vid.
+  const { promptFilenamePrefix } = await import('./dynamic-workflow')
+  const vidPrefix = promptFilenamePrefix(params.prompt, true)
   if (hasSaveWEBP) {
     workflow['9'] = {
       class_type: 'SaveAnimatedWEBP',
-      inputs: { images: ['8', 0], filename_prefix: 'locally_uncensored_vid', fps: params.fps, lossless: false, quality: 90, method: 'default' },
+      inputs: { images: ['8', 0], filename_prefix: vidPrefix, fps: params.fps, lossless: false, quality: 90, method: 'default' },
     }
   } else {
     workflow['9'] = {
       class_type: 'SaveImage',
-      inputs: { images: ['8', 0], filename_prefix: 'locally_uncensored_vid' },
+      inputs: { images: ['8', 0], filename_prefix: vidPrefix },
     }
   }
 

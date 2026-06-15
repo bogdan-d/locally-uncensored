@@ -2147,6 +2147,20 @@ function comfyLauncher(): Plugin {
         })
       })
 
+      // API: Install neural TTS (Piper) — honest dev-mode stub. Bug B10: the
+      // real install (pip install piper-tts + voice-model download) runs only in
+      // the packaged Tauri app, so the browser surface reports it as desktop-only
+      // (POST kickoff + GET status both error) instead of throwing
+      // "Unknown backend command: install_tts".
+      server.middlewares.use('/local-api/install-tts', (_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          status: 'error',
+          error: 'Neural TTS install is only available in the desktop app. Run the packaged Locally Uncensored to install Piper TTS.',
+          logs: [],
+        }))
+      })
+
       // API: Transcribe audio via persistent Whisper server
       server.middlewares.use('/local-api/transcribe', (req, res) => {
         if (req.method !== 'POST') { res.writeHead(405); res.end(); return }

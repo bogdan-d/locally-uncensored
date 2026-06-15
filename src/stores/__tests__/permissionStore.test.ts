@@ -1,6 +1,35 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { usePermissionStore } from '../permissionStore'
+import { usePermissionStore, migratePermissionState } from '../permissionStore'
 import { DEFAULT_PERMISSIONS } from '../../api/mcp/types'
+
+// v2.5.3 — video generation went live. The default must not be 'blocked'
+// anymore (it removes video_generate from every model's tool list), and the
+// persist migration must lift the old locked-in 'blocked' for existing users.
+describe('video category unlock (v2.5.3)', () => {
+  it('DEFAULT_PERMISSIONS.video is confirm (same gate as image)', () => {
+    expect(DEFAULT_PERMISSIONS.video).toBe('confirm')
+    expect(DEFAULT_PERMISSIONS.image).toBe('confirm')
+  })
+
+  it('migrate lifts a persisted v1 video:blocked to the new default', () => {
+    const persisted = {
+      globalPermissions: { ...DEFAULT_PERMISSIONS, video: 'blocked', terminal: 'auto' },
+      conversationOverrides: { c1: { web: 'blocked' } },
+    }
+    const migrated = migratePermissionState(persisted, 1)
+    // The locked-in old default is lifted…
+    expect(migrated.globalPermissions.video).toBe('confirm')
+    // …while real user choices survive untouched.
+    expect(migrated.globalPermissions.terminal).toBe('auto')
+    expect(migrated.conversationOverrides.c1.web).toBe('blocked')
+  })
+
+  it('migrate is a no-op for current-version state', () => {
+    const persisted = { globalPermissions: { ...DEFAULT_PERMISSIONS, video: 'blocked' } }
+    const migrated = migratePermissionState(persisted, 2)
+    expect(migrated.globalPermissions.video).toBe('blocked')
+  })
+})
 
 describe('permissionStore', () => {
   beforeEach(() => {

@@ -3,7 +3,7 @@
 import type { MCPToolDefinition } from './types'
 import type { ToolRegistry } from './tool-registry'
 import { backendCall, fetchExternal } from '../backend'
-import { getActiveChatId, getActiveWorkspace } from '../agent-context'
+import { getActiveChatId, getActiveWorkspace, isChatArtifactMode, captureChatArtifact } from '../agent-context'
 import { useAgentWorkflowStore } from '../../stores/agentWorkflowStore'
 import { WorkflowEngine } from '../../lib/workflow-engine'
 import type { StepResult } from '../../types/agent-workflows'
@@ -498,8 +498,8 @@ const BUILTIN_TOOLS: MCPToolDefinition[] = [
             height: { type: 'number', description: 'Output height in px.' },
             negativePrompt: { type: 'string', description: 'Things to avoid.' },
             denoise: { type: 'number', description: 'Image-to-image strength 0.05–1.0 (only with inputImage).' },
-            lora: { type: 'string', description: 'LoRA filename to apply.' },
-            loraStrength: { type: 'number', description: 'LoRA strength (~0–2).' },
+            lora: { type: ['string', 'array'], items: { type: 'string' }, description: 'LoRA filename to apply — or an ARRAY of filenames to stack multiple LoRAs (chained in order, like stacking LoraLoader nodes). Names are matched against the installed LoRAs (extension optional); an unknown name is rejected with the installed list.' },
+            loraStrength: { type: ['number', 'array'], items: { type: 'number' }, description: 'LoRA strength (~0–2). Single number = applied to every LoRA; array = one strength per LoRA in the same order.' },
             vae: { type: 'string', description: 'Override VAE filename.' },
           },
         },
@@ -609,10 +609,21 @@ async function executeWebSearch(args: Record<string, any>): Promise<string> {
     braveApiKey: searchSettings.braveApiKey || '',
     tavilyApiKey: searchSettings.tavilyApiKey || '',
   })
-  if (Array.isArray(data.results)) {
-    return data.results
+  if (Array.isArray(data.results) && data.results.length > 0) {
+    const lines = data.results
       .map((r: any, i: number) => `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.snippet}`)
       .join('\n\n')
+    // When the configured paid provider failed we still return free-tier
+    // results, but say why the configured one didn't answer — a silently
+    // swallowed bad API key would look like "search is broken".
+    const note = typeof data.providerError === 'string' && data.providerError
+      ? `\n\n[Note: configured search provider failed — ${data.providerError}. Results above are from the free fallback (${data.provider || 'fallback'}).]`
+      : ''
+    return lines + note
+  }
+  if (typeof data.error === 'string' && data.error) {
+    const extra = typeof data.providerError === 'string' && data.providerError ? ` (${data.providerError})` : ''
+    return `Web search failed: ${data.error}${extra}`
   }
   return JSON.stringify(data)
 }
@@ -659,8 +670,39 @@ async function executeFileRead(args: Record<string, any>): Promise<string> {
   return data.content || ''
 }
 
+/** Last path segment, defaulting to file.txt. */
+function artifactBaseName(p: any): string {
+  const raw = typeof p === 'string' && p.trim() ? p.trim() : 'file.txt'
+  return raw.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || 'file.txt'
+}
+
+/** MIME from a filename extension — drives the in-chat artifact preview. */
+function mimeForName(name: string): string {
+  const ext = (name.split('.').pop() || '').toLowerCase()
+  const map: Record<string, string> = {
+    md: 'text/markdown', markdown: 'text/markdown', txt: 'text/plain',
+    json: 'application/json', js: 'text/javascript', mjs: 'text/javascript',
+    ts: 'text/typescript', tsx: 'text/typescript', jsx: 'text/javascript',
+    py: 'text/x-python', html: 'text/html', htm: 'text/html', css: 'text/css',
+    csv: 'text/csv', yml: 'text/yaml', yaml: 'text/yaml', xml: 'application/xml',
+    sh: 'text/x-shellscript', sql: 'text/plain', toml: 'text/plain',
+    rs: 'text/x-rust', go: 'text/x-go', java: 'text/x-java', c: 'text/x-c', cpp: 'text/x-c++',
+  }
+  return map[ext] || 'text/plain'
+}
+
 async function executeFileWrite(args: Record<string, any>): Promise<string> {
-  const data = await backendCall('fs_write', { path: args.path, content: args.content, ...chatCtx() })
+  const content = typeof args.content === 'string' ? args.content : String(args.content ?? '')
+  // Plain-chat artifact mode (ChatGPT-style, David 2026-06-12): in the NORMAL
+  // chat, a "file write" must NOT touch disk — capture it so it renders inline
+  // with a preview + Download button. The Coding Agent / full Agent leave
+  // artifact mode OFF and fall through to the real fs_write below.
+  if (isChatArtifactMode()) {
+    const name = artifactBaseName(args.path)
+    captureChatArtifact(name, content, mimeForName(name))
+    return `Created "${name}" (${formatBytes(content.length)}). It is shown to the user right here in the chat with a preview and a Download button — nothing was written to disk. Do not call file_read on it; just tell the user it's ready.`
+  }
+  const data = await backendCall('fs_write', { path: args.path, content, ...chatCtx() })
   // Rust returns {status: 'saved', path: <absolute>}. Surface the real path
   // so the model (and the file-change event) knows WHERE the write landed —
   // especially important when chatId is None and Rust routes a relative path
@@ -990,6 +1032,13 @@ async function executeImageGenerate(args: Record<string, any>): Promise<string> 
   const flat: Record<string, any> = {}
   for (const [k, v] of Object.entries(args)) if (k !== 'settings' && v !== undefined) flat[k] = v
   const merged: Record<string, any> = { ...settings, ...flat }   // explicit flat args win; undefined never clobbers settings
+  // Model-Picker gate (v2.5.3): BEFORE the VRAM swap, let the user pick the
+  // ComfyUI model in the tool call (or silently use the saved preference).
+  // Returns null when an explicit model arg exists / nothing is installed /
+  // ComfyUI is unreachable — the existing pipeline then behaves as before.
+  const { pickModelForGeneration } = await import('../model-pick')
+  const picked = await pickModelForGeneration('image', merged)
+  if (picked) merged.model = picked
   const { vramHandoffGenerate } = await import('../vram-handoff')
   return vramHandoffGenerate('image', merged)
 }
@@ -1010,6 +1059,11 @@ async function executeVideoGenerate(args: Record<string, any>): Promise<string> 
   const flat: Record<string, any> = {}
   for (const [k, v] of Object.entries(args)) if (k !== 'settings' && v !== undefined) flat[k] = v
   const merged: Record<string, any> = { ...settings, ...flat }   // explicit flat args win; undefined never clobbers settings
+  // Model-Picker gate (v2.5.3) — see executeImageGenerate. T2V and I2V keep
+  // separate saved preferences (disjoint capability sets).
+  const { pickModelForGeneration } = await import('../model-pick')
+  const picked = await pickModelForGeneration('video', merged)
+  if (picked) merged.model = picked
   const { vramHandoffGenerate } = await import('../vram-handoff')
   return vramHandoffGenerate('video', merged)
 }

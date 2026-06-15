@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { lmsIdOf, shouldAutoLoadForSelect } from '../ModelSelector'
+import { lmsIdOf, shouldAutoLoadForSelect, lmsAutoLoadContext, LMS_AUTOLOAD_CONTEXT } from '../ModelSelector'
 import type { AIModel } from '../../../types/models'
 
 // §18 — focused tests for the LM Studio select-time auto-load decision.
@@ -102,5 +102,35 @@ describe('shouldAutoLoadForSelect', () => {
       provider: 'openai', providerName: 'OpenRouter',
     } as AIModel
     expect(shouldAutoLoadForSelect(cloud, new Set())).toBe(false)
+  })
+})
+
+// Root cause proven live 2026-06-12: `lms load` without `-c` pins the instance
+// at LM Studio's 4096 default, which overflows the moment tool schemas are in
+// play → opaque "LM Studio: Request failed" (a 4xx, so no retry). These lock in
+// that LU always asks for a usable window, capped by the model's real max.
+describe('lmsAutoLoadContext', () => {
+  it('caps a huge model max at the 16K auto-load window', () => {
+    // gemma-3-4b reports max 131072 — we must NOT load it that big (KV-cache
+    // VRAM blowup); 16K is the sweet spot.
+    expect(lmsAutoLoadContext(lmsModel('gemma-3-4b', { contextLength: 131072 }))).toBe(LMS_AUTOLOAD_CONTEXT)
+    expect(LMS_AUTOLOAD_CONTEXT).toBe(16384)
+  })
+
+  it('uses the model max when it is SMALLER than the window (never over-asks)', () => {
+    expect(lmsAutoLoadContext(lmsModel('tiny', { contextLength: 8192 }))).toBe(8192)
+  })
+
+  it('returns exactly the window when max equals it', () => {
+    expect(lmsAutoLoadContext(lmsModel('m', { contextLength: 16384 }))).toBe(16384)
+  })
+
+  it('falls back to the window when contextLength is missing', () => {
+    expect(lmsAutoLoadContext(lmsModel('m'))).toBe(LMS_AUTOLOAD_CONTEXT)
+  })
+
+  it('falls back to the window for a zero / bogus contextLength (never loads 0)', () => {
+    expect(lmsAutoLoadContext(lmsModel('m', { contextLength: 0 }))).toBe(LMS_AUTOLOAD_CONTEXT)
+    expect(lmsAutoLoadContext(lmsModel('m', { contextLength: -5 }))).toBe(LMS_AUTOLOAD_CONTEXT)
   })
 })

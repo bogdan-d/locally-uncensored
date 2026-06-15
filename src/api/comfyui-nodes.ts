@@ -125,6 +125,8 @@ export function categorizeNodes(allNodes: Record<string, NodeMetadata>): Categor
     EmptyMochiLatentVideo: 'latentInit',
     EmptyCosmosLatentVideo: 'latentInit',
     CogVideoXEmptyLatents: 'latentInit',
+    // Wan 2.2 TI2V-5B unified latent (optional start_image → I2V, absent → T2V)
+    Wan22ImageToVideoLatent: 'latentInit',
     // Conditioning
     ConditioningZeroOut: 'textEncoders',
     // Text encoding

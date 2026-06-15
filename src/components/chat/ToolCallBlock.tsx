@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Search, Globe, FileText, FileEdit, Terminal, Image, Film, Loader2, Check, X, Clock, AlertCircle, FolderOpen, Cpu, Monitor, GitBranch, Database } from 'lucide-react'
+import { Search, Globe, FileText, FileEdit, Terminal, Image, Film, Loader2, Check, X, Clock, AlertCircle, FolderOpen, Cpu, Monitor, GitBranch, Database, Download } from 'lucide-react'
 import type { AgentToolCall } from '../../types/agent-mode'
-import { getComfyHost, getComfyPort } from '../../api/backend'
+import { getComfyHost, getComfyPort, downloadComfyFile } from '../../api/backend'
+import { useModelPickStore } from '../../stores/modelPickStore'
+import { ModelPickerCard, ChangeModelInline, pickKindForToolCall } from './ModelPickerCard'
 
 // F1 (konata3602 commitment 2026-05-23) + render fix (konata3602 bug 2026-06-07)
 // — when image_generate / video_generate / screenshot produce a ComfyUI output,
@@ -46,6 +48,24 @@ export function isInlineVideoUrl(url: string): boolean {
     return /\.(mp4|webm)$/i.test(name)
   } catch {
     return /\.(mp4|webm)(?=[?&]|$)/i.test(url)
+  }
+}
+
+// David 2026-06-12 ("alle tools in chat, mit download"): pull the ComfyUI
+// filename/subfolder/type back out of a /view URL so the inline image/video
+// gets a Download button (downloadComfyFile fetches the real bytes → native
+// Save-As in Tauri / anchor download in the browser). Returns null if the URL
+// has no filename. Exported for unit testing.
+export function comfyViewParams(url: string | null | undefined): { filename: string; subfolder: string; type: string } | null {
+  if (!url) return null
+  try {
+    const q = url.includes('?') ? url.slice(url.indexOf('?') + 1) : ''
+    const p = new URLSearchParams(q)
+    const filename = p.get('filename')
+    if (!filename) return null
+    return { filename, subfolder: p.get('subfolder') || '', type: p.get('type') || 'output' }
+  } catch {
+    return null
   }
 }
 
@@ -98,6 +118,14 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
   // without the user having to expand the block — konata's "and no image".
   const previewUrl = comfyViewUrlFromResult(toolCall.result)
 
+  // Model-Picker (v2.5.3): while a generation tool call is RUNNING and the
+  // executor's pre-VRAM-swap gate is waiting, render the picker inside this
+  // block. Once a preference is saved (no picker shows), a mini "Change
+  // model" line takes its place so the choice stays one click away.
+  const pendingPick = useModelPickStore((s) => s.pending)
+  const genKind = pickKindForToolCall(toolCall)
+  const showPicker = !!genKind && !!pendingPick && pendingPick.kind === genKind && isRunning
+
   // Proxy-independent loading (konata 2026-06-08). In browser/dev the tool
   // result carries the RELATIVE `/comfyui/view?…` Vite-proxy path, which loads
   // fine under `npm run dev` (verified E2E). But a built frontend served
@@ -138,6 +166,12 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
         )}
       </button>
 
+      {/* Model-Picker (v2.5.3) — LU's own pre-VRAM-swap model choice, shown
+          while the executor gate awaits the pick. Falls back to the mini
+          "Change model" line once a preference is saved. */}
+      {showPicker && pendingPick && <ModelPickerCard request={pendingPick} />}
+      {!showPicker && genKind && <ChangeModelInline kind={genKind} />}
+
       {/* Inline media preview — ALWAYS visible for a completed image/video
           generation, even while the tool block stays collapsed. Before the
           konata 2026-06-07 fix this lived inside the collapsed details, so a
@@ -146,7 +180,7 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
           else — including animated .webp — in an <img>. URL is bounded to OUR
           ComfyUI by comfyViewUrlFromResult (never auto-loads arbitrary URLs). */}
       {previewUrl && effectivePreviewUrl && (
-        <div className="pl-5 pt-0.5">
+        <div className="pl-5 pt-0.5 space-y-1">
           {isInlineVideoUrl(effectivePreviewUrl) ? (
             <video
               src={effectivePreviewUrl}
@@ -166,6 +200,22 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
               />
             </a>
           )}
+          {/* Download (David 2026-06-12): generated media shows in the chat with
+              a Download button, ChatGPT-style — downloadComfyFile pulls the real
+              bytes and saves via the native dialog. */}
+          {(() => {
+            const p = comfyViewParams(effectivePreviewUrl)
+            if (!p) return null
+            return (
+              <button
+                onClick={() => { void downloadComfyFile(p.filename, p.subfolder, p.type) }}
+                title="Download"
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6rem] font-medium bg-blue-500/15 text-blue-500 hover:bg-blue-500/25 border border-blue-500/30 transition-colors"
+              >
+                <Download size={11} /> Download
+              </button>
+            )
+          })()}
         </div>
       )}
 
