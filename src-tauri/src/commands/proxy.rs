@@ -409,59 +409,104 @@ pub async fn proxy_localhost_stream_chunked(
     method: Option<String>,
     body: Option<String>,
     on_chunk: tauri::ipc::Channel<Vec<u8>>,
+    // Optional id so the JS side can deterministically cancel THIS stream via
+    // `cancel_proxy_stream(stream_id)`. Without it, aborting only broke the JS
+    // read-loop while Ollama kept generating to completion on the proxy path
+    // (David 2026-06-15: deleting/Stopping a chat must stop the backend too).
+    stream_id: Option<String>,
     state: tauri::State<'_, crate::state::AppState>,
 ) -> Result<(), String> {
     validate_proxy_url(&url, &state)?;
 
-    let client = reqwest::Client::builder()
-        .user_agent("LocallyUncensored/2.0")
-        .timeout(std::time::Duration::from_secs(7200))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let http_method = method.unwrap_or_else(|| "GET".to_string());
-
-    let mut request = match http_method.as_str() {
-        "POST" => client.post(&url),
-        "DELETE" => client.delete(&url),
-        "PUT" => client.put(&url),
-        _ => client.get(&url),
-    };
-
-    if let Some(body_str) = body {
-        request = request.header("Content-Type", "application/json").body(body_str);
-    }
-
-    let resp = request
-        .send()
-        .await
-        .map_err(|e| format!("proxy_localhost_stream_chunked: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("HTTP {}: {}", status, text));
-    }
-
-    use futures_util::StreamExt;
-    let mut stream = resp.bytes_stream();
-    while let Some(item) = stream.next().await {
-        let bytes = item.map_err(|e| e.to_string())?;
-        if bytes.is_empty() {
-            continue;
-        }
-        // If the JS side is gone (reader cancelled / window closed), stop.
-        if on_chunk.send(bytes.to_vec()).is_err() {
-            break;
+    // Register a cancellation token under stream_id (mirrors pull_tokens).
+    let token = tokio_util::sync::CancellationToken::new();
+    let registry = state.stream_tokens.clone();
+    if let Some(id) = stream_id.as_ref() {
+        if let Some(old) = registry.lock().unwrap().insert(id.clone(), token.clone()) {
+            old.cancel(); // a stale stream under the same id — cancel it first
         }
     }
-    // Explicit EOF marker (empty chunk — data chunks are never empty, the
-    // loop above skips them). The JS side closes its ReadableStream on THIS,
-    // not on the command's return: WebView2 149 delivers queued channel
-    // messages AFTER the invoke result resolves (live find 2026-06-11), so
-    // closing on the result raced ahead of the data and silently dropped
-    // every chunk — chats showed the user message but never a reply.
-    let _ = on_chunk.send(Vec::new());
+
+    // Run the actual proxying in an inner future so we can always clean the
+    // token out of the registry afterwards, regardless of how we exit.
+    let run = async move {
+        let client = reqwest::Client::builder()
+            .user_agent("LocallyUncensored/2.0")
+            .timeout(std::time::Duration::from_secs(7200))
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        let http_method = method.unwrap_or_else(|| "GET".to_string());
+
+        let mut request = match http_method.as_str() {
+            "POST" => client.post(&url),
+            "DELETE" => client.delete(&url),
+            "PUT" => client.put(&url),
+            _ => client.get(&url),
+        };
+
+        if let Some(body_str) = body {
+            request = request.header("Content-Type", "application/json").body(body_str);
+        }
+
+        // Race the request against cancellation even during connect/headers.
+        let resp = tokio::select! {
+            _ = token.cancelled() => return Ok(()),
+            r = request.send() => r.map_err(|e| format!("proxy_localhost_stream_chunked: {}", e))?,
+        };
+
+        if !resp.status().is_success() {
+            let status = resp.status().as_u16();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("HTTP {}: {}", status, text));
+        }
+
+        use futures_util::StreamExt;
+        let mut stream = resp.bytes_stream();
+        loop {
+            tokio::select! {
+                // Stop fires → drop `stream`/`resp` → the HTTP connection closes
+                // → Ollama stops generating (frees the GPU). This is the fix.
+                _ = token.cancelled() => break,
+                item = stream.next() => match item {
+                    Some(it) => {
+                        let bytes = it.map_err(|e| e.to_string())?;
+                        if bytes.is_empty() { continue; }
+                        // JS side gone (reader cancelled / window closed) → stop.
+                        if on_chunk.send(bytes.to_vec()).is_err() { break; }
+                    }
+                    None => break,
+                }
+            }
+        }
+        // Explicit EOF marker (empty chunk — data chunks are never empty, the
+        // loop above skips them). The JS side closes its ReadableStream on THIS,
+        // not on the command's return: WebView2 149 delivers queued channel
+        // messages AFTER the invoke result resolves (live find 2026-06-11), so
+        // closing on the result raced ahead of the data and silently dropped
+        // every chunk — chats showed the user message but never a reply.
+        let _ = on_chunk.send(Vec::new());
+        Ok(())
+    }
+    .await;
+
+    if let Some(id) = stream_id.as_ref() {
+        registry.lock().unwrap().remove(id);
+    }
+    run
+}
+
+/// Cancel an in-flight `proxy_localhost_stream_chunked` by its stream id. Fired
+/// from the JS side when the user hits Stop or deletes/closes a chat, so the
+/// upstream Ollama request is actually aborted (not just the JS read-loop).
+#[tauri::command]
+pub fn cancel_proxy_stream(
+    state: tauri::State<'_, crate::state::AppState>,
+    stream_id: String,
+) -> Result<(), String> {
+    if let Some(token) = state.stream_tokens.lock().unwrap().remove(&stream_id) {
+        token.cancel();
+    }
     Ok(())
 }
 

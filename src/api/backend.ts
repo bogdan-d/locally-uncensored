@@ -210,7 +210,7 @@ export async function localFetchStream(
     }
   }
 
-  const proxied = await proxyStreamChunked(url, method, body);
+  const proxied = await proxyStreamChunked(url, method, body, options?.signal);
   if (proxied) return proxied;
 
   // Proxy layer itself unavailable (invoke/Channel import died) — give the
@@ -242,7 +242,7 @@ export async function localFetchStream(
  * Returns null when the invoke/Channel layer itself is unavailable so the
  * caller can decide on a last-resort transport.
  */
-async function proxyStreamChunked(url: string, method: string, body?: string): Promise<Response | null> {
+async function proxyStreamChunked(url: string, method: string, body?: string, signal?: AbortSignal): Promise<Response | null> {
   let invoke: Awaited<ReturnType<typeof getInvoke>>;
   let ChannelCtor: typeof import("@tauri-apps/api/core").Channel;
   try {
@@ -252,6 +252,25 @@ async function proxyStreamChunked(url: string, method: string, body?: string): P
     log.warn('[localFetchStream] invoke/Channel unavailable', { err: String(err) });
     return null;
   }
+
+  // Deterministic backend cancellation: tag this stream with an id and, when the
+  // caller aborts (Stop button / chat delete/close), tell Rust to cancel the
+  // upstream request so Ollama actually stops generating — not just the JS loop
+  // (David 2026-06-15: "Aktivität komplett stoppen"). Without this, the proxy
+  // kept pulling from Ollama to completion after an abort, burning GPU.
+  const streamId =
+    (globalThis.crypto as Crypto | undefined)?.randomUUID?.() ??
+    `s_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const cancelUpstream = () => { void invoke("cancel_proxy_stream", { streamId }).catch(() => { /* best-effort */ }); };
+  let onAbort: (() => void) | null = null;
+  if (signal) {
+    if (signal.aborted) cancelUpstream();
+    else {
+      onAbort = () => cancelUpstream();
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+  const detachAbort = () => { if (signal && onAbort) { signal.removeEventListener("abort", onAbort); onAbort = null; } };
 
   try {
     const channel = new ChannelCtor<number[]>();
@@ -263,6 +282,7 @@ async function proxyStreamChunked(url: string, method: string, body?: string): P
     const closeStream = () => {
       if (closed) return;
       closed = true;
+      detachAbort();
       try { ctrl?.close(); } catch { /* already closed */ }
     };
 
@@ -293,7 +313,7 @@ async function proxyStreamChunked(url: string, method: string, body?: string): P
       settleStreaming();
     };
 
-    void invoke("proxy_localhost_stream_chunked", { url, method, body: body || null, onChunk: channel })
+    void invoke("proxy_localhost_stream_chunked", { url, method, body: body || null, onChunk: channel, streamId })
       .then(() => {
         // Do NOT close here — the EOF marker does that (it may arrive after
         // this resolves; see above). Grace fallback so a lost EOF can't leak
@@ -312,6 +332,7 @@ async function proxyStreamChunked(url: string, method: string, body?: string): P
           ? new Response(httpErr.body, { status: httpErr.status })
           : new Response(JSON.stringify({ error: msg }), { status: 503 }));
         closed = true;
+        detachAbort();
         // If a reader is already consuming (mid-stream death), surface there too.
         try { ctrl?.error(err instanceof Error ? err : new Error(msg)); } catch { /* no reader */ }
       });
@@ -319,6 +340,7 @@ async function proxyStreamChunked(url: string, method: string, body?: string): P
     return await settled;
   } catch (chanErr) {
     // Channel unavailable → legacy buffered proxy (still works, just not streamed).
+    detachAbort();
     log.warn('[localFetchStream] Channel stream unavailable, buffering via proxy', { err: String(chanErr) });
     try {
       const bytes = await invoke("proxy_localhost_stream", {

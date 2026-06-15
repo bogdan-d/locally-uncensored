@@ -206,6 +206,7 @@ fn main() {
             commands::proxy::proxy_localhost,
             commands::proxy::proxy_localhost_stream,
             commands::proxy::proxy_localhost_stream_chunked,
+            commands::proxy::cancel_proxy_stream,
             commands::proxy::register_openai_host,
             commands::proxy::pull_model_stream,
             commands::proxy::cancel_model_pull,

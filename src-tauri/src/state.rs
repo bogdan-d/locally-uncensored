@@ -152,6 +152,12 @@ pub struct AppState {
     pub downloads: Arc<Mutex<HashMap<String, DownloadProgress>>>,
     pub download_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub pull_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
+    /// Per-stream cancellation tokens for `proxy_localhost_stream_chunked`.
+    /// When the user hits Stop or deletes/closes a chat, the JS side calls
+    /// `cancel_proxy_stream(stream_id)` → the token fires → the upstream reqwest
+    /// stream is dropped → Ollama actually stops generating (David 2026-06-15:
+    /// "Aktivität komplett stoppen"; aborting only stopped the JS loop before).
+    pub stream_tokens: Arc<Mutex<HashMap<String, CancellationToken>>>,
     pub install_status: Arc<Mutex<InstallState>>,
     /// Cancel flag for the ComfyUI installer (Bug #1, techx69 v2.4.3).
     /// `install_comfyui` polls this between steps; setting it from
@@ -243,6 +249,7 @@ impl AppState {
             downloads: Arc::new(Mutex::new(HashMap::new())),
             download_tokens: Arc::new(Mutex::new(HashMap::new())),
             pull_tokens: Arc::new(Mutex::new(HashMap::new())),
+            stream_tokens: Arc::new(Mutex::new(HashMap::new())),
             install_status: Arc::new(Mutex::new(InstallState::default())),
             comfyui_install_cancel: Arc::new(AtomicBool::new(false)),
             ollama_install: Arc::new(Mutex::new(InstallState::default())),
