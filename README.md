@@ -35,7 +35,17 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.5.3 — Current Release
+## v2.5.4 — Current Release
+
+A stability patch on top of v2.5.3, focused on Remote Access, video, and the agent. Your chats, memories, and gallery carry over automatically, and auto-update prompts on next launch.
+
+**Improved:** Remote Access is sturdier — the Cloudflare tunnel **self-heals** (re-downloads a stale tunnel client that used to silently fail), the **QR code only appears once the tunnel is actually connected**, and **closing the remote chat fully stops** the server and tunnel. The pairing code now lasts longer so you have time to scan it.
+
+**Fixed:** **Stop / deleting a chat now actually halts generation on the backend** (not just the UI) — it frees your GPU right away instead of letting the model keep running. **Image-to-Video** upload now routes through the local proxy (addresses a "Failed to upload image" error from some Windows WebView builds), and upload problems now show the real reason. The **agent honors your configured project folder** for file reads/writes. Freshly **downloaded models auto-activate**. The **Create** prompt bar is aligned to one height. Building from source: `npm run dev` no longer crashes when Ollama isn't installed. And the **LM Studio** model picker no longer freezes when its server is off.
+
+---
+
+## v2.5.3
 
 A maintenance and features patch on top of v2.5.0. Your chats, memories, and gallery carry over automatically, and auto-update prompts on next launch.
 
