@@ -6,6 +6,7 @@ import type { AgentBlock } from '../types/agent-mode'
 import { idbStorage } from '../lib/idbStorage'
 import { migrateBlockInPlace } from '../api/agents/block-helpers'
 import { useGenerationStore } from './generationStore'
+import { useRemoteStore } from './remoteStore'
 
 /**
  * Rehydration migration for Phase 1 (v2.4.0) — wraps legacy
@@ -99,6 +100,18 @@ export const useChatStore = create<ChatState>()(
         // completely — no orphaned stream burning tokens / GPU after the chat
         // is gone (David 2026-06-15).
         try { useGenerationStore.getState().abortConversation(id) } catch { /* best-effort */ }
+        // If this is the dispatched Remote chat, deleting/closing it must also
+        // tear down the whole Remote session — stop the axum server AND kill
+        // the Cloudflare tunnel/cloudflared process (David 2026-06-15: closing
+        // the remote chat has to stop *everything*, not leave the server +
+        // tunnel running in the background). undispatch() → stopServer() →
+        // stop_remote_server (taskkill /T /F on the tunnel PID + abort serve).
+        try {
+          const remote = useRemoteStore.getState()
+          if (remote.dispatchedConversationId === id) {
+            void remote.undispatch()
+          }
+        } catch { /* best-effort */ }
         set((state) => ({
           conversations: state.conversations.filter((c) => c.id !== id),
           activeConversationId:

@@ -21,7 +21,7 @@ export function Sidebar() {
   const {
     enabled: remoteEnabled, passcode, passcodeExpiresAt, lanUrl, mobileUrl,
     qrPngBase64, loading: remoteLoading, error: remoteError,
-    tunnelActive, tunnelUrl, tunnelLoading,
+    tunnelActive, tunnelUrl, tunnelLoading, awaitingTunnel,
     qrVisible, hideQr, refreshDevices,
     dispatchedConversationId, dispatch, undispatch, regenerateToken, restart,
   } = useRemoteStore()
@@ -31,6 +31,8 @@ export function Sidebar() {
   const [countdown, setCountdown] = useState('')
   const [dispatchPicker, setDispatchPicker] = useState(false)
   const [qrModalOpen, setQrModalOpen] = useState(false)
+  const [lanFixMsg, setLanFixMsg] = useState<string | null>(null)
+  const [lanFixing, setLanFixing] = useState(false)
 
   const isCodingMode = chatMode === 'codex'
   const isRemoteMode = chatMode === 'remote'
@@ -125,6 +127,11 @@ export function Sidebar() {
     const persona = personasEnabled ? getActivePersona() : null
     const convId = createConversation(activeModel, persona?.systemPrompt || '', 'remote')
     setView('chat')
+    // For internet mode, suppress the QR until the Cloudflare tunnel is
+    // verified up (David 2026-06-15). Set this BEFORE dispatch() so the LAN
+    // QR fetched during startServer never flashes. LAN mode shows the QR
+    // immediately (no tunnel to wait for).
+    useRemoteStore.setState({ awaitingTunnel: mode === 'internet' })
     try {
       await dispatch(convId, activeModel, '')
     } catch {
@@ -134,10 +141,12 @@ export function Sidebar() {
       // server that never came up. The error banner still surfaces in
       // ChatView so the user can act on it (e.g. close another LU
       // instance, then click Dispatch again).
+      useRemoteStore.setState({ awaitingTunnel: false })
       deleteConversation(convId)
       return
     }
-    // Auto-start tunnel for internet mode
+    // Auto-start tunnel for internet mode. startTunnel() clears awaitingTunnel
+    // once Cloudflare is verified serving (or it fails), which reveals the QR.
     if (mode === 'internet') {
       useRemoteStore.getState().startTunnel()
     }
@@ -152,6 +161,23 @@ export function Sidebar() {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
+  }
+
+  // One-click LAN firewall fix: relaunch netsh elevated (UAC) to add the
+  // inbound allow rule for the remote port, so a phone on the same Wi-Fi can
+  // actually reach the server (David 2026-06-15: the QR/IP were correct but
+  // Windows silently dropped the phone's connection — no inbound rule).
+  const handleAllowLan = async () => {
+    setLanFixing(true)
+    setLanFixMsg('Requesting permission (accept the Windows prompt)…')
+    try {
+      const msg = await useRemoteStore.getState().allowLanAccess()
+      setLanFixMsg(msg || 'LAN access allowed — re-scan the QR on your phone.')
+    } catch (e) {
+      setLanFixMsg(String(e))
+    } finally {
+      setLanFixing(false)
+    }
   }
 
   // Auto-hide the QR panel (a) as soon as the dispatched conversation
@@ -300,8 +326,17 @@ export function Sidebar() {
                 </div>
               </div>
 
-              {/* QR Code — small, clickable to open enlarged modal */}
-              {qrPngBase64 && (
+              {/* QR Code — hidden until Cloudflare is verified up (internet
+                  mode); shown immediately for LAN. David 2026-06-15: never
+                  flash a QR that points at the LAN IP while the tunnel is
+                  still coming up. */}
+              {awaitingTunnel ? (
+                <div className="w-full flex flex-col items-center justify-center gap-1 py-4 text-center">
+                  <RefreshCw size={16} className="animate-spin text-emerald-400/70" />
+                  <span className="text-[0.55rem] text-emerald-400/80">Connecting to Cloudflare…</span>
+                  <span className="text-[0.45rem] text-gray-500 leading-snug px-2">The QR appears once the tunnel is live</span>
+                </div>
+              ) : qrPngBase64 ? (
                 <button
                   onClick={() => setQrModalOpen(true)}
                   title="Show large QR code"
@@ -311,7 +346,7 @@ export function Sidebar() {
                     <img src={`data:image/png;base64,${qrPngBase64}`} alt="QR" className="w-[72px] h-[72px]" />
                   </div>
                 </button>
-              )}
+              ) : null}
 
               {/* Passcode */}
               <div className="flex items-center justify-between">
@@ -356,6 +391,26 @@ export function Sidebar() {
                 <p className="text-[0.5rem] text-gray-500/70 leading-snug">
                   First connection may take 5–10 s while DNS propagates. If you see a DNS error, wait a moment and reload.
                 </p>
+              )}
+
+              {/* LAN reachability helper — only relevant for LAN dispatch.
+                  Adds the Windows Firewall inbound rule (elevated UAC) so a
+                  phone on the same Wi-Fi can actually reach the server. */}
+              {!tunnelActive && !awaitingTunnel && (mobileUrl || lanUrl) && (
+                <div className="pt-0.5">
+                  <button
+                    onClick={handleAllowLan}
+                    disabled={lanFixing}
+                    title="If your phone can't open the URL on the same Wi-Fi, click to allow LAN access through Windows Firewall (requires admin)"
+                    className="w-full flex items-center justify-center gap-1 px-1.5 py-0.5 rounded text-[0.5rem] text-amber-400/90 hover:bg-amber-500/15 border border-amber-500/20 transition-all disabled:opacity-50"
+                  >
+                    <Wifi size={8} className={lanFixing ? 'animate-pulse' : ''} />
+                    {lanFixing ? 'Allowing…' : "Phone can't connect? Allow LAN access"}
+                  </button>
+                  {lanFixMsg && (
+                    <p className="text-[0.45rem] text-gray-400 leading-snug mt-0.5 break-words">{lanFixMsg}</p>
+                  )}
+                </div>
               )}
 
               {remoteError && (
@@ -570,7 +625,13 @@ export function Sidebar() {
               </button>
             </div>
 
-            {qrPngBase64 && (
+            {awaitingTunnel ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+                <RefreshCw size={28} className="animate-spin text-emerald-400/70" />
+                <span className="text-[0.8rem] text-emerald-400/90">Connecting to Cloudflare…</span>
+                <span className="text-[0.6rem] text-gray-500">The QR appears once the tunnel is live</span>
+              </div>
+            ) : qrPngBase64 ? (
               <div className="bg-white rounded-lg p-3">
                 <img
                   src={`data:image/png;base64,${qrPngBase64}`}
@@ -579,7 +640,7 @@ export function Sidebar() {
                   style={{ imageRendering: 'pixelated' }}
                 />
               </div>
-            )}
+            ) : null}
 
             <div className="flex items-center justify-center gap-3 w-full">
               <code className="text-2xl font-mono font-bold text-amber-400 tracking-[8px]">{passcode}</code>

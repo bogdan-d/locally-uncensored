@@ -3767,6 +3767,92 @@ fn ensure_lan_firewall_rule(port: u16) {
 #[cfg(not(target_os = "windows"))]
 fn ensure_lan_firewall_rule(_port: u16) {}
 
+/// User-triggered, ELEVATED counterpart to `ensure_lan_firewall_rule`. The
+/// best-effort version can't elevate, so a per-user install's inbound rule
+/// never gets created and a phone on the same Wi-Fi can't reach the (correct)
+/// LAN URL — David 2026-06-15: "manual URL works on the PC but not the phone".
+/// This relaunches `netsh` via a UAC prompt to add the rule once, then verifies
+/// it landed in a locale-independent way (exit code + port match, since David's
+/// Windows is German and netsh's text is localized).
+#[tauri::command]
+pub async fn allow_lan_access(port: Option<u16>) -> Result<String, String> {
+    let port = port.unwrap_or(11435);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        use std::process::Command;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let name = format!("Locally Uncensored Remote {}", port);
+
+        // A tiny .cmd lets cmd.exe parse the spaced, quoted rule name natively
+        // — avoids the PowerShell→netsh nested-quoting trap entirely.
+        let script = format!(
+            "@echo off\r\n\
+             netsh advfirewall firewall delete rule name=\"{name}\" >nul 2>&1\r\n\
+             netsh advfirewall firewall add rule name=\"{name}\" dir=in action=allow protocol=TCP localport={port} profile=private,domain\r\n",
+            name = name, port = port
+        );
+        let cmd_path = std::env::temp_dir().join("lu_allow_lan.cmd");
+        std::fs::write(&cmd_path, script)
+            .map_err(|e| format!("Could not write helper script: {}", e))?;
+
+        // Relaunch the .cmd elevated (UAC). -Wait so we know when it finished;
+        // a cancelled UAC makes Start-Process throw → powershell exits non-zero.
+        let ps = format!(
+            "Start-Process -FilePath '{}' -Verb RunAs -WindowStyle Hidden -Wait",
+            cmd_path.display()
+        );
+        let out = Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output()
+            .map_err(|e| format!("Could not launch elevated helper: {}", e))?;
+        let ps_ok = out.status.success();
+        let ps_err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+
+        // Verify the rule exists now. Reading rules needs no admin. netsh
+        // returns a non-zero exit when no rule matches, and the port number is
+        // locale-independent — check both so a German Windows can't fool us.
+        let check = Command::new("netsh")
+            .args(["advfirewall", "firewall", "show", "rule", &format!("name={}", name)])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+        let exists = match check {
+            Ok(o) => o.status.success()
+                || String::from_utf8_lossy(&o.stdout).contains(&port.to_string()),
+            Err(_) => false,
+        };
+
+        let _ = std::fs::remove_file(&cmd_path); // best-effort cleanup
+
+        if exists {
+            Ok(format!(
+                "LAN access enabled (inbound TCP {port} allowed). Re-scan the QR on your phone — same Wi-Fi."
+            ))
+        } else if !ps_ok {
+            Err(format!(
+                "Permission was declined, so LAN access wasn't changed{}. Click again and accept the Windows prompt, or run this once in an Admin PowerShell:\n\
+                 netsh advfirewall firewall add rule name=\"{name}\" dir=in action=allow protocol=TCP localport={port}",
+                if ps_err.is_empty() { String::new() } else { format!(" ({})", ps_err) },
+                name = name, port = port
+            ))
+        } else {
+            Err(format!(
+                "Tried to allow LAN access but couldn't confirm the firewall rule. Run this once in an Admin PowerShell:\n\
+                 netsh advfirewall firewall add rule name=\"{name}\" dir=in action=allow protocol=TCP localport={port}",
+                name = name, port = port
+            ))
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(format!(
+            "Automatic firewall setup is Windows-only. On Linux/macOS, allow inbound TCP {} in your system firewall (e.g. `sudo ufw allow {}/tcp`).",
+            port, port
+        ))
+    }
+}
+
 #[tauri::command]
 pub async fn start_remote_server(
     app: AppHandle,
