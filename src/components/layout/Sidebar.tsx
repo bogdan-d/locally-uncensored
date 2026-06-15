@@ -31,8 +31,6 @@ export function Sidebar() {
   const [countdown, setCountdown] = useState('')
   const [dispatchPicker, setDispatchPicker] = useState(false)
   const [qrModalOpen, setQrModalOpen] = useState(false)
-  const [lanFixMsg, setLanFixMsg] = useState<string | null>(null)
-  const [lanFixing, setLanFixing] = useState(false)
 
   const isCodingMode = chatMode === 'codex'
   const isRemoteMode = chatMode === 'remote'
@@ -161,23 +159,6 @@ export function Sidebar() {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
-  }
-
-  // One-click LAN firewall fix: relaunch netsh elevated (UAC) to add the
-  // inbound allow rule for the remote port, so a phone on the same Wi-Fi can
-  // actually reach the server (David 2026-06-15: the QR/IP were correct but
-  // Windows silently dropped the phone's connection — no inbound rule).
-  const handleAllowLan = async () => {
-    setLanFixing(true)
-    setLanFixMsg('Requesting permission (accept the Windows prompt)…')
-    try {
-      const msg = await useRemoteStore.getState().allowLanAccess()
-      setLanFixMsg(msg || 'LAN access allowed — re-scan the QR on your phone.')
-    } catch (e) {
-      setLanFixMsg(String(e))
-    } finally {
-      setLanFixing(false)
-    }
   }
 
   // Auto-hide the QR panel (a) as soon as the dispatched conversation
@@ -391,26 +372,6 @@ export function Sidebar() {
                 <p className="text-[0.5rem] text-gray-500/70 leading-snug">
                   First connection may take 5–10 s while DNS propagates. If you see a DNS error, wait a moment and reload.
                 </p>
-              )}
-
-              {/* LAN reachability helper — only relevant for LAN dispatch.
-                  Adds the Windows Firewall inbound rule (elevated UAC) so a
-                  phone on the same Wi-Fi can actually reach the server. */}
-              {!tunnelActive && !awaitingTunnel && (mobileUrl || lanUrl) && (
-                <div className="pt-0.5">
-                  <button
-                    onClick={handleAllowLan}
-                    disabled={lanFixing}
-                    title="If your phone can't open the URL on the same Wi-Fi, click to allow LAN access through Windows Firewall (requires admin)"
-                    className="w-full flex items-center justify-center gap-1 px-1.5 py-0.5 rounded text-[0.5rem] text-amber-400/90 hover:bg-amber-500/15 border border-amber-500/20 transition-all disabled:opacity-50"
-                  >
-                    <Wifi size={8} className={lanFixing ? 'animate-pulse' : ''} />
-                    {lanFixing ? 'Allowing…' : "Phone can't connect? Allow LAN access"}
-                  </button>
-                  {lanFixMsg && (
-                    <p className="text-[0.45rem] text-gray-400 leading-snug mt-0.5 break-words">{lanFixMsg}</p>
-                  )}
-                </div>
               )}
 
               {remoteError && (

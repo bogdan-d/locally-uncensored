@@ -95,7 +95,6 @@ interface RemoteState {
   setPermissions: (perms: RemotePermissions) => Promise<void>
   startTunnel: () => Promise<void>
   stopTunnel: () => Promise<void>
-  allowLanAccess: () => Promise<string>
   dispatch: (conversationId: string, model: string, systemPrompt: string) => Promise<void>
   undispatch: () => Promise<void>
   restart: (model?: string, systemPrompt?: string) => Promise<void>
@@ -304,18 +303,6 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
     } catch (err) {
       set({ error: String(err) })
     }
-  },
-
-  // Open the LAN port in Windows Firewall so phones on the same Wi-Fi can
-  // reach the remote server. This needs admin, so the Rust side relaunches
-  // `netsh` elevated via a UAC prompt. Root cause of David's 2026-06-15
-  // "manual URL works on PC but not the phone": no inbound firewall rule
-  // existed (the QR/IP were correct all along). Returns a human-readable
-  // result for the UI to show.
-  allowLanAccess: async (): Promise<string> => {
-    if (!isTauri()) return REMOTE_DEV_MODE_ERROR
-    const port = get().port || 11435
-    return await backendCall<string>('allow_lan_access', { port })
   },
 
   dispatch: async (conversationId: string, model: string, systemPrompt: string) => {

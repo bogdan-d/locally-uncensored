@@ -199,7 +199,6 @@ fn main() {
             commands::remote::start_tunnel,
             commands::remote::stop_tunnel,
             commands::remote::tunnel_status,
-            commands::remote::allow_lan_access,
             // Proxy
             commands::proxy::ollama_search,
             commands::proxy::fetch_external,
