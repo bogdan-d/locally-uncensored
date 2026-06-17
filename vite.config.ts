@@ -405,19 +405,31 @@ function comfyLauncher(): Plugin {
       process.on('SIGINT', () => { stopComfy(); process.exit() })
       process.on('SIGTERM', () => { stopComfy(); process.exit() })
 
-      // API: ComfyUI POST proxy (workaround for Vite 8 blocking POST via proxy)
+      // API: ComfyUI POST proxy (workaround for Vite 8 blocking POST via proxy).
+      // David 2026-06-16 — konata's "Failed to upload image: HTTP 400" (web build
+      // via SSH-tunneled `npm run dev`) reproduced HERE: this proxy used to buffer
+      // the body as a STRING (`body += chunk` corrupts binary image bytes) and
+      // HARDCODE Content-Type: application/json (strips the multipart/form-data
+      // boundary). JSON POSTs (submit/history) survived; the I2V image upload
+      // (/upload/image, multipart) reached ComfyUI as garbage → 400. Fix: buffer
+      // the raw bytes intact and forward the REAL Content-Type (with its boundary)
+      // + Content-Length, so multipart uploads pass through unchanged.
       server.middlewares.use('/comfyui', (req, res, next) => {
         if (req.method !== 'POST') return next()
         const targetPath = (req.url || '').replace(/^\/comfyui/, '') || '/'
-        let body = ''
-        req.on('data', (chunk: any) => { body += chunk })
+        const inChunks: Buffer[] = []
+        req.on('data', (chunk: Buffer) => { inChunks.push(chunk) })
         req.on('end', () => {
+          const body = Buffer.concat(inChunks)
           const proxyReq = http.request({
             hostname: '127.0.0.1',
             port: 8188,
             path: targetPath,
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': (req.headers['content-type'] as string) || 'application/json',
+              'Content-Length': body.length,
+            },
           }, (proxyRes) => {
             const chunks: Buffer[] = []
             proxyRes.on('data', (c: Buffer) => chunks.push(c))

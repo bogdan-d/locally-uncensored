@@ -49,9 +49,16 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
   const activeModel = useModelStore((s) => s.activeModel)
   const toggleAgentMode = useAgentModeStore((s) => s.toggleAgentMode)
   const userAvatarDataUrl = useSettingsStore((s) => s.settings.userAvatarDataUrl)
+  // Chat Tools (v2.5.3) gives plain chat web/file/image/video WITHOUT Agent Mode.
+  // When it's on, the "turn Agent Mode on" banners below are wrong + contradictory
+  // (the tool IS available in normal chat) — they predate Chat Tools and only
+  // checked `!isAgentActive`. Suppress them when Chat Tools is enabled. David
+  // 2026-06-16: web build, Agent off + Chat Tools on, image_generate emitted →
+  // bubble showed "Turn Agent Mode on" even though the tool was already running.
+  const chatToolsEnabled = useSettingsStore((s) => s.settings.chatToolsEnabled !== false)
 
   const suggestAgent = useMemo(() => {
-    if (isUser || isAgentActive || !activeConversationId || !activeModel) return false
+    if (isUser || isAgentActive || chatToolsEnabled || !activeConversationId || !activeModel) return false
     if (!message.content || message.content.length < 10) return false
     // The repair helper extracts {name, arguments}-shaped JSON blocks, plus
     // <tool_call>...</tool_call> Hermes tags. If anything came out, the
@@ -61,7 +68,7 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
     // Only nudge when the model is on the agent-allow-list. Showing this
     // banner on a non-agent-capable model would be a dead-end.
     return isAgentCompatible(activeModel)
-  }, [isUser, isAgentActive, activeConversationId, activeModel, message.content])
+  }, [isUser, isAgentActive, chatToolsEnabled, activeConversationId, activeModel, message.content])
 
   // Thought-only completion (live find 2026-06-11): the model reasoned —
   // usually about calling a tool it doesn't have in a non-agent chat — and
@@ -72,8 +79,8 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
   const thoughtOnly = !isUser && !(message.content || '').trim() && !!(message.thinking || '').trim()
     && (!isLast || !!message.usage)
   const thoughtOnlyToolIntent = useMemo(
-    () => thoughtOnly && !isAgentActive && looksLikeToolIntent(message.thinking || ''),
-    [thoughtOnly, isAgentActive, message.thinking],
+    () => thoughtOnly && !isAgentActive && !chatToolsEnabled && looksLikeToolIntent(message.thinking || ''),
+    [thoughtOnly, isAgentActive, chatToolsEnabled, message.thinking],
   )
 
   useEffect(() => {

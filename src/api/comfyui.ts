@@ -924,6 +924,24 @@ export async function cancelGeneration(): Promise<void> {
   } catch { /* best effort */ }
 }
 
+/**
+ * Clear ComfyUI's PENDING queue (David 2026-06-16). /interrupt only stops the
+ * job that is currently executing; anything still queued (e.g. a duplicate that
+ * slipped in, or a second gen the model emitted) would start the instant the
+ * running one ends. On a user "Stop" we want EVERYTHING gone, so we clear the
+ * queue too. Best-effort — a failure here must never block the cancel path.
+ */
+export async function clearComfyQueue(): Promise<void> {
+  try {
+    await localFetch(comfyuiUrl('/queue'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clear: true }),
+      timeoutMs: COMFY_STATS_TIMEOUT_MS,
+    })
+  } catch { /* best effort */ }
+}
+
 export async function freeMemory(): Promise<void> {
   try {
     await localFetch(comfyuiUrl('/free'), {

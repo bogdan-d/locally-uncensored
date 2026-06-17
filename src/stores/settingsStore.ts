@@ -21,7 +21,12 @@ import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 // preferredVideoT2VModel / preferredVideoI2VModel (all default '' = "ask
 // before the VRAM swap"). Same additive merge path — existing users simply
 // see the picker on their next generation.
-const STORE_VERSION = 9
+// v10 (2026-06-16): one-time RESET of those three picker preferences. Video had
+// kept a silently-saved model and only offered "Change model"; David wants the
+// full picker to come FIRST again on both image AND video. Clearing the saved
+// picks once on upgrade makes the picker the default until the user deliberately
+// saves a model again via the picker's Remember.
+const STORE_VERSION = 10
 
 interface SettingsState {
   settings: Settings
@@ -92,10 +97,19 @@ export const useSettingsStore = create<SettingsState>()(
       migrate: (persisted: any, version: number) => {
         if (version < STORE_VERSION) {
           const customPersonas = (persisted.personas || []).filter((p: Persona) => !p.isBuiltIn)
+          // Merge new default settings into existing (fills missing fields like thinkingEnabled)
+          const mergedSettings = { ...DEFAULT_SETTINGS, ...(persisted.settings || {}) }
+          // v10: clear the saved model-picker preferences ONCE so the picker is
+          // shown first again on image + video (David 2026-06-16). The additive
+          // merge above would otherwise preserve a previously-saved pick.
+          if (version < 10) {
+            mergedSettings.preferredImageModel = ''
+            mergedSettings.preferredVideoT2VModel = ''
+            mergedSettings.preferredVideoI2VModel = ''
+          }
           return {
             ...persisted,
-            // Merge new default settings into existing (fills missing fields like thinkingEnabled)
-            settings: { ...DEFAULT_SETTINGS, ...(persisted.settings || {}) },
+            settings: mergedSettings,
             personas: [...BUILT_IN_PERSONAS, ...customPersonas],
             activePersonaId: persisted.activePersonaId || 'unrestricted',
             _version: STORE_VERSION,

@@ -263,6 +263,31 @@ export function useAgentChat() {
       }
     }
 
+    // ── Re-entry guard (double-submit) ──────────────────────────────────
+    // An accidental double-send (two Enters before the React `isGenerating`
+    // prop flips Send → Stop) used to start a SECOND agent loop on this hook.
+    // Both loops share the streaming refs AND each keeps its OWN per-turn
+    // over-generation caps (maxImageGen/maxVideoGen), so each fired its own
+    // image/video tool — live repro: ONE prompt sent twice ran video_generate
+    // 4× (gemma4:e4b + SVD-XT, David 2026-06-16). Claim the lock synchronously
+    // HERE — strategy resolution above can await, the critical section (message
+    // add, ref reset, the loop) is all below — so the racing second call bails
+    // before duplicating anything. Released in the finally (runningRef=false).
+    if (runningRef.current) {
+      log.info('agent.duplicate_send_blocked', { activeModel })
+      return
+    }
+    runningRef.current = true
+    // Flip the INPUT gate true in the SAME synchronous beat as the ref (David
+    // 2026-06-16, bug A). The input shows Send vs Stop off `isAgentRunning`,
+    // which used to flip true only ~80 lines down — AFTER the RAG + memory-
+    // retrieval awaits. In that window runningRef was already true (so the guard
+    // silently dropped a resend) while the input still showed Send, so the first
+    // message right after a generation looked like it "didn't go through". Both
+    // signals now go true together here and false together in the finally; the
+    // only early return before the try (no conv) resets both.
+    setIsAgentRunning(true)
+
     // Create or get conversation
     let convId = store.activeConversationId
     if (!convId) {
@@ -337,7 +362,7 @@ export function useAgentChat() {
 
     // Build conversation context
     const conv = useChatStore.getState().conversations.find((c) => c.id === convId)
-    if (!conv) return
+    if (!conv) { runningRef.current = false; setIsAgentRunning(false); return }
 
     // RAG context injection
     // Per-chat persona toggle — default OFF. Only apply persona prompt
@@ -348,7 +373,10 @@ export function useAgentChat() {
     const ragEnabled = ragState.ragEnabled[convId] ?? false
 
     if (ragEnabled) {
-      await ragState.loadChunksFromDB(convId)
+      // Guard the lock: a throw here (before the main try/finally below) would
+      // otherwise leave runningRef stuck true and wedge the chat (the re-entry
+      // guard set it above). Degrade gracefully to no RAG context on failure.
+      try { await ragState.loadChunksFromDB(convId) } catch (e) { log.error('RAG chunk load failed', { e }) }
       const chunks = ragState.getConversationChunks(convId)
       if (chunks.length > 0) {
         try {
@@ -422,19 +450,24 @@ export function useAgentChat() {
     }
 
     // Caveman mode: append as response style modifier AFTER agent instructions
-    // This ensures the model understands its agent role first, then applies terse style
-    if (settings.cavemanMode && settings.cavemanMode !== 'off') {
-      const { CAVEMAN_PROMPTS } = await import('../lib/constants')
-      const cavemanPrompt = CAVEMAN_PROMPTS[settings.cavemanMode]
-      if (cavemanPrompt) {
-        agentSystemPrompt += `\n\nResponse style: ${cavemanPrompt}`
+    // This ensures the model understands its agent role first, then applies terse
+    // style. Wrapped so a failed dynamic import can't throw OUT of the setup
+    // region (which runs before the main try/finally) and leave runningRef +
+    // isAgentRunning stuck true — that would wedge the chat (bug A class).
+    let cavemanReminder = ''
+    try {
+      if (settings.cavemanMode && settings.cavemanMode !== 'off') {
+        const { CAVEMAN_PROMPTS, CAVEMAN_REMINDERS } = await import('../lib/constants')
+        const cavemanPrompt = CAVEMAN_PROMPTS[settings.cavemanMode]
+        if (cavemanPrompt) {
+          agentSystemPrompt += `\n\nResponse style: ${cavemanPrompt}`
+        }
+        // Per-message Caveman reminder for non-thinking models
+        cavemanReminder = CAVEMAN_REMINDERS?.[settings.cavemanMode as 'lite' | 'full' | 'ultra'] || ''
       }
+    } catch (e) {
+      log.warn('agent.caveman_load_failed', { e: String(e) })
     }
-
-    // Per-message Caveman reminder for non-thinking models
-    const cavemanReminder = (settings.cavemanMode && settings.cavemanMode !== 'off')
-      ? (await import('../lib/constants')).CAVEMAN_REMINDERS?.[settings.cavemanMode as 'lite' | 'full' | 'ultra'] || ''
-      : ''
 
     // Build messages array
     let agentMessages: ChatMessage[] = [
@@ -512,6 +545,12 @@ export function useAgentChat() {
     const maxVideoGen = wantsVideo && videoAllowed ? 1 : 0
     let imageGenDone = 0
     let videoGenDone = 0
+    // Track whether the generated media was actually fed back to the model
+    // (vision feedback). When it wasn't — video is never fed back, and a
+    // text-only model can't see an image — we suppress the generic "your media
+    // is above" closing line so the finished tool call + inline media stands on
+    // its own with no hollow comment behind it (David 2026-06-16).
+    let visionFeedbackGiven = false
     let mediaSteered = false
     let mediaSynthesized = false
     let forceNoThink = false
@@ -1203,6 +1242,7 @@ export function useAgentChat() {
                 const vf = await buildVisionFeedback(modelToUse, tc.function.name, result.result)
                 if (vf) {
                   agentMessages.push(vf as unknown as ChatMessage)
+                  visionFeedbackGiven = true
                   log.info('agent.vision_feedback_attached', { tool: tc.function.name })
                   break // one image per batch is enough context
                 }
@@ -1237,11 +1277,18 @@ export function useAgentChat() {
         // Media-aware closing: if a picture/clip was produced, say so warmly
         // instead of a robotic "1 operation completed" (David 2026-06-04).
         if (imageGenDone > 0 || videoGenDone > 0) {
-          contentRef.current = imageGenDone > 0 && videoGenDone > 0
-            ? 'Fertig — dein Bild und dein Video sind oben. / Done — your image and video are above.'
-            : videoGenDone > 0
-              ? 'Fertig — dein Video ist oben. / Done — your video is above.'
-              : 'Fertig — dein Bild ist oben. / Done — your image is above.'
+          // Only add a generic closing line when the model actually SAW the
+          // media (vision feedback was sent — image + vision-capable model).
+          // For video (never fed back) or a text-only model, contentRef stays
+          // empty: the bubble shows just the completed tool call with its inline
+          // image/video, no robotic "your video is above" (David 2026-06-16).
+          if (visionFeedbackGiven) {
+            contentRef.current = imageGenDone > 0 && videoGenDone > 0
+              ? 'Fertig — dein Bild und dein Video sind oben. / Done — your image and video are above.'
+              : videoGenDone > 0
+                ? 'Fertig — dein Video ist oben. / Done — your video is above.'
+                : 'Fertig — dein Bild ist oben. / Done — your image is above.'
+          }
         } else {
           const otherOk = completedTools.length - writes - reads
           const parts: string[] = []

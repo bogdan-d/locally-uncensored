@@ -412,9 +412,11 @@ describe('vramHandoffGenerate — finally always restores the text model', () =>
     await vramHandoffGenerate('image', { prompt: 'a fox' })
     // 5GB + ~4GB sd15 = 9GB < 24GB → fits → no eviction.
     expect(unloadModel).not.toHaveBeenCalled()
-    // …but ComfyUI VRAM is still freed afterwards (cleanup), and no reload was
-    // needed because nothing was evicted.
-    expect(freeMemory).toHaveBeenCalled()
+    // Bug C (David 2026-06-16): when nothing was evicted we now SKIP the ComfyUI
+    // freeMemory in the finally so the checkpoint stays resident and the NEXT
+    // generation reuses it warm instead of cold-loading every time. Nothing
+    // evicted → no reload either.
+    expect(freeMemory).not.toHaveBeenCalled()
     expect(loadModel).not.toHaveBeenCalled()
   })
 

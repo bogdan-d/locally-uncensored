@@ -4,7 +4,9 @@ import { Search, Globe, FileText, FileEdit, Terminal, Image, Film, Loader2, Chec
 import type { AgentToolCall } from '../../types/agent-mode'
 import { getComfyHost, getComfyPort, downloadComfyFile } from '../../api/backend'
 import { useModelPickStore } from '../../stores/modelPickStore'
+import { useGenerationStore } from '../../stores/generationStore'
 import { ModelPickerCard, ChangeModelInline, pickKindForToolCall } from './ModelPickerCard'
+import { requestGenerationCancel } from '../../api/vram-handoff'
 
 // F1 (konata3602 commitment 2026-05-23) + render fix (konata3602 bug 2026-06-07)
 // — when image_generate / video_generate / screenshot produce a ComfyUI output,
@@ -111,6 +113,11 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
   const isRunning = toolCall.status === 'running'
   const isPending = toolCall.status === 'pending_approval'
   const isFailed = toolCall.status === 'failed' || toolCall.status === 'rejected'
+  // Real cancel (David 2026-06-16): only image/video generation supports a true
+  // abort (ComfyUI /interrupt + loop abort). Local "cancelling" state flips the
+  // mini button to a "stopping…" indicator the moment it's clicked.
+  const isGenTool = toolCall.toolName === 'image_generate' || toolCall.toolName === 'video_generate'
+  const [cancelling, setCancelling] = useState(false)
 
   // Inline media preview URL (image_generate / video_generate / screenshot).
   // Computed once; rendered ALWAYS-visible below the header (even while the
@@ -147,24 +154,50 @@ export function ToolCallBlock({ toolCall, onApprove, onReject }: Props) {
   return (
     <div className="mb-0.5">
       {/* Header line — monochrome, only status icon has subtle color */}
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-1.5 py-0.5 text-left hover:opacity-80 transition-opacity w-full"
-      >
-        <ToolIcon size={10} className="text-gray-500 dark:text-gray-500 shrink-0" />
-        <span className="text-[0.65rem] text-gray-600 dark:text-gray-400">{toolCall.toolName}</span>
-        <StatusIcon size={9} className={`shrink-0 ${
-          toolCall.status === 'completed' ? 'text-gray-400 dark:text-gray-500' :
-          isFailed ? 'text-red-400/60' :
-          isPending ? 'text-amber-400/60' :
-          'text-gray-500'
-        } ${isRunning ? 'animate-spin' : ''}`} />
-        {toolCall.duration != null && (
-          <span className="text-[0.5rem] text-gray-500 dark:text-gray-600">
-            {toolCall.duration < 1000 ? `${toolCall.duration}ms` : `${(toolCall.duration / 1000).toFixed(1)}s`}
-          </span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => setOpen(!open)}
+          className="flex items-center gap-1.5 py-0.5 text-left hover:opacity-80 transition-opacity flex-1 min-w-0"
+        >
+          <ToolIcon size={10} className="text-gray-500 dark:text-gray-500 shrink-0" />
+          <span className="text-[0.65rem] text-gray-600 dark:text-gray-400">{toolCall.toolName}</span>
+          <StatusIcon size={9} className={`shrink-0 ${
+            toolCall.status === 'completed' ? 'text-gray-400 dark:text-gray-500' :
+            isFailed ? 'text-red-400/60' :
+            isPending ? 'text-amber-400/60' :
+            'text-gray-500'
+          } ${isRunning ? 'animate-spin' : ''}`} />
+          {toolCall.duration != null && (
+            <span className="text-[0.5rem] text-gray-500 dark:text-gray-600">
+              {toolCall.duration < 1000 ? `${toolCall.duration}ms` : `${(toolCall.duration / 1000).toFixed(1)}s`}
+            </span>
+          )}
+        </button>
+        {/* Real abort (David 2026-06-16): stop a running image/video generation.
+            Fires ComfyUI /interrupt AND aborts the agent loop so it won't
+            auto-start a replacement. VRAM is restored by runHandoff's finally. */}
+        {isRunning && isGenTool && (
+          cancelling ? (
+            <span className="flex items-center gap-1 text-[0.55rem] text-gray-400 dark:text-gray-500 shrink-0 pr-1">
+              <Loader2 size={9} className="animate-spin" /> stopping…
+            </span>
+          ) : (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setCancelling(true)
+                requestGenerationCancel()
+                const { generating, aborters } = useGenerationStore.getState()
+                Object.keys(generating).forEach((cid) => aborters[cid]?.())
+              }}
+              title="Stop generation"
+              className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.55rem] font-medium text-red-700 dark:text-red-300 bg-red-500/10 hover:bg-red-500/15 border border-red-500/20 dark:border-red-500/25 transition-colors shrink-0"
+            >
+              <X size={10} /> Stop
+            </button>
+          )
         )}
-      </button>
+      </div>
 
       {/* Model-Picker (v2.5.3) — LU's own pre-VRAM-swap model choice, shown
           while the executor gate awaits the pick. Falls back to the mini

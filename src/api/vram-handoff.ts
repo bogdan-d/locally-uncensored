@@ -55,6 +55,8 @@ import {
   submitWorkflow,
   getHistory,
   freeMemory,
+  cancelGeneration,
+  clearComfyQueue,
   extractComfyOutputFiles,
   getImageUrl,
   classifyModel,
@@ -351,7 +353,9 @@ async function ensureComfyRunning(timeoutMs = 90_000): Promise<boolean> {
   }
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    await sleep(1500)
+    // Bail fast if the user cancelled during the cold start (the caller checks
+    // _genCancelRequested right after us and reports it as "cancelled").
+    if ((await raceCancel(sleep(1500))) === CANCELLED) return false
     if (await comfyIsRunning()) return true
   }
   return false
@@ -476,6 +480,56 @@ function sleep(ms: number): Promise<void> {
 // reload-in-finally of call #1 can never overlap the generate of call #2.
 let _inFlight: Promise<unknown> = Promise.resolve()
 
+// ── User-initiated cancel (David 2026-06-16) ────────────────────────────────
+// The agent's AbortController never reached the ComfyUI poll loop, so "Stop"
+// left ComfyUI rendering (a ~500 s SVD video kept burning the GPU after the UI
+// said it stopped). This module-level flag + ComfyUI /interrupt give the
+// in-chat cancel button a REAL abort. Only one generation runs at a time
+// (serialised via _inFlight), so one flag suffices.
+//
+// David 2026-06-16 (bug B): a bare flag checked only BETWEEN getHistory calls
+// wasn't enough — `image_generate` Stop "hung at stopping…". The hang: each
+// poll tick blocks in `await getHistory` (15 s cap) while ComfyUI COLD-LOADS the
+// checkpoint (RealVisXL is a long, non-interruptible load), and /interrupt is a
+// no-op during a model load. So the flag wasn't re-checked for up to 15 s and
+// the UI sat on "stopping…". Fix: a notify-promise (_cancelWait) that every long
+// await RACES against, so Stop bails within milliseconds regardless of which
+// phase we're in (eviction, ComfyUI cold-start, model-load, or sampling). We
+// also clear the ComfyUI queue, not just /interrupt, so a queued item can't
+// start after the running one is interrupted. runHandoff's finally still
+// restores the text model into VRAM exactly as before.
+const CANCELLED = '__lu_cancelled__' as const
+
+let _genCancelRequested = false
+let _cancelNotify: (() => void) | null = null
+// A promise that resolves to CANCELLED the instant Stop is pressed. Re-armed per
+// run by resetCancel() and built ONCE per gen (not per raceCancel call) so a long
+// poll doesn't accumulate thousands of derived `.then` promises on it.
+let _cancelSignal: Promise<typeof CANCELLED> = new Promise<typeof CANCELLED>(() => { /* until reset */ })
+
+/** Re-arm the cancel channel at the start of each generation. */
+function resetCancel(): void {
+  _genCancelRequested = false
+  _cancelSignal = new Promise<typeof CANCELLED>((resolve) => { _cancelNotify = () => resolve(CANCELLED) })
+}
+
+/**
+ * Race a long await against a user cancel. Returns the wrapped promise's value
+ * normally, or the CANCELLED sentinel the moment Stop is pressed — so a 15 s
+ * getHistory tick or a 90 s ComfyUI cold-start can't keep "stopping…" on screen.
+ */
+function raceCancel<T>(p: Promise<T>): Promise<T | typeof CANCELLED> {
+  if (_genCancelRequested) return Promise.resolve(CANCELLED)
+  return Promise.race([p, _cancelSignal])
+}
+
+export function requestGenerationCancel(): void {
+  _genCancelRequested = true
+  _cancelNotify?.()        // wake every pending raceCancel immediately
+  void cancelGeneration()  // /interrupt the running job (no-op mid model-load)
+  void clearComfyQueue()   // drop anything still queued so it can't start next
+}
+
 // Last image LU actually produced this session. Small models routinely pass a
 // hallucinated filename (e.g. "locally_saved_image.png") to a follow-up
 // video_generate; when the given name can't be resolved we fall back to this so
@@ -523,6 +577,9 @@ export async function vramHandoffGenerate(kind: 'image' | 'video', args: VramHan
 }
 
 async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promise<string> {
+  // Fresh run — re-arm the cancel channel (clears any flag/notify left over from
+  // a previous cancelled gen).
+  resetCancel()
   // Robustness for small local models (gemma4:e4b live): they frequently emit a
   // snake_case `input_image` alias and sometimes omit `prompt` on a video call.
   // Normalize the alias so the I2V path still finds the source image.
@@ -752,9 +809,16 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
       }
     }
 
+    // Cancelled while freeing VRAM / waiting for eviction — bail before we even
+    // touch ComfyUI. The finally still restores the text model.
+    if (_genCancelRequested) return `${label(kind)} generation cancelled.`
+
     // ── (c) GENERATE ───────────────────────────────────────────────
     emitHandoff('loading_image_model', { kind, detail: targetModel })
     const up = await ensureComfyRunning()
+    // ensureComfyRunning returns false on a cancel too — distinguish so Stop
+    // reads as "cancelled", not the misleading "ComfyUI did not start".
+    if (_genCancelRequested) return `${label(kind)} generation cancelled.`
     if (!up) {
       // Surface clearly; the finally block still restores the text model.
       emitHandoff('error', { kind, detail: 'ComfyUI did not start' })
@@ -763,9 +827,21 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
 
     emitHandoff('generating', { kind, detail: targetModel })
 
-    const result = kind === 'image'
-      ? await generateImage(prompt, targetModel, args)
-      : await generateVideo(prompt, targetModel, videoBackend, args)
+    // Race the WHOLE generation against the cancel signal — not just the poll
+    // loop. David 2026-06-16 (web build): "Stop" sat on "stopping…" forever
+    // because generateImage was stuck BEFORE the poll loop (fetchCaps /
+    // buildDynamicWorkflow — /object_info fetches that can hang through a web
+    // proxy), and the cancel flag was only checked inside pollAndExtract /
+    // ensureComfyRunning. Wrapping the entire generate call means Stop returns
+    // "cancelled" within ms from ANY phase (caps fetch, workflow build, image
+    // upload, submit, poll). The abandoned promise keeps running in the
+    // background but its output is ignored; requestGenerationCancel already
+    // fired /interrupt + queue-clear, and the finally restores the text model.
+    const genPromise = kind === 'image'
+      ? generateImage(prompt, targetModel, args)
+      : generateVideo(prompt, targetModel, videoBackend, args)
+    const result = await raceCancel(genPromise)
+    if (result === CANCELLED) return `${label(kind)} generation cancelled.`
     return result
   } finally {
     // ── (d) HANDOFF-BACK — ALWAYS (success, failure, timeout) ──────
@@ -773,14 +849,44 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
     // best-effort reload the text model. The reload is non-fatal: if it throws,
     // Ollama will lazy-load on the user's next message anyway.
     emitHandoff('restoring_text', { kind, detail: evictedModel ?? evictedLms?.id ?? undefined })
-    try {
-      await freeMemory()
-    } catch { /* best effort */ }
+    // David 2026-06-16 (bug C — RealVisXL "6 min+"): only force a ComfyUI VRAM
+    // unload when we ACTUALLY evicted a text model (it needs the room to reload)
+    // or the user cancelled (stop the burn). When nothing was evicted — the
+    // common image case, where the small chat model and the SDXL checkpoint
+    // co-exist — keep ComfyUI's checkpoint resident so the NEXT generation
+    // reuses it warm instead of paying the full cold reload every single time.
+    if (evictedModel || evictedLms || _genCancelRequested) {
+      try {
+        await freeMemory()
+      } catch { /* best effort */ }
+    }
     if (evictedModel) {
       try {
         await loadModel(evictedModel)
       } catch (e) {
-        log.warn('vram_handoff.reload_failed', { textModel: evictedModel, err: String(e) })
+        // A heavy video model (e.g. wan2.2 5B on a 12 GB GPU) can leave ComfyUI
+        // holding a wedged CUDA context that blocks Ollama from re-initializing
+        // the text model: loadModel throws "CUDA error: shared object
+        // initialization failed" (David 2026-06-16, E2E). It is NOT an OOM — VRAM
+        // is already free — and it survives even an Ollama restart; the only thing
+        // that clears it is stopping ComfyUI's process to release its CUDA context.
+        // So on that failure class, stop ComfyUI and retry the reload ONCE, so the
+        // next chat turn finds the model loaded instead of a dead backend. Reactive
+        // by design: svd / lighter models never throw here, so they never pay the
+        // ComfyUI restart (the next generation lazily restarts it via ensureComfyRunning).
+        const msg = String(e instanceof Error ? e.message : e)
+        log.warn('vram_handoff.reload_failed', { textModel: evictedModel, err: msg })
+        if (/cuda|shared object|terminated|0xc0000409|llama[ -](?:runner|server)/i.test(msg)) {
+          try {
+            log.warn('vram_handoff.reload_cuda_wedge_recover', { textModel: evictedModel })
+            await backendCall('stop_comfyui')
+            await sleep(5000) // let the GPU/driver settle after ComfyUI releases the context
+            await loadModel(evictedModel)
+            log.info('vram_handoff.reload_cuda_wedge_recovered', { textModel: evictedModel })
+          } catch (e2) {
+            log.warn('vram_handoff.reload_retry_failed', { textModel: evictedModel, err: String(e2 instanceof Error ? e2.message : e2) })
+          }
+        }
       }
     }
     if (evictedLms) {
@@ -1086,8 +1192,16 @@ async function generateVideo(
 async function pollAndExtract(promptId: string, prompt: string, kindLabel: string, timeoutMs: number): Promise<string> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    await sleep(1000)
-    const history = await getHistory(promptId)
+    // User hit the in-chat cancel button — ComfyUI was already sent /interrupt
+    // + queue-clear by requestGenerationCancel(); stop polling so runHandoff's
+    // finally can restore the text model into VRAM instead of waiting out the
+    // timeout. RACE both the sleep AND the getHistory against the cancel signal
+    // (bug B): a cold checkpoint load makes getHistory block for up to its 15 s
+    // cap, so a between-ticks-only check kept "stopping…" on screen for seconds.
+    if (_genCancelRequested) return `${kindLabel} generation cancelled.`
+    if ((await raceCancel(sleep(1000))) === CANCELLED) return `${kindLabel} generation cancelled.`
+    const history = await raceCancel(getHistory(promptId))
+    if (history === CANCELLED) return `${kindLabel} generation cancelled.`
     if (history?.status?.completed) {
       const outputs = history.outputs ?? {}
       for (const nodeId of Object.keys(outputs)) {
