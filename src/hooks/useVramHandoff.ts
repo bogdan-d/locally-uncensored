@@ -16,7 +16,7 @@
  * `done`/`error` are terminal and reset the state.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { onHandoff, type HandoffPhase } from '../api/vram-handoff'
 
 export interface VramHandoffState {
@@ -38,12 +38,23 @@ const INITIAL: VramHandoffState = { active: false, evicted: false, phase: null, 
 
 export function useVramHandoff(): VramHandoffState {
   const [state, setState] = useState<VramHandoffState>(INITIAL)
+  // Pending terminal-reset timer. Stored so a NEW generation that starts within
+  // the 1200ms window cancels the previous gen's reset — otherwise the orphaned
+  // timer fires mid-gen-#2 and blanks the live card (back-to-back image→video).
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     const unsub = onHandoff((d) => {
+      // Any new event means a gen is in flight — cancel a pending reset from a
+      // prior gen so it can't clobber this one.
+      if (resetTimer.current) { clearTimeout(resetTimer.current); resetTimer.current = null }
       setState((prev) => {
         let active = prev.active
         let evicted = prev.evicted
+        // `deciding` is the orchestrator's first emit for every generation, so
+        // re-arm the per-cycle flags here. Without this, gen #2 inherits gen #1's
+        // `evicted` and shows a false "VRAM swap" / "restoring chat model" copy.
+        if (d.phase === 'deciding') { active = false; evicted = false }
         // A real swap is marked by `freeing_vram`; the card becomes visible as
         // soon as the gen starts loading its model, so a no-eviction image gen
         // still gets an honest "loading / generating" banner.
@@ -61,10 +72,10 @@ export function useVramHandoff(): VramHandoffState {
       // After a terminal event, fully reset shortly so a fresh generation starts
       // from a clean slate (and the card unmounts cleanly).
       if (d.terminal) {
-        setTimeout(() => setState(INITIAL), 1200)
+        resetTimer.current = setTimeout(() => { resetTimer.current = null; setState(INITIAL) }, 1200)
       }
     })
-    return unsub
+    return () => { if (resetTimer.current) clearTimeout(resetTimer.current); unsub() }
   }, [])
 
   return state

@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { chatNonStreaming } from '../api/agents'
 import { setActiveChatId, clearActiveChatId, chatWorkspaceSlug, setActiveWorkspace, setActiveAgentModel, renderWorkspaceSection, setChatArtifactMode, takeChatArtifacts } from '../api/agent-context'
 import { isOllamaLocal } from '../api/backend'
+import { requestGenerationCancel } from '../api/vram-handoff'
 import { resolveWorkspace } from '../api/agents/workspace-resolve'
 import { useAgentModeStore } from '../stores/agentModeStore'
 import { streamOllamaChatWithTools } from '../lib/ollama-stream-tools'
@@ -1383,6 +1384,10 @@ export function useAgentChat() {
     runningRef.current = false
     abortRef.current?.abort()
     abortRef.current = null
+    // Interrupt any in-flight ComfyUI gen too — the main Stop button only aborted
+    // the agent loop before, so a running image/video kept burning unless the user
+    // happened to click the small in-chat tool Stop. Now both Stops agree.
+    requestGenerationCancel()
     for (const entry of approvalQueueRef.current) entry.resolve(false)
     approvalQueueRef.current = []
     setPendingApproval(null)

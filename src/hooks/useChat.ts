@@ -8,6 +8,7 @@ import { useMemoryStore } from "../stores/memoryStore"
 import { retrieveContext } from "../api/rag"
 import { getModelMaxTokens } from "../lib/context-compaction"
 import { getModelContextCached } from "../api/ollama"
+import { requestGenerationCancel } from "../api/vram-handoff"
 import { effectiveContextWindow } from "../lib/context-window"
 import { useAgentChat } from "./useAgentChat"
 import { useMemory } from "./useMemory"
@@ -448,6 +449,10 @@ export function useChat() {
 
   const stopGeneration = useCallback(() => {
     abortRef.current?.abort()
+    // Also interrupt an in-flight ComfyUI image/video gen, not just the JS loop —
+    // otherwise the main Stop button leaves ComfyUI burning (only the in-chat
+    // tool Stop did this before; now both affordances agree).
+    requestGenerationCancel()
   }, [])
 
   const regenerateMessage = useCallback((conversationId: string, assistantMessageId: string) => {

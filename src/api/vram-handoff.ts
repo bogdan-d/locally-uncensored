@@ -876,7 +876,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
         // ComfyUI restart (the next generation lazily restarts it via ensureComfyRunning).
         const msg = String(e instanceof Error ? e.message : e)
         log.warn('vram_handoff.reload_failed', { textModel: evictedModel, err: msg })
-        if (/cuda|shared object|terminated|0xc0000409|llama[ -](?:runner|server)/i.test(msg)) {
+        if (/cuda|shared object|0xc0000409/i.test(msg)) {
           try {
             log.warn('vram_handoff.reload_cuda_wedge_recover', { textModel: evictedModel })
             await backendCall('stop_comfyui')
@@ -975,7 +975,9 @@ async function generateImage(prompt: string, model: string, args: VramHandoffArg
     // Remember the produced filename so a follow-up "animate it" video call can
     // fall back to it when the model passes a wrong/hallucinated inputImage.
     const fn = result.match(/generated:\s*([^\s(]+\.(?:png|jpe?g|webp))/i)
-    if (fn) _lastImageFilename = fn[1]
+    // Don't let an abandoned (cancelled) gen that finishes in the background
+    // overwrite the filename a later "animate it" might pick up.
+    if (fn && !_genCancelRequested) _lastImageFilename = fn[1]
     return result
   } catch (err) {
     // Surface ComfyUI's message verbatim — an OOM must NOT be masked.
