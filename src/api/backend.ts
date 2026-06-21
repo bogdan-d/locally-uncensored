@@ -657,8 +657,29 @@ export async function fetchLocalhostBytes(url: string): Promise<Uint8Array> {
   return new Uint8Array(await res.arrayBuffer())
 }
 
+/**
+ * True only for URLs that are safe to hand to the OS shell / a new window:
+ * http, https, or mailto. Rejects file://, custom protocol handlers, UNC
+ * paths, javascript:/data: URIs, and relative paths (no base = throws). This
+ * is the guard for the main "untrusted text (model/web link) → native action"
+ * bridge: a markdown link like `[results](file:///C:/Windows/System32/calc.exe)`
+ * must never reach `plugin:shell|open`.
+ */
+export function isSafeExternalUrl(url: string): boolean {
+  try {
+    const proto = new URL(url).protocol
+    return proto === 'http:' || proto === 'https:' || proto === 'mailto:'
+  } catch {
+    return false
+  }
+}
+
 /** Open a URL in the system's default browser (works in both dev and Tauri) */
 export async function openExternal(url: string): Promise<void> {
+  if (!isSafeExternalUrl(url)) {
+    console.warn('[openExternal] blocked non-web URL:', url)
+    return
+  }
   if (isTauri()) {
     // Use Tauri's invoke to open URL in system browser via shell plugin
     const invoke = await getInvoke()
@@ -666,10 +687,10 @@ export async function openExternal(url: string): Promise<void> {
       await invoke('plugin:shell|open', { path: url })
     } catch {
       // Fallback if plugin command format differs
-      window.open(url, '_blank')
+      window.open(url, '_blank', 'noopener,noreferrer')
     }
   } else {
-    window.open(url, '_blank')
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
 }
 

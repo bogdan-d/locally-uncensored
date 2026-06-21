@@ -56,6 +56,10 @@ interface RemotePermissions {
   filesystem: boolean
   downloads: boolean
   process_control: boolean
+  /** Shell + code execution over the remote bridge. Optional + default off
+   *  (RCE-class; kept separate from filesystem). Older state without it reads
+   *  as false. */
+  shell?: boolean
 }
 
 interface RemoteState {
@@ -112,7 +116,7 @@ export const useRemoteStore = create<RemoteState>()((set, get) => ({
   mobileUrl: '',
   qrPngBase64: '',
   connectedDevices: [],
-  permissions: { filesystem: false, downloads: false, process_control: false },
+  permissions: { filesystem: false, downloads: false, process_control: false, shell: false },
   tunnelActive: false,
   tunnelUrl: '',
   tunnelLoading: false,

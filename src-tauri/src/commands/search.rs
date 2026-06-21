@@ -457,27 +457,18 @@ pub fn searxng_status(state: State<'_, AppState>) -> Result<serde_json::Value, S
 ///   - Caps at ~24 000 chars so we don't blow the context window
 #[tauri::command]
 pub async fn web_fetch(url: String) -> Result<serde_json::Value, String> {
-    // Basic URL hardening: must start http(s) and not point at localhost /
-    // private IPs. The agent should fetch public pages, not poke internal
-    // services (Ollama, ComfyUI, LAN boxes).
+    // URL hardening: http(s) only and the host must not be localhost, a
+    // private/reserved range, or a cloud-metadata endpoint. The agent should
+    // fetch public pages, not poke internal services (Ollama, ComfyUI, LAN
+    // boxes, 169.254.169.254). Reuse the shared SSRF validator — the old
+    // substring blocklist missed 172.16/12, IPv6, and decimal/hex/octal IP
+    // encodings, and didn't re-check redirects.
     let trimmed = url.trim();
-    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
-        return Err("URL must start with http:// or https://".into());
-    }
-    let lower = trimmed.to_lowercase();
-    if lower.contains("://localhost")
-        || lower.contains("://127.")
-        || lower.contains("://0.0.0.0")
-        || lower.contains("://10.")
-        || lower.contains("://192.168.")
-        || lower.contains("://169.254.")
-    {
-        return Err("Refusing to fetch private / loopback addresses from the agent.".into());
-    }
+    crate::commands::proxy::validate_public_url(trimmed)?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(20))
-        .redirect(reqwest::redirect::Policy::limited(6))
+        .redirect(crate::commands::proxy::ssrf_safe_redirect_policy(6))
         .user_agent("Mozilla/5.0 (compatible; LocallyUncensored-Agent/1.0)")
         .build()
         .map_err(|e| e.to_string())?;

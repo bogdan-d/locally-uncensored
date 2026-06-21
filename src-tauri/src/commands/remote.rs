@@ -43,6 +43,13 @@ pub struct RemotePermissions {
     pub filesystem: bool,
     pub downloads: bool,
     pub process_control: bool,
+    /// Shell + arbitrary code execution over the remote bridge. OFF by default:
+    /// this is RCE-equivalent, so it must be explicitly opted into and is kept
+    /// SEPARATE from `filesystem` (granting file access should never imply
+    /// arbitrary command execution). `#[serde(default)]` so older client
+    /// payloads that omit the field deserialize to `false`.
+    #[serde(default)]
+    pub shell: bool,
 }
 
 impl Default for RemotePermissions {
@@ -51,6 +58,7 @@ impl Default for RemotePermissions {
             filesystem: true,
             downloads: true,
             process_control: true,
+            shell: false,
         }
     }
 }
@@ -263,6 +271,14 @@ async fn handle_auth(
     Json(body): Json<AuthRequest>,
 ) -> Response {
     let ip = client_ip(&headers, Some(addr));
+    // Anti-spoof: rate-limit/lockout is keyed on the REAL TCP peer
+    // (`ConnectInfo`), NOT on `X-Forwarded-For`. A client can set XFF to a
+    // fresh value per request and otherwise reset the per-IP cooldown, which
+    // would make the 6-digit passcode brute-forceable. Over the Cloudflare
+    // tunnel every request shares cloudflared's loopback peer, so they share
+    // one (stricter) bucket — acceptable. `ip` above stays XFF-aware for the
+    // device label / JWT claim only.
+    let rate_key = addr.ip().to_string();
 
     let now = chrono_now_secs();
 
@@ -271,7 +287,7 @@ async fn handle_auth(
         let mut pc = state.passcode.lock().await;
 
         // Rate limit check
-        if let Some(&(count, cooldown_until)) = pc.failed_attempts.get(&ip) {
+        if let Some(&(count, cooldown_until)) = pc.failed_attempts.get(&rate_key) {
             if count >= MAX_FAILED_ATTEMPTS && now < cooldown_until {
                 let remaining = cooldown_until - now;
                 return (StatusCode::TOO_MANY_REQUESTS,
@@ -280,7 +296,7 @@ async fn handle_auth(
             }
             // Reset if cooldown expired
             if count >= MAX_FAILED_ATTEMPTS && now >= cooldown_until {
-                pc.failed_attempts.remove(&ip);
+                pc.failed_attempts.remove(&rate_key);
             }
         }
 
@@ -293,7 +309,7 @@ async fn handle_auth(
 
         // Verify passcode
         if body.passcode != pc.code {
-            let entry = pc.failed_attempts.entry(ip.clone()).or_insert((0, 0));
+            let entry = pc.failed_attempts.entry(rate_key.clone()).or_insert((0, 0));
             entry.0 += 1;
             if entry.0 >= MAX_FAILED_ATTEMPTS {
                 entry.1 = now + COOLDOWN_SECS;
@@ -302,7 +318,7 @@ async fn handle_auth(
         }
 
         // Success: clear failed attempts
-        pc.failed_attempts.remove(&ip);
+        pc.failed_attempts.remove(&rate_key);
     }
 
     let user_agent = headers.get(header::USER_AGENT)
@@ -409,21 +425,24 @@ pub(crate) fn resolve_remote_path(
     path: &str,
     chat_id: Option<&str>,
     state: &crate::state::AppState,
-) -> String {
+) -> Result<String, String> {
     use std::path::Path;
-    if Path::new(path).is_absolute() {
-        path.to_string()
-    } else {
-        let workspace = crate::commands::agent::agent_workspace_for(chat_id, state);
-        workspace.join(path).to_string_lossy().to_string()
-    }
+    // CONTAIN to the remote workspace (the user-picked override folder or the
+    // per-chat sandbox). A remote client must not be able to read/write/cd
+    // outside it via an absolute path or `..` (security: this is the network
+    // attack surface).
+    let workspace = crate::commands::agent::agent_workspace_for(chat_id, state);
+    let p = Path::new(path);
+    let candidate = if p.is_absolute() { p.to_path_buf() } else { workspace.join(path) };
+    let contained = crate::commands::filesystem::contain_within(&workspace, &candidate)?;
+    Ok(contained.to_string_lossy().to_string())
 }
 
 /// Run a single agent tool on behalf of an authenticated mobile client.
 /// Mirrors `executeTool` in `src/api/agents.ts`. Permission-gated so a
 /// remote client cannot reach into the desktop without explicit toggle:
 ///   - file_read / file_write   → requires `filesystem`
-///   - code_execute             → requires `filesystem`
+///   - shell_execute / code_execute → requires `shell` (default OFF, RCE-class)
 ///   - image_generate           → requires `process_control`
 ///   - web_search               → no permission required
 ///
@@ -453,7 +472,12 @@ async fn handle_agent_tool(
     // Permission gate up-front. Returns a graceful 200 + {error,permission}
     // so the mobile UI can render a single-line hint instead of "HTTP 403".
     let needs = match tool_name.as_str() {
-        "file_read" | "file_write" | "code_execute" | "file_list" | "file_search" | "shell_execute" | "screenshot"
+        // RCE-equivalent: gated behind the dedicated, default-OFF `shell`
+        // permission (NOT `filesystem`) so a remote client can't get arbitrary
+        // command/code execution just by having file access enabled.
+        "shell_execute" | "code_execute"
+            => Some(("shell", perms.shell)),
+        "file_read" | "file_write" | "file_list" | "file_search" | "screenshot"
             => Some(("filesystem", perms.filesystem)),
         "image_generate"
             => Some(("process_control", perms.process_control)),
@@ -530,12 +554,13 @@ async fn handle_agent_tool(
             let pattern = body.args.get("pattern").and_then(|v| v.as_str()).map(String::from);
             if raw_path.is_empty() { Err("file_list needs a non-empty `path` argument.".into()) }
             else {
-                // Pre-resolve so relative paths land in the user-picked
-                // Remote workspace, not in `~/agent-workspace/__remote__/`.
-                // fs_list itself doesn't see AppState — pass an absolute
-                // path so it skips its own resolver.
-                let resolved = resolve_remote_path(&raw_path, chat_id.as_deref(), &app_state);
-                crate::commands::filesystem::fs_list(resolved, recursive, pattern, None, None)
+                // Pass the user-picked Remote workspace as the working dir so
+                // fs_list resolves relatives there AND re-applies the path-jail
+                // against it — an absolute or `..` path can't escape the
+                // workspace (security: remote = network surface).
+                let ws = crate::commands::agent::agent_workspace_for(chat_id.as_deref(), &app_state)
+                    .to_string_lossy().to_string();
+                crate::commands::filesystem::fs_list(raw_path, recursive, pattern, None, Some(ws))
             }
         }
         "file_search" => {
@@ -552,8 +577,10 @@ async fn handle_agent_tool(
             if raw_path.is_empty() || pattern.is_empty() {
                 Err("file_search needs both `path` and `pattern` arguments.".into())
             } else {
-                let resolved = resolve_remote_path(&raw_path, chat_id.as_deref(), &app_state);
-                crate::commands::filesystem::fs_search(resolved, pattern, max, None, None)
+                // Jail to the remote workspace (see file_list above).
+                let ws = crate::commands::agent::agent_workspace_for(chat_id.as_deref(), &app_state)
+                    .to_string_lossy().to_string();
+                crate::commands::filesystem::fs_search(raw_path, pattern, max, None, Some(ws))
             }
         }
         "shell_execute" => {
@@ -566,12 +593,14 @@ async fn handle_agent_tool(
                 // app's launch directory and every relative command fails
                 // with "no such file" while the model thinks it succeeded.
                 let cwd_raw = body.args.get("cwd").and_then(|v| v.as_str()).map(String::from);
-                let cwd = match cwd_raw {
-                    Some(c) if !c.trim().is_empty() => Some(resolve_remote_path(&c, chat_id.as_deref(), &app_state)),
-                    _ => Some(crate::commands::agent::agent_workspace_for(chat_id.as_deref(), &app_state)
+                // Jail the cwd to the remote workspace; an out-of-workspace cwd
+                // falls back to the workspace root rather than running anywhere.
+                let cwd = cwd_raw
+                    .filter(|c| !c.trim().is_empty())
+                    .and_then(|c| resolve_remote_path(&c, chat_id.as_deref(), &app_state).ok())
+                    .or_else(|| Some(crate::commands::agent::agent_workspace_for(chat_id.as_deref(), &app_state)
                         .to_string_lossy()
-                        .to_string()),
-                };
+                        .to_string()));
                 // Best-effort: ensure the cwd exists before the shell command
                 // runs. Saves the model an extra "Error: directory not found"
                 // round-trip for the very first shell call in a new chat.
@@ -3812,9 +3841,16 @@ pub async fn start_remote_server(
         )
     }; // std::sync::MutexGuard dropped here
 
-    // Generate new passcode + JWT secret
+    // Generate new passcode + JWT secret. The secret is 32 bytes from a CSPRNG
+    // (256-bit) — the old `lu-<timestamp>-<u64>` form had a guessable prefix
+    // and only ~64 bits of entropy.
     let passcode = generate_passcode();
-    let jwt_secret_str = format!("lu-{}-{}", chrono_now_secs(), rand::random::<u64>());
+    let jwt_secret_str = {
+        use rand::RngCore;
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bytes);
+        bytes.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    };
     let now = chrono_now_secs();
 
     // Update shared state (safe to .await now, no std::sync::MutexGuard held)
@@ -4404,7 +4440,12 @@ pub async fn tunnel_status(
 // ─── Router builder ───
 
 fn build_router(state: RemoteState) -> Router {
-    let cors = CorsLayer::permissive();
+    // Same-origin only. The mobile page is served from this server and calls
+    // its APIs same-origin, so no cross-origin access is needed. The previous
+    // `CorsLayer::permissive()` reflected ANY origin onto the shell/file/proxy
+    // routes — an unnecessary exposure if a token ever leaked. `new()` adds no
+    // permissive CORS headers (same-origin requests are unaffected).
+    let cors = CorsLayer::new();
 
     // API routes. `/remote-api/auth` + `/remote-api/status` are explicitly
     // public (handled in auth_middleware). Everything else in this router
@@ -4481,7 +4522,7 @@ mod remote_path_tests {
     #[test]
     fn relative_without_override_uses_default_workspace() {
         let state = AppState::new();
-        let resolved = resolve_remote_path("client/public", Some("__remote__"), &state);
+        let resolved = resolve_remote_path("client/public", Some("__remote__"), &state).unwrap();
         let s = resolved.replace('\\', "/");
         assert!(s.contains("agent-workspace/__remote__/client/public"), "got: {}", s);
     }
@@ -4500,7 +4541,7 @@ mod remote_path_tests {
             .unwrap()
             .insert("__remote__".to_string(), target.clone());
 
-        let resolved = resolve_remote_path("client/public/index.html", Some("__remote__"), &state);
+        let resolved = resolve_remote_path("client/public/index.html", Some("__remote__"), &state).unwrap();
         let actual = resolved.replace('\\', "/");
         let expected = target
             .join("client")
@@ -4511,26 +4552,44 @@ mod remote_path_tests {
         assert_eq!(actual, expected);
     }
 
-    /// Absolute paths must pass through untouched even when an override is set.
+    /// Security (path-jail): an absolute path INSIDE the override workspace is
+    /// accepted, but one OUTSIDE it — or a `..` escape — is rejected, so a
+    /// remote client can't read/write/cd to arbitrary disk locations.
     #[test]
-    fn absolute_path_passes_through_with_override() {
+    fn absolute_inside_ok_outside_and_traversal_rejected() {
         let state = AppState::new();
-        let target = std::env::temp_dir().join("lu-rrp-test-abs");
+        let target = std::env::temp_dir().join("lu-rrp-test-jail");
         state
             .chat_workspace_overrides
             .lock()
             .unwrap()
-            .insert("__remote__".to_string(), target);
+            .insert("__remote__".to_string(), target.clone());
 
-        let abs = if cfg!(windows) { "C:/elsewhere/foo.txt" } else { "/etc/passwd" };
-        let resolved = resolve_remote_path(abs, Some("__remote__"), &state);
-        let s = resolved.replace('\\', "/");
-        // We ignore drive vs unix specifics — just assert we kept the
-        // input absolute form rather than nesting it under the override.
-        if cfg!(windows) {
-            assert!(s.ends_with("/elsewhere/foo.txt"), "got: {}", s);
-        } else {
-            assert!(s.ends_with("/etc/passwd"), "got: {}", s);
-        }
+        // Inside the workspace → allowed.
+        let inside = target.join("sub").join("foo.txt");
+        assert!(resolve_remote_path(&inside.to_string_lossy(), Some("__remote__"), &state).is_ok());
+
+        // Outside the workspace → rejected.
+        let abs = if cfg!(windows) { "C:/Windows/System32/foo.txt" } else { "/etc/passwd" };
+        assert!(resolve_remote_path(abs, Some("__remote__"), &state).is_err());
+
+        // `..` climbing out → rejected.
+        assert!(resolve_remote_path("../../../../etc/passwd", Some("__remote__"), &state).is_err());
+    }
+
+    #[test]
+    fn shell_permission_is_off_by_default() {
+        // C1: a freshly-dispatched remote server must NOT grant shell/code
+        // execution by default — it's RCE-class and opt-in only.
+        let p = super::RemotePermissions::default();
+        assert!(!p.shell, "remote `shell` permission must default to false");
+    }
+
+    #[test]
+    fn remote_permissions_deserialize_without_shell_defaults_false() {
+        // Older mobile/client payloads omit `shell`; serde default must be false.
+        let p: super::RemotePermissions =
+            serde_json::from_str(r#"{"filesystem":true,"downloads":true,"process_control":true}"#).unwrap();
+        assert!(!p.shell);
     }
 }

@@ -94,14 +94,18 @@ fn normalize_duplicate_drive_prefix(path: &str) -> String {
     }
 }
 
-fn resolve_agent_path(path: &str, chat_id: Option<&str>, state: Option<&AppState>) -> PathBuf {
+/// Resolve + CONTAIN an agent file-op path to its per-chat workspace (or the
+/// user-picked override folder). A relative path resolves under the workspace;
+/// an absolute path is accepted only when it falls inside it. Any escape
+/// (`..`, an out-of-workspace absolute path) is rejected — this is the security
+/// boundary that stops a prompt-injected model or a remote client from reading
+/// `~/.ssh/id_rsa` or writing into the Startup folder.
+fn resolve_agent_path(path: &str, chat_id: Option<&str>, state: Option<&AppState>) -> Result<PathBuf, String> {
     let cleaned = normalize_duplicate_drive_prefix(path);
+    let root = agent_workspace(chat_id, state);
     let p = std::path::Path::new(&cleaned);
-    if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        agent_workspace(chat_id, state).join(&cleaned)
-    }
+    let candidate = if p.is_absolute() { p.to_path_buf() } else { root.join(&cleaned) };
+    crate::commands::filesystem::contain_within(&root, &candidate)
 }
 
 #[cfg(test)]
@@ -230,30 +234,36 @@ mod path_tests {
             .unwrap()
             .insert("__remote__".to_string(), target.clone());
 
-        let resolved = resolve_agent_path("client/public", Some("__remote__"), Some(&state));
+        let resolved = resolve_agent_path("client/public", Some("__remote__"), Some(&state)).unwrap();
         let actual = resolved.to_string_lossy().replace('\\', "/");
         let expected = target.join("client").join("public").to_string_lossy().replace('\\', "/");
         assert_eq!(actual, expected);
     }
 
-    /// Absolute paths must NOT be rewritten — the user passed a literal
-    /// drive path, we hand it back as-is.
+    /// Security (path-jail): an absolute path INSIDE the workspace is accepted,
+    /// but one OUTSIDE it is rejected — a remote client / model can't read or
+    /// write arbitrary disk locations by passing a literal drive path.
     #[test]
-    fn resolve_absolute_path_untouched_with_override() {
+    fn resolve_absolute_inside_override_is_allowed_outside_is_rejected() {
         let state = AppState::new();
-        let target = std::env::temp_dir().join("lu-test-remote-absolute-passthrough");
+        let target = std::env::temp_dir().join("lu-test-remote-jail");
         state
             .chat_workspace_overrides
             .lock()
             .unwrap()
             .insert("__remote__".to_string(), target.clone());
 
-        // Absolute path should pass through, ignoring the override.
-        let abs = if cfg!(windows) { "C:/elsewhere/foo.txt" } else { "/tmp/elsewhere/foo.txt" };
-        let resolved = resolve_agent_path(abs, Some("__remote__"), Some(&state));
-        assert!(resolved.is_absolute());
-        let s = resolved.to_string_lossy().to_string().replace('\\', "/");
-        assert!(s.ends_with("/elsewhere/foo.txt"), "got: {}", s);
+        // Inside the override → allowed.
+        let inside = target.join("foo.txt");
+        let resolved = resolve_agent_path(&inside.to_string_lossy(), Some("__remote__"), Some(&state));
+        assert!(resolved.is_ok(), "inside path should be allowed: {:?}", resolved);
+
+        // Outside the override → rejected.
+        let abs = if cfg!(windows) { "C:/Windows/System32/foo.txt" } else { "/etc/passwd" };
+        assert!(resolve_agent_path(abs, Some("__remote__"), Some(&state)).is_err());
+
+        // `..` climbing out of the workspace → rejected.
+        assert!(resolve_agent_path("../../../../etc/passwd", Some("__remote__"), Some(&state)).is_err());
     }
 }
 
@@ -355,7 +365,7 @@ pub fn file_read(
     chatId: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let full_path = resolve_agent_path(&path, chatId.as_deref(), Some(&*state));
+    let full_path = resolve_agent_path(&path, chatId.as_deref(), Some(&*state))?;
     if !full_path.exists() {
         return Err(format!("File not found: {}", full_path.display()));
     }
@@ -372,7 +382,7 @@ pub fn file_write(
     chatId: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    let full_path = resolve_agent_path(&path, chatId.as_deref(), Some(&*state));
+    let full_path = resolve_agent_path(&path, chatId.as_deref(), Some(&*state))?;
     if let Some(parent) = full_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", e))?;
     }

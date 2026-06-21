@@ -55,11 +55,12 @@ fn validate_external_url(raw: &str) -> Result<(), String> {
 /// Used for CivitAI API calls, workflow JSON downloads, etc.
 #[tauri::command]
 pub async fn fetch_external(url: String) -> Result<String, String> {
-    validate_external_url(&url)?;
+    validate_public_url(&url)?;
 
     let client = reqwest::Client::builder()
         .user_agent("LocallyUncensored/2.0")
         .timeout(std::time::Duration::from_secs(60))
+        .redirect(ssrf_safe_redirect_policy(10))
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -79,11 +80,12 @@ pub async fn fetch_external(url: String) -> Result<String, String> {
 /// Used for downloading ZIP files, images, model files.
 #[tauri::command]
 pub async fn fetch_external_bytes(url: String) -> Result<Vec<u8>, String> {
-    validate_external_url(&url)?;
+    validate_public_url(&url)?;
 
     let client = reqwest::Client::builder()
         .user_agent("LocallyUncensored/2.0")
         .timeout(std::time::Duration::from_secs(300))
+        .redirect(ssrf_safe_redirect_policy(10))
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -151,6 +153,50 @@ fn is_blocked_proxy_host(host: &str) -> bool {
         }
     }
     false
+}
+
+/// Strict public-URL validation for agent/downloader fetches: http(s) only and
+/// the host must not be localhost, a private/reserved range, or a cloud-metadata
+/// endpoint (incl. IPv4-mapped-IPv6 forms). Combines `validate_external_url`
+/// (RFC1918/loopback/link-local ranges) with `is_blocked_proxy_host`
+/// (metadata + mapped-v6). This is the single SSRF gate — reuse it everywhere
+/// instead of ad-hoc substring blocklists (which miss 172.16/12, IPv6, and
+/// decimal/hex/octal IP encodings).
+pub(crate) fn validate_public_url(raw: &str) -> Result<(), String> {
+    validate_external_url(raw)?;
+    let parsed = url::Url::parse(raw).map_err(|e| format!("Invalid URL: {}", e))?;
+    let host = parsed.host_str().unwrap_or("");
+    if is_blocked_proxy_host(host) {
+        return Err("Blocked: cloud-metadata / link-local address".into());
+    }
+    // Reject inet_aton-style numeric hosts: a bare decimal integer
+    // (http://2852039166 == 169.254.169.254) or a 0x-hex integer
+    // (http://0xA9FEA9FE) parses as a "domain" here, slips past the
+    // dotted-quad range checks, then the OS resolver expands it to an IP. A
+    // legitimate public hostname is never all-digits or `0x…`.
+    let h = host.trim_matches(|c| c == '[' || c == ']').to_lowercase();
+    let is_decimal_int = !h.is_empty() && h.chars().all(|c| c.is_ascii_digit());
+    let is_hex_int = h.starts_with("0x") && h.len() > 2 && h[2..].chars().all(|c| c.is_ascii_hexdigit());
+    if is_decimal_int || is_hex_int {
+        return Err("Blocked: numeric host form (possible IP-encoding bypass)".into());
+    }
+    Ok(())
+}
+
+/// Redirect policy that re-validates EVERY hop with `validate_public_url`, so a
+/// public URL can't 30x-redirect into localhost / a private host / cloud
+/// metadata (the classic SSRF-via-redirect bypass). Use this on any reqwest
+/// client that fetches a renderer- or model-supplied URL.
+pub(crate) fn ssrf_safe_redirect_policy(max: usize) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= max {
+            return attempt.error("too many redirects");
+        }
+        match validate_public_url(attempt.url().as_str()) {
+            Ok(()) => attempt.follow(),
+            Err(_) => attempt.error("redirect to a blocked (private/metadata) host"),
+        }
+    })
 }
 
 /// True only for private/LAN hosts a user could legitimately point a local
@@ -780,6 +826,42 @@ mod tests {
         // Real LAN/global addresses are not metadata.
         assert!(!is_blocked_proxy_host("192.168.0.74"));
         assert!(!is_blocked_proxy_host("2606:4700::1111"));
+    }
+
+    #[test]
+    fn validate_public_url_blocks_private_and_loopback() {
+        for u in [
+            "http://localhost/x", "http://127.0.0.1/x", "http://10.0.0.5/x",
+            "http://192.168.1.1/x", "http://172.16.4.4/x", "http://169.254.169.254/x",
+            "http://[::1]/x", "http://[fd00::1]/x", "http://0.0.0.0/x",
+        ] {
+            assert!(validate_public_url(u).is_err(), "{} should be blocked", u);
+        }
+    }
+
+    #[test]
+    fn validate_public_url_blocks_numeric_ip_encodings() {
+        // inet_aton-style forms the OS resolver would expand to a blocked IP.
+        assert!(validate_public_url("http://2852039166/").is_err()); // decimal 169.254.169.254
+        assert!(validate_public_url("http://0xA9FEA9FE/").is_err()); // hex 169.254.169.254
+        assert!(validate_public_url("http://0x7f000001/").is_err()); // hex 127.0.0.1
+    }
+
+    #[test]
+    fn validate_public_url_blocks_non_http_schemes() {
+        assert!(validate_public_url("file:///etc/passwd").is_err());
+        assert!(validate_public_url("ftp://example.com/x").is_err());
+        assert!(validate_public_url("not a url").is_err());
+    }
+
+    #[test]
+    fn validate_public_url_allows_real_public_hosts() {
+        for u in [
+            "https://huggingface.co/model", "https://civitai.com/api",
+            "http://example.com/", "https://8.8.8.8/", "https://3com.com/",
+        ] {
+            assert!(validate_public_url(u).is_ok(), "{} should be allowed", u);
+        }
     }
 
     #[test]

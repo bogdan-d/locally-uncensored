@@ -10,8 +10,65 @@ use tokio_util::sync::CancellationToken;
 
 use crate::state::{AppState, DownloadProgress};
 
+/// Reduce a download filename to a safe basename — no path separators, no
+/// drive letter, no `..` — so a crafted `filename` (e.g. "..\\..\\Start
+/// Menu\\Programs\\Startup\\x.bat") can't escape the target directory and drop
+/// an autostart payload. Falls back to "download" if nothing usable remains.
+fn sanitize_filename(name: &str) -> String {
+    let base = name.rsplit(|c| c == '/' || c == '\\').next().unwrap_or("");
+    let cleaned: String = base.chars().filter(|c| !matches!(c, '/' | '\\' | ':' | '\0')).collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() || cleaned == "." || cleaned == ".." {
+        "download".to_string()
+    } else {
+        cleaned.to_string()
+    }
+}
+
+/// Reject a subfolder that tries to escape the base (absolute path, drive
+/// letter, or any `..` segment). Returns the subfolder unchanged when safe.
+fn safe_subfolder(subfolder: &str) -> Result<(), String> {
+    let norm = subfolder.replace('\\', "/");
+    let p = std::path::Path::new(&norm);
+    // `starts_with('/')` also catches Windows drive-relative roots like `/x`,
+    // which `is_absolute()` does NOT treat as absolute.
+    if p.is_absolute() || norm.starts_with('/') || norm.contains(':') {
+        return Err("Invalid subfolder: absolute paths are not allowed".into());
+    }
+    if norm.split('/').any(|seg| seg == "..") {
+        return Err("Invalid subfolder: path traversal is not allowed".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod download_security_tests {
+    use super::{sanitize_filename, safe_subfolder};
+
+    #[test]
+    fn sanitize_strips_traversal_and_separators() {
+        assert_eq!(sanitize_filename("model.safetensors"), "model.safetensors");
+        assert_eq!(sanitize_filename("..\\..\\Startup\\x.bat"), "x.bat");
+        assert_eq!(sanitize_filename("a/b/c/evil.exe"), "evil.exe");
+        assert_eq!(sanitize_filename("C:evil.dll"), "Cevil.dll"); // colon stripped
+        assert_eq!(sanitize_filename(".."), "download");
+        assert_eq!(sanitize_filename(""), "download");
+    }
+
+    #[test]
+    fn safe_subfolder_rejects_escapes() {
+        assert!(safe_subfolder("checkpoints").is_ok());
+        assert!(safe_subfolder("custom_nodes/foo").is_ok());
+        assert!(safe_subfolder("../../etc").is_err());
+        assert!(safe_subfolder("a/../../b").is_err());
+        assert!(safe_subfolder("/abs/path").is_err());
+        assert!(safe_subfolder("C:/x").is_err());
+    }
+}
+
 fn models_dir(comfy_path: &Option<String>, subfolder: &str) -> Result<PathBuf, String> {
     let base = comfy_path.as_ref().ok_or("ComfyUI path not set. Please set it in settings or install ComfyUI first.")?;
+    safe_subfolder(subfolder)?;
     // Subfolders starting with "custom_nodes/" are relative to ComfyUI root, not models/
     let dir = if subfolder.starts_with("custom_nodes/") || subfolder.starts_with("custom_nodes\\") {
         PathBuf::from(base).join(subfolder)
@@ -44,7 +101,7 @@ pub async fn download_model(
     };
 
     let dest_dir = models_dir(&comfy_path, &subfolder)?;
-    let dest_file = dest_dir.join(&filename);
+    let dest_file = dest_dir.join(sanitize_filename(&filename));
 
     if dest_file.exists() {
         // If expected_bytes is provided, verify the file is at least 90% of expected size
@@ -155,9 +212,15 @@ async fn do_download(
     token: CancellationToken,
     resume_offset: u64,
 ) -> Result<(), String> {
+    // SSRF guard: model downloads come from public catalogs (HuggingFace,
+    // civitai, ollama). Block private/loopback/metadata hosts and re-validate
+    // every redirect hop so a crafted catalog/model URL can't pull from an
+    // internal service or 169.254.169.254.
+    crate::commands::proxy::validate_public_url(url)?;
+
     let client = reqwest::Client::builder()
         .user_agent("LocallyUncensored/1.5")
-        .redirect(reqwest::redirect::Policy::limited(10))
+        .redirect(crate::commands::proxy::ssrf_safe_redirect_policy(10))
         .timeout(std::time::Duration::from_secs(7200))
         .build()
         .map_err(|e| e.to_string())?;
@@ -572,7 +635,7 @@ pub async fn download_model_to_path(
     let expected_bytes = expectedBytes;
     let dir = PathBuf::from(&dest_dir);
     fs::create_dir_all(&dir).map_err(|e| format!("Create dest dir: {}", e))?;
-    let dest_file = dir.join(&filename);
+    let dest_file = dir.join(sanitize_filename(&filename));
 
     if dest_file.exists() {
         let file_complete = match expected_bytes {

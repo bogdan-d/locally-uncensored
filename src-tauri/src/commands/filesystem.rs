@@ -4,7 +4,7 @@ use std::time::UNIX_EPOCH;
 
 use base64::Engine;
 use glob::glob as glob_match;
-use regex::Regex;
+use regex::RegexBuilder;
 use walkdir::WalkDir;
 
 /// Strip duplicate drive-letter prefixes, e.g.
@@ -30,29 +30,60 @@ fn normalize_duplicate_drive_prefix(path: &str) -> String {
     }
 }
 
-/// Resolve path — supports absolute and relative paths. A relative path
-/// resolves against, in order: the agent's folder workspace `working_dir`
-/// (the repo the user picked, threaded from the frontend as
-/// `workingDirectory` via chatCtx) when set; otherwise the per-chat sandbox
-/// `~/agent-workspace/<chat_id>/`. Honoring `working_dir` is what makes a
-/// configured repo path actually win over the sandbox (#62) — before this,
-/// the frontend sent it but every command dropped it. `chat_id` is sanitised
-/// to `[A-Za-z0-9_\-\.]` (anything else → `_`) and capped at 64 chars to
-/// prevent path traversal. Missing chat_id falls back to `default`.
-fn resolve_path(path: &str, chat_id: Option<&str>, working_dir: Option<&str>) -> PathBuf {
-    let cleaned = normalize_duplicate_drive_prefix(path);
-    let p = Path::new(&cleaned);
-    if p.is_absolute() {
-        return p.to_path_buf();
-    }
-    // Relative path: a configured folder workspace (the user's repo) wins over
-    // the per-chat sandbox, so relative tool-call paths land where the user
-    // expects. Blank/whitespace working_dir is treated as unset.
-    if let Some(wd) = working_dir {
-        let wd = wd.trim();
-        if !wd.is_empty() {
-            return PathBuf::from(wd).join(&cleaned);
+/// Lexically normalize a path (resolve `.` / `..` segments without touching
+/// the filesystem) so containment can be checked deterministically even for a
+/// path that doesn't exist yet (e.g. a file about to be created).
+fn lexical_normalize(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for comp in p.components() {
+        match comp {
+            Component::ParentDir => { out.pop(); }
+            Component::CurDir => {}
+            other => out.push(other.as_os_str()),
         }
+    }
+    out
+}
+
+/// Jail `candidate` to `root`: return the normalized path when it stays inside
+/// `root`, otherwise an error. This is the single containment boundary for
+/// every agent/remote file op — it stops a prompt-injected model or a remote
+/// client from reading `~/.ssh/id_rsa`, writing into `\Startup\`, or `..`-ing
+/// out of the workspace. Absolute paths are allowed ONLY when they fall within
+/// `root`, so the desktop coding agent can still use absolute paths inside the
+/// user-picked project folder (#62). Symlink-based escape is a residual (it
+/// needs a prior local write) and is intentionally out of scope here.
+pub(crate) fn contain_within(root: &Path, candidate: &Path) -> Result<PathBuf, String> {
+    let nroot = lexical_normalize(root);
+    let ncand = lexical_normalize(candidate);
+    let within = {
+        #[cfg(windows)]
+        {
+            // Windows paths are case-insensitive; compare lowercased with a
+            // component boundary so `…/foo` can't match `…/foobar`.
+            let r = nroot.to_string_lossy().to_lowercase().replace('\\', "/");
+            let r = r.trim_end_matches('/');
+            let c = ncand.to_string_lossy().to_lowercase().replace('\\', "/");
+            c == r || c.starts_with(&format!("{}/", r))
+        }
+        #[cfg(not(windows))]
+        { ncand == nroot || ncand.starts_with(&nroot) }
+    };
+    if within {
+        Ok(ncand)
+    } else {
+        Err(format!("Path escapes the allowed workspace: {}", candidate.display()))
+    }
+}
+
+/// The jail root for a file op: a configured folder workspace `working_dir`
+/// (the repo the user picked, threaded from the frontend as `workingDirectory`)
+/// when set; otherwise the per-chat sandbox `~/agent-workspace/<chat_id>/`.
+/// `chat_id` is sanitised to `[A-Za-z0-9_\-\.]` (else `_`), capped at 64 chars.
+pub(crate) fn workspace_root(chat_id: Option<&str>, working_dir: Option<&str>) -> PathBuf {
+    if let Some(wd) = working_dir.map(str::trim).filter(|w| !w.is_empty()) {
+        return PathBuf::from(wd);
     }
     let id = chat_id.unwrap_or("default");
     let safe: String = id
@@ -61,11 +92,20 @@ fn resolve_path(path: &str, chat_id: Option<&str>, working_dir: Option<&str>) ->
         .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' { c } else { '_' })
         .collect();
     let slug = if safe.is_empty() { "default".to_string() } else { safe };
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join("agent-workspace")
-        .join(slug)
-        .join(&cleaned)
+    dirs::home_dir().unwrap_or_default().join("agent-workspace").join(slug)
+}
+
+/// Resolve + CONTAIN a tool-call path. A relative path resolves against the
+/// workspace root (folder workspace #62, else the per-chat sandbox); an
+/// absolute path is accepted only when it falls inside that root. Returns an
+/// error on any escape (`..`, an out-of-root absolute path, etc.) — the
+/// security boundary for fs_read/fs_write/fs_list/fs_search/fs_info.
+fn resolve_path(path: &str, chat_id: Option<&str>, working_dir: Option<&str>) -> Result<PathBuf, String> {
+    let cleaned = normalize_duplicate_drive_prefix(path);
+    let root = workspace_root(chat_id, working_dir);
+    let p = Path::new(&cleaned);
+    let candidate = if p.is_absolute() { p.to_path_buf() } else { root.join(&cleaned) };
+    contain_within(&root, &candidate)
 }
 
 /// True when `path` addresses the workspace ROOT itself ("", ".", "./",
@@ -103,7 +143,7 @@ fn file_meta(path: &Path) -> serde_json::Value {
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn fs_read(path: String, chatId: Option<String>, workingDirectory: Option<String>) -> Result<serde_json::Value, String> {
-    let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref());
+    let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
     if !full.exists() {
         return Err(format!("File not found: {}", full.display()));
     }
@@ -122,7 +162,7 @@ pub fn fs_read(path: String, chatId: Option<String>, workingDirectory: Option<St
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn fs_write(path: String, content: String, chatId: Option<String>, workingDirectory: Option<String>) -> Result<serde_json::Value, String> {
-    let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref());
+    let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
     if let Some(parent) = full.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", e))?;
     }
@@ -139,7 +179,7 @@ pub fn fs_list(
     chatId: Option<String>,
     workingDirectory: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let dir = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref());
+    let dir = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
     if !dir.is_dir() {
         // A fresh per-chat agent sandbox (~/agent-workspace/<chat_id>) may not
         // exist yet. When the model lists the workspace ROOT with a relative
@@ -199,12 +239,19 @@ pub fn fs_search(
     chatId: Option<String>,
     workingDirectory: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let dir = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref());
+    let dir = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
     if !dir.is_dir() {
         return Err(format!("Not a directory: {}", dir.display()));
     }
 
-    let re = Regex::new(&pattern).map_err(|e| format!("Invalid regex: {}", e))?;
+    // Bound the compiled regex so a pathological pattern can't blow up memory.
+    // (The `regex` crate is already linear-time, so there's no catastrophic
+    // backtracking; this caps the compiled-program size.)
+    let re = RegexBuilder::new(&pattern)
+        .size_limit(1 << 20)
+        .dfa_size_limit(1 << 20)
+        .build()
+        .map_err(|e| format!("Invalid regex: {}", e))?;
     let max = max_results.unwrap_or(50) as usize;
     let mut results: Vec<serde_json::Value> = Vec::new();
 
@@ -253,7 +300,7 @@ pub fn fs_search(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn fs_info(path: String, chatId: Option<String>, workingDirectory: Option<String>) -> Result<serde_json::Value, String> {
-    let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref());
+    let full = resolve_path(&path, chatId.as_deref(), workingDirectory.as_deref())?;
     if !full.exists() {
         return Err(format!("Path not found: {}", full.display()));
     }
@@ -379,30 +426,52 @@ mod tests {
     // ── #62: relative paths must honor the folder workspace ──────────
     #[test]
     fn relative_path_resolves_against_working_dir() {
-        let got = resolve_path("src/main.rs", Some("chat-1"), Some("D:/Projects/site"));
+        let got = resolve_path("src/main.rs", Some("chat-1"), Some("D:/Projects/site")).unwrap();
         let s = got.to_string_lossy().replace('\\', "/");
         assert_eq!(s, "D:/Projects/site/src/main.rs");
     }
 
     #[test]
     fn relative_path_without_working_dir_uses_sandbox() {
-        let got = resolve_path("notes.md", Some("chat-1"), None);
+        let got = resolve_path("notes.md", Some("chat-1"), None).unwrap();
         let s = got.to_string_lossy().replace('\\', "/");
         assert!(s.contains("agent-workspace/chat-1/notes.md"), "got: {}", s);
     }
 
     #[test]
     fn blank_working_dir_falls_back_to_sandbox() {
-        let got = resolve_path("a.txt", Some("c"), Some("   "));
+        let got = resolve_path("a.txt", Some("c"), Some("   ")).unwrap();
         let s = got.to_string_lossy().replace('\\', "/");
         assert!(s.contains("agent-workspace/c/a.txt"), "got: {}", s);
     }
 
+    // ── Path-jail (security): absolute paths are allowed only inside the root ──
     #[test]
-    fn absolute_path_ignores_working_dir() {
-        let abs = if cfg!(windows) { "C:/abs/file.txt" } else { "/abs/file.txt" };
-        let got = resolve_path(abs, Some("chat-1"), Some("D:/Projects/site"));
+    fn absolute_path_inside_working_dir_is_allowed() {
+        let (root, abs) = if cfg!(windows) {
+            ("D:/Projects/site", "D:/Projects/site/src/main.rs")
+        } else {
+            ("/projects/site", "/projects/site/src/main.rs")
+        };
+        let got = resolve_path(abs, Some("chat-1"), Some(root)).unwrap();
         let s = got.to_string_lossy().replace('\\', "/");
         assert_eq!(s, abs);
+    }
+
+    #[test]
+    fn absolute_path_outside_working_dir_is_rejected() {
+        let abs = if cfg!(windows) { "C:/Windows/System32/x.txt" } else { "/etc/passwd" };
+        assert!(resolve_path(abs, Some("chat-1"), Some("D:/Projects/site")).is_err());
+    }
+
+    #[test]
+    fn dotdot_traversal_out_of_sandbox_is_rejected() {
+        // relative path that climbs out of the per-chat sandbox
+        assert!(resolve_path("../../../../Windows/x.txt", Some("chat-1"), None).is_err());
+    }
+
+    #[test]
+    fn dotdot_traversal_out_of_working_dir_is_rejected() {
+        assert!(resolve_path("../../secret.txt", Some("c"), Some("D:/Projects/site")).is_err());
     }
 }

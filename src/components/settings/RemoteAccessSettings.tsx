@@ -54,9 +54,10 @@ export function RemoteAccessSettings() {
           <span className="text-[0.65rem] font-medium text-gray-400">Permissions</span>
         </div>
         {([
-          { key: 'filesystem' as const, label: 'Filesystem Access', desc: 'Agent file read/write, shell execute' },
+          { key: 'filesystem' as const, label: 'Filesystem Access', desc: 'Agent file read/write (sandboxed to the chat workspace)' },
           { key: 'downloads' as const, label: 'Downloads & Installs', desc: 'Model downloads, ComfyUI/Ollama install' },
           { key: 'process_control' as const, label: 'Process Control', desc: 'Start/stop ComfyUI, Ollama' },
+          { key: 'shell' as const, label: 'Shell & Code Execution', desc: 'Run shell commands + code from your phone. Risky — leave OFF unless you trust the network.' },
         ]).map(({ key, label, desc }) => (
           <div key={key} className="flex items-center justify-between">
             <div>
