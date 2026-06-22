@@ -1276,24 +1276,26 @@ export function useAgentChat() {
         }
 
         // Vision feedback (David 2026-06-03): after image_generate, hand the
-        // generated picture to a vision-capable local model so it SEES the
-        // result and can comment — and learns the filename to chain into
-        // video_generate. Local Ollama only; buildVisionFeedback no-ops for
-        // text-only models, video results, or fetch failures.
-        if (providerId === 'ollama') {
-          for (const { tc, ac } of batch) {
-            const result = results.find((r) => r.id === ac.id)
-            if (result?.status === 'completed' && result.result) {
-              try {
-                const vf = await buildVisionFeedback(modelToUse, tc.function.name, result.result)
-                if (vf) {
-                  agentMessages.push(vf as unknown as ChatMessage)
-                  visionFeedbackGiven = true
-                  log.info('agent.vision_feedback_attached', { tool: tc.function.name })
-                  break // one image per batch is enough context
-                }
-              } catch { /* non-fatal — flow still works without the visual */ }
-            }
+        // generated picture to a vision-capable model so it SEES the result and
+        // can comment — and learns the filename to chain into video_generate.
+        // Provider-aware (konata 2026-06-21: a non-Ollama vision model never got
+        // the image → it described from the prompt and hallucinated). Now runs
+        // for every provider; buildVisionFeedback no-ops for text-only models,
+        // video results, or fetch failures — and on non-Ollama only feeds models
+        // whose name matches a vision family (so a text LM Studio model isn't
+        // sent an image and made to SSE-error).
+        for (const { tc, ac } of batch) {
+          const result = results.find((r) => r.id === ac.id)
+          if (result?.status === 'completed' && result.result) {
+            try {
+              const vf = await buildVisionFeedback(modelToUse, tc.function.name, result.result, providerId)
+              if (vf) {
+                agentMessages.push(vf as unknown as ChatMessage)
+                visionFeedbackGiven = true
+                log.info('agent.vision_feedback_attached', { tool: tc.function.name, provider: providerId })
+                break // one image per batch is enough context
+              }
+            } catch { /* non-fatal — flow still works without the visual */ }
           }
         }
 

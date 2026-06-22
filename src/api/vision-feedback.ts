@@ -15,6 +15,7 @@
  */
 
 import { modelSupportsVision } from './ollama'
+import { modelNameSuggestsVision } from '../lib/model-compatibility'
 import { fetchComfyImageBase64 } from './comfyui'
 import { log } from '../lib/logger'
 
@@ -54,6 +55,7 @@ export async function buildVisionFeedback(
   model: string,
   toolName: string,
   result: string,
+  providerId: string,
 ): Promise<VisionFeedbackMessage | null> {
   if (!result) return null
   // ONLY image_generate produces a still the vision model can read. A video_generate
@@ -67,8 +69,17 @@ export async function buildVisionFeedback(
   if (!m) return null
   const url = m[1]
   if (urlIsVideo(url)) return null // can't feed a video to the model as an image
+  // Vision capability, provider-aware (konata 2026-06-21: on a non-Ollama
+  // provider the generated image never reached the model's vision input, so it
+  // described from the prompt and hallucinated). Ollama: the accurate /api/show
+  // capability list. Other providers: a STRICT model-name family match — never
+  // the lenient isVisionCompatible, which would feed an image to a text-only
+  // LM Studio model and trip the image→text SSE error.
   try {
-    if (!(await modelSupportsVision(model))) return null
+    const canSee = providerId === 'ollama'
+      ? await modelSupportsVision(model)
+      : modelNameSuggestsVision(model)
+    if (!canSee) return null
   } catch {
     return null
   }

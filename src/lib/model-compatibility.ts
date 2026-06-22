@@ -202,6 +202,26 @@ export function isVisionCompatible(modelName: string | null): boolean {
 }
 
 /**
+ * STRICT, provider-agnostic vision check: true only when the model NAME matches
+ * a known vision family. Unlike isVisionCompatible (lenient — returns true for
+ * ANY openai/anthropic-prefixed model so the manual attach UI stays permissive),
+ * this never returns true for an unknown name. The auto vision-feedback loop
+ * uses it for non-Ollama providers so it won't feed a generated image to a
+ * text-only OpenAI-compatible model (e.g. an LM Studio text GGUF), which would
+ * otherwise trip the image→text-model SSE error. Cloud vision models whose tag
+ * doesn't match a family (gpt-4o, claude-*) simply get no feedback — the safe
+ * no-op, same as before this loop existed.
+ *
+ * Strips a `provider::` prefix first because normalizeFamily cuts at the first
+ * ':' and would otherwise collapse `openai::llava` to `openai`.
+ */
+export function modelNameSuggestsVision(modelName: string | null): boolean {
+  if (!modelName) return false
+  const bare = modelName.includes('::') ? modelName.split('::').slice(1).join('::') : modelName
+  return VISION_COMPATIBLE.some(f => containsFamily(f, normalizeFamily(bare)))
+}
+
+/**
  * Gemma 3/4 are thinking-compatible but their `think: false` path produces
  * plain-text structured planning (`Plan:`, `Constraint Checklist:`,
  * `Confidence Score:`) that has no tags we can strip — the model trained
