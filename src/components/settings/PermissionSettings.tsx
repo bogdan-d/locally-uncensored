@@ -1,9 +1,16 @@
 import { usePermissionStore } from '../../stores/permissionStore'
 import type { ToolCategory, PermissionLevel } from '../../api/mcp/types'
+import { isTauri } from '../../api/backend'
 import { FolderOpen, Terminal, Monitor, Globe, Cpu, Image, GitBranch, Lock } from 'lucide-react'
 
-// Categories that are not yet fully implemented
-const LOCKED_CATEGORIES = new Set<ToolCategory>(['image'])
+// Image generation is fully wired in the chat agent path — it shares the exact
+// confirm-gate the live `video` category already uses — but this settings
+// selector was still locked ("Coming Soon"), so users could not switch image
+// gen to Auto. That is konata's "you cannot change image generation to auto
+// accept" (web app, 2026-06-23). Unlock it in the WEB build only for now; the
+// desktop .exe keeps the shipped 2.5.5 behavior until a desktop release flips
+// it there too. Computed per-render inside the component so the Tauri global is
+// reliably set by the time it is read.
 
 const CATEGORIES: {
   key: ToolCategory
@@ -35,6 +42,7 @@ const LEVEL_OPTIONS: { value: PermissionLevel; label: string }[] = [
 
 export function PermissionSettings() {
   const { globalPermissions, setGlobalPermission, resetToDefaults } = usePermissionStore()
+  const lockedCategories: Set<ToolCategory> = isTauri() ? new Set<ToolCategory>(['image']) : new Set<ToolCategory>()
 
   return (
     <div className="space-y-2">
@@ -43,7 +51,7 @@ export function PermissionSettings() {
       </p>
 
       {CATEGORIES.map(({ key, label, description, icon: Icon, risk }) => {
-        const isLocked = LOCKED_CATEGORIES.has(key)
+        const isLocked = lockedCategories.has(key)
 
         return (
           <div
