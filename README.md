@@ -35,7 +35,19 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.5.4 — Current Release
+## v2.5.5 — Current Release
+
+A security and polish patch on top of v2.5.4. Your chats, memories, and gallery carry over automatically, and auto-update prompts on next launch.
+
+**Security:** A full hardening pass. Remote Access defaults the `shell` permission **off** and rate-limits connections, with stronger passcodes and tightened cross-origin rules; file tools are confined to their workspace (path-jail); web fetch and downloads now block requests to internal addresses (SSRF guard); a tighter content-security policy; and optional **OS-keychain storage** for provider API keys on Windows and macOS.
+
+**Improved:** Automatic generation settings are now correct **per model** — FLUX and Z-Image run at their proper low CFG instead of a generic value that washed them out, and Wan / HunyuanVideo / LTX use their intended steps and CFG. After the agent generates an image, vision-capable models on **any** provider (not only Ollama) now actually see the result and describe it, instead of guessing from the prompt.
+
+**Fixed:** Smaller chat models behave on the media loop — no stray reasoning when Thinking is off, a steadier context counter, and follow-up requests keep the image/video tool. Attaching an image to a text-only model shows a clear "this model can't read images" note instead of a raw error. **ChatGPT imports read every conversation shard** (not just the first 100); **Claude imports** read the modern export format. **LM Studio** now surfaces image-to-text errors instead of swallowing them. **Stop** interrupts ComfyUI from both buttons. Plus reporter-driven fixes: external TTS persistence, Ministral in agent mode, a clear control for Create prompt history, and New Chat routing you to the model picker when nothing is selected.
+
+---
+
+## v2.5.4
 
 A stability patch on top of v2.5.3, focused on Remote Access, video, and the agent. Your chats, memories, and gallery carry over automatically, and auto-update prompts on next launch.
 
@@ -348,6 +360,7 @@ Open the **Create** tab. ComfyUI is auto-detected or one-click installed. Models
 - [x] Codex Architect/Editor split + Repo-Map + Stage-and-Approve (v2.5.0)
 - [x] Code-Review mode + Test-Driven Loop + typed git/gh tools (v2.5.0)
 - [x] Multi-Repo Agent + `.lurules` + `pr_resume` + `project_init` (v2.5.0)
+- [ ] **Create-tab polish + new generation features** (next focus — face-ID / PuLID, a cleaner image & video workflow, more in-app controls)
 - [ ] Voice Mode (Qwen Omni live voice)
 - [ ] Upscale + Inpainting
 
