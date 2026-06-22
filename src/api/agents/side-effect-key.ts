@@ -18,9 +18,9 @@
  *     shell command touches, so batch all exec-class calls onto a single
  *     queue.
  *
- *   - image_generate, run_workflow → key 'comfyui'. ComfyUI serializes
- *     internally and workflows do heavy I/O; running in parallel provides
- *     no win and competes for the GPU.
+ *   - image_generate, video_generate, run_workflow → key 'comfyui'. ComfyUI
+ *     serializes internally and workflows do heavy I/O; running in parallel
+ *     provides no win and competes for the GPU + the VRAM hand-off.
  */
 
 export function deriveSideEffectKey(
@@ -36,7 +36,11 @@ export function deriveSideEffectKey(
     case 'code_execute':
       return 'exec'
     case 'image_generate':
+    case 'video_generate':
     case 'run_workflow':
+      // All ComfyUI work shares one GPU + one VRAM hand-off. video_generate was
+      // missing here, so an image+video in the same turn ran concurrently —
+      // both queued on the hand-off and a back-to-back gen could survive Stop.
       return 'comfyui'
     default:
       // file_read, file_list, file_search, web_search, web_fetch,

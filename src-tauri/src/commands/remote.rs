@@ -3699,12 +3699,27 @@ async fn handle_get_permissions(AxumState(state): AxumState<RemoteState>) -> Jso
     Json(perms.clone())
 }
 
+/// Merge a remote-supplied permissions update over the current state. The
+/// `shell` (RCE-equivalent) permission is NEVER raised here — only the trusted
+/// desktop `set_remote_permissions` command may grant it — so an authenticated
+/// client can't `POST {"shell":true}` and self-escalate to arbitrary command
+/// execution, which would defeat the desktop's OFF-by-default toggle.
+fn merge_remote_permissions(current: &RemotePermissions, body: RemotePermissions) -> RemotePermissions {
+    RemotePermissions {
+        filesystem: body.filesystem,
+        downloads: body.downloads,
+        process_control: body.process_control,
+        shell: current.shell, // desktop-controlled only — ignore whatever the client sent
+    }
+}
+
 async fn handle_set_permissions(
     AxumState(state): AxumState<RemoteState>,
     Json(body): Json<RemotePermissions>,
 ) -> StatusCode {
     let mut perms = state.permissions.lock().await;
-    *perms = body;
+    let merged = merge_remote_permissions(&perms, body);
+    *perms = merged;
     StatusCode::OK
 }
 
@@ -4621,5 +4636,27 @@ mod remote_path_tests {
         let p: super::RemotePermissions =
             serde_json::from_str(r#"{"filesystem":true,"downloads":true,"process_control":true}"#).unwrap();
         assert!(!p.shell);
+    }
+
+    #[test]
+    fn remote_cannot_raise_shell_via_permissions_endpoint() {
+        // SECURITY: an authenticated client POSTing {"shell":true} must NOT be
+        // able to self-grant the RCE-class shell permission.
+        let current = super::RemotePermissions { filesystem: false, downloads: false, process_control: false, shell: false };
+        let body = super::RemotePermissions { filesystem: true, downloads: true, process_control: true, shell: true };
+        let merged = super::merge_remote_permissions(&current, body);
+        assert!(merged.filesystem && merged.downloads && merged.process_control, "non-RCE perms apply");
+        assert!(!merged.shell, "remote bridge must NOT be able to grant shell");
+    }
+
+    #[test]
+    fn remote_merge_preserves_desktop_set_shell() {
+        // Desktop enabled shell; a later remote update that omits/clears it must
+        // NOT silently revoke the desktop's choice (shell is desktop-controlled).
+        let current = super::RemotePermissions { filesystem: false, downloads: false, process_control: false, shell: true };
+        let body = super::RemotePermissions { filesystem: true, downloads: false, process_control: false, shell: false };
+        let merged = super::merge_remote_permissions(&current, body);
+        assert!(merged.shell, "desktop-set shell must survive a remote update");
+        assert!(merged.filesystem, "non-RCE perms still apply");
     }
 }

@@ -44,8 +44,12 @@ describe('side-effect-key', () => {
     expect(deriveSideEffectKey('code_execute', { code: '1' })).toBe('exec')
   })
 
-  it('image_generate and run_workflow share the "comfyui" queue', () => {
+  it('image_generate, video_generate and run_workflow share the "comfyui" queue', () => {
     expect(deriveSideEffectKey('image_generate', { prompt: 'x' })).toBe('comfyui')
+    // video_generate MUST serialize with image_generate (same GPU + VRAM
+    // hand-off); when it was missing it ran in parallel and a back-to-back gen
+    // could survive Stop.
+    expect(deriveSideEffectKey('video_generate', { prompt: 'x' })).toBe('comfyui')
     expect(deriveSideEffectKey('run_workflow', { name: 'x' })).toBe('comfyui')
   })
 

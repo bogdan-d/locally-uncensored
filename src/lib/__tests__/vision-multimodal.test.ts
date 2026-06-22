@@ -19,6 +19,14 @@ describe('isVisionCompatible', () => {
   it('accepts dashed / community gemma variants via normalizeFamily', () => {
     expect(isVisionCompatible('hf.co/mradermacher/Gemma-4-31B-it-abliterated-GGUF:Q4_K_M')).toBe(true)
   })
+  it('accepts GLM-4V (normalizes to glm4v) and versioned InternVL tags', () => {
+    // glm-4v → normalizeFamily collapses glm-4→glm4 → "glm4v"; the family list
+    // must hold the post-normalize form or these false-warn "can't read images".
+    expect(isVisionCompatible('glm-4v:9b')).toBe(true)
+    expect(isVisionCompatible('internvl2:8b')).toBe(true)
+    expect(isVisionCompatible('internvl2.5:8b')).toBe(true)
+    expect(isVisionCompatible('internvl3:14b')).toBe(true)
+  })
   it('rejects text-only local models', () => {
     expect(isVisionCompatible('llama3.1:8b')).toBe(false)
     expect(isVisionCompatible('mistral:7b')).toBe(false)
@@ -51,6 +59,11 @@ describe('isMultimodalUnsupportedError', () => {
     expect(isMultimodalUnsupportedError('connection refused')).toBe(false)
     expect(isMultimodalUnsupportedError(null)).toBe(false)
     expect(isMultimodalUnsupportedError(undefined)).toBe(false)
+  })
+  it('does NOT misfire on an image-GENERATION refusal (it is about image INPUT)', () => {
+    expect(isMultimodalUnsupportedError('This model does not support image generation')).toBe(false)
+    // but a real image-INPUT refusal still matches
+    expect(isMultimodalUnsupportedError('this model does not support images')).toBe(true)
   })
   it('exposes actionable, vision-oriented copy', () => {
     expect(MULTIMODAL_UNSUPPORTED_MESSAGE).toMatch(/vision/i)

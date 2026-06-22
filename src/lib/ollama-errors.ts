@@ -164,7 +164,9 @@ export function chatStyleMessage(parsed: ParsedOllamaError): string {
  * multimodal requests." with no guidance. Match the common phrasings.
  */
 const MULTIMODAL_UNSUPPORTED_RE =
-  /multimodal data provided|does not support multimodal|not multimodal|does not support image|image input is not supported|no vision support|vision is not supported/i
+  // `does not support image(?! generation)` so a model REFUSING image GENERATION
+  // ("does not support image generation") isn't misread as "can't read images".
+  /multimodal data provided|does not support multimodal|not multimodal|does not support image(?! gen)|image input is not supported|no vision support|vision is not supported/i
 
 export function isMultimodalUnsupportedError(raw: string | null | undefined): boolean {
   return typeof raw === 'string' && MULTIMODAL_UNSUPPORTED_RE.test(raw)

@@ -224,7 +224,11 @@ export function useChat() {
     const abort = new AbortController()
     abortRef.current = abort
     // Register so deleting/closing this chat aborts the in-flight stream (Bug C).
-    useGenerationStore.getState().registerAborter(convId, () => abort.abort())
+    // Also requestGenerationCancel so a running ComfyUI job is interrupted when
+    // the chat goes away mid-generation (the _activeHandoffs gate makes it a
+    // no-op when no media gen is in flight). Without it a long video kept
+    // rendering after the chat was deleted.
+    useGenerationStore.getState().registerAborter(convId, () => { abort.abort(); requestGenerationCancel() })
     setIsGenerating(true)
     // Bind the generating flag to THIS conversation so the typing indicator
     // only shows in the chat whose turn is in flight — not in every other chat

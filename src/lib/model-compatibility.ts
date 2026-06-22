@@ -179,7 +179,12 @@ const VISION_COMPATIBLE = [
   'qwen2.5-vl', 'qwen3-vl', 'qwen-vl', 'qwen3.6',
   'minicpm-v', 'moondream', 'pixtral',
   'mistral-small3.1', 'mistral-small3.2',
-  'granite3.2-vision', 'internvl', 'glm-4v',
+  // Entries must be in POST-normalizeFamily form. `glm-4v` normalizes to
+  // `glm4v` (the `glm-4`→`glm4` dash-collapse), so the dashed literal never
+  // matched a real GLM-4V tag → false "can't read images" hint. `internvl`
+  // alone misses the real `internvl2` / `internvl2.5` / `internvl3` tags
+  // (trailing digit breaks the word boundary), so list those prefixes.
+  'granite3.2-vision', 'internvl', 'internvl2', 'internvl3', 'glm4v',
 ]
 
 /**

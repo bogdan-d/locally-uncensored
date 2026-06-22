@@ -503,7 +503,10 @@ export function useAgentChat() {
     // shows only in the chat whose turn is in flight (David 2026-06-12).
     useGenerationStore.getState().setGenerating(convId, true)
     // Register so deleting/closing this chat stops the agent loop (Bug C).
-    useGenerationStore.getState().registerAborter(convId, () => { runningRef.current = false; abort.abort() })
+    // requestGenerationCancel too, so a ComfyUI gen the agent kicked off is
+    // interrupted when the chat is deleted mid-generation (gated to a no-op when
+    // nothing is in flight).
+    useGenerationStore.getState().registerAborter(convId, () => { runningRef.current = false; abort.abort(); requestGenerationCancel() })
     contentRef.current = ''
     thinkingRef.current = ''
     blocksRef.current = []

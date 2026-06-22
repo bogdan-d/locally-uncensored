@@ -43,8 +43,17 @@ function isBlockedIp(ip: string): boolean {
     if (lc === '::1' || lc === '::') return true // loopback / unspecified
     if (lc.startsWith('fe80')) return true // link-local
     if (lc.startsWith('fc') || lc.startsWith('fd')) return true // ULA fc00::/7
-    const mapped = lc.match(/::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
-    if (mapped) return isBlockedIp(mapped[1]) // IPv4-mapped IPv6
+    if (lc.startsWith('64:ff9b:')) return true // NAT64 (embeds an IPv4 — block)
+    // IPv4-mapped IPv6 in BOTH the dotted (::ffff:127.0.0.1) and the hex
+    // (::ffff:7f00:1) forms — decode the embedded IPv4 and re-check it.
+    const dotted = lc.match(/::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/)
+    if (dotted) return isBlockedIp(dotted[1])
+    const hex = lc.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+    if (hex) {
+      const hi = parseInt(hex[1], 16)
+      const lo = parseInt(hex[2], 16)
+      return isBlockedIp(`${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`)
+    }
     return false
   }
   return false // not an IP literal — caller resolves DNS and re-checks
@@ -525,8 +534,11 @@ function comfyLauncher(): Plugin {
           const proto = u.protocol === 'https:' ? https : http
           proto.get(imgUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (upstream) => {
             if (upstream.statusCode && upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
-              const loc = upstream.headers.location
               upstream.resume() // drain the redirect body
+              // Resolve relative redirects against the current hop (imgUrl was
+              // already validated) before re-validating + following.
+              let loc: string
+              try { loc = new URL(upstream.headers.location, imgUrl).toString() } catch { deny(); return }
               assertPublicUrl(loc).then((lu) => {
                 const lproto = lu.protocol === 'https:' ? https : http
                 lproto.get(loc, { headers: { 'User-Agent': 'Mozilla/5.0' } }, (redir) => {
@@ -570,7 +582,11 @@ function comfyLauncher(): Plugin {
             protocol.get(targetUrl, { headers: { 'User-Agent': 'LocallyUncensored/1.0' } }, (upstream) => {
               if (upstream.statusCode && upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
                 upstream.resume()
-                fetchUrl(upstream.headers.location, redirectCount + 1)
+                // Resolve relative redirects against the current hop (targetUrl
+                // was already validated) before the next hop re-validates.
+                let nextUrl: string
+                try { nextUrl = new URL(upstream.headers.location, targetUrl).toString() } catch { res.writeHead(502); res.end(); return }
+                fetchUrl(nextUrl, redirectCount + 1)
                 return
               }
               res.writeHead(upstream.statusCode || 200, {

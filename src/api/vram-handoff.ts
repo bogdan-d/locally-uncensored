@@ -507,6 +507,18 @@ let _cancelNotify: (() => void) | null = null
 // poll doesn't accumulate thousands of derived `.then` promises on it.
 let _cancelSignal: Promise<typeof CANCELLED> = new Promise<typeof CANCELLED>(() => { /* until reset */ })
 
+// Monotonic generation sequence + cancel epoch (back-to-back Stop fix). Each
+// vramHandoffGenerate() claims a seq when CREATED (before it parks on the
+// previous gen). requestGenerationCancel records the highest seq seen so far as
+// "cancelled-through"; a gen queued at/before the Stop bails the instant it
+// dequeues — its per-run resetCancel() clears the flag, but the epoch persists.
+let _genSeq = 0
+let _cancelledThrough = 0
+// Count of runHandoff bodies actually executing. Lets a Stop on a PLAIN text
+// chat (no media gen in flight) skip the ComfyUI /interrupt + full /queue-clear
+// that would otherwise nuke an unrelated Create-tab render or another client.
+let _activeHandoffs = 0
+
 /** Re-arm the cancel channel at the start of each generation. */
 function resetCancel(): void {
   _genCancelRequested = false
@@ -525,9 +537,15 @@ function raceCancel<T>(p: Promise<T>): Promise<T | typeof CANCELLED> {
 
 export function requestGenerationCancel(): void {
   _genCancelRequested = true
-  _cancelNotify?.()        // wake every pending raceCancel immediately
-  void cancelGeneration()  // /interrupt the running job (no-op mid model-load)
-  void clearComfyQueue()   // drop anything still queued so it can't start next
+  _cancelledThrough = _genSeq  // cancel every gen created so far (running + queued)
+  _cancelNotify?.()            // wake every pending raceCancel immediately
+  // Only touch ComfyUI when a chat-initiated generation is actually running.
+  // A plain text-chat Stop must NOT /interrupt + clear the ENTIRE queue (that
+  // would kill an unrelated Create-tab render or another client's job).
+  if (_activeHandoffs > 0) {
+    void cancelGeneration()  // /interrupt the running job (no-op mid model-load)
+    void clearComfyQueue()   // drop anything still queued so it can't start next
+  }
 }
 
 // Last image LU actually produced this session. Small models routinely pass a
@@ -565,9 +583,10 @@ export async function vramHandoffGenerate(kind: 'image' | 'video', args: VramHan
   // Serialise. We park on the previous call's settled promise (success OR
   // failure — `.catch` swallows so a prior error doesn't reject our chain),
   // then run our own body and expose it as the new tail.
+  const seq = ++_genSeq
   const run = _inFlight
     .catch(() => {})
-    .then(() => runHandoff(kind, args))
+    .then(() => runHandoff(kind, args, seq))
     // Defensive: runHandoff is written to always RETURN a string (the finally
     // block never rethrows), but if anything unexpected slips through we still
     // hand the agent a clean tool message instead of rejecting the chain.
@@ -576,10 +595,15 @@ export async function vramHandoffGenerate(kind: 'image' | 'video', args: VramHan
   return run
 }
 
-async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promise<string> {
+async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs, seq: number): Promise<string> {
   // Fresh run — re-arm the cancel channel (clears any flag/notify left over from
   // a previous cancelled gen).
   resetCancel()
+  // If Stop arrived while THIS gen was still queued behind another (its seq was
+  // created at/before the cancel), bail now. resetCancel() above just cleared the
+  // per-run flag, but the cancel epoch persists — without this, a back-to-back
+  // gen survives the user's Stop.
+  if (seq <= _cancelledThrough) return `${label(kind)} generation cancelled.`
   // Robustness for small local models (gemma4:e4b live): they frequently emit a
   // snake_case `input_image` alias and sometimes omit `prompt` on a video call.
   // Normalize the alias so the I2V path still finds the source image.
@@ -609,6 +633,9 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
   let targetModel: string
   let videoBackend: VideoBackend = 'none'
   try {
+    // A chat-initiated ComfyUI gen is now in flight — gates the ComfyUI
+    // /interrupt in requestGenerationCancel (paired 1:1 with the finally below).
+    _activeHandoffs++
     if (kind === 'image') {
       const models = await getImageModels()
       if (models.length === 0) {
@@ -844,6 +871,7 @@ async function runHandoff(kind: 'image' | 'video', args: VramHandoffArgs): Promi
     if (result === CANCELLED) return `${label(kind)} generation cancelled.`
     return result
   } finally {
+    _activeHandoffs-- // paired with the increment at the top of the try above
     // ── (d) HANDOFF-BACK — ALWAYS (success, failure, timeout) ──────
     // Free ComfyUI's VRAM first (so the text model has room to reload), then
     // best-effort reload the text model. The reload is non-fatal: if it throws,

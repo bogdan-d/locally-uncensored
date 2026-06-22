@@ -45,6 +45,10 @@ function deobfuscate(encoded: string): string {
 // before. Module-level so the static `partialize` can read it.
 let keychainReady = false
 const PROVIDER_IDS: ProviderId[] = ['ollama', 'openai', 'anthropic']
+// Providers whose OS-vault WRITE failed this session. partialize keeps their
+// obfuscated key in localStorage as a fallback so a flaky/locked credential
+// store can't silently drop the key on the next restart.
+const _keychainFailed = new Set<ProviderId>()
 
 // ── Default provider configs ───────────────────────────────────
 
@@ -123,11 +127,17 @@ export const useProviderStore = create<ProviderState>()(
             [id]: { ...state.providers[id], apiKey: obfuscate(key) },
           },
         }))
-        // When the OS vault is active, store the real key there; partialize
-        // keeps it out of localStorage. Fire-and-forget — the in-memory
-        // obfuscated value already serves this session's reads.
+        // When the OS vault is active, store the real key there; partialize then
+        // keeps it out of localStorage. If the vault WRITE fails (locked / policy
+        // / full), mark this id so partialize RETAINS the obfuscated key in
+        // localStorage — otherwise it would vanish on the next restart with no
+        // trace (the in-memory value only serves this session).
         if (keychainReady) {
-          void secretSet(id, key).catch(() => { /* vault write best-effort */ })
+          _keychainFailed.delete(id)
+          secretSet(id, key).catch(() => {
+            _keychainFailed.add(id)
+            set((s) => ({ providers: { ...s.providers } })) // re-persist with the fallback retained
+          })
         }
         clearProviderCache()
       },
@@ -177,7 +187,9 @@ export const useProviderStore = create<ProviderState>()(
               // (an upgrading user) into the vault, once.
               const existing = deobfuscate(next[id]?.apiKey || '')
               if (existing) {
-                try { await secretSet(id, existing) } catch { /* migrate best-effort */ }
+                // Migrate the old localStorage key into the vault. If the write
+                // fails, mark it so partialize keeps the localStorage copy (no loss).
+                try { await secretSet(id, existing) } catch { _keychainFailed.add(id) }
               }
             }
           } catch {
@@ -203,7 +215,11 @@ export const useProviderStore = create<ProviderState>()(
       partialize: (state) => ({
         providers: keychainReady
           ? (Object.fromEntries(
-              Object.entries(state.providers).map(([id, p]) => [id, { ...p, apiKey: '' }])
+              Object.entries(state.providers).map(([id, p]) =>
+                // Strip the key (it lives in the vault) UNLESS the vault write
+                // failed for this id — then keep the obfuscated fallback.
+                _keychainFailed.has(id as ProviderId) ? [id, p] : [id, { ...p, apiKey: '' }]
+              )
             ) as Record<ProviderId, ProviderConfig>)
           : state.providers,
         hideBackendSelector: state.hideBackendSelector,
