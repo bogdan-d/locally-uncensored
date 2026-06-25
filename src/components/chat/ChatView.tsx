@@ -386,6 +386,7 @@ export function ChatView() {
                 pendingApproval={pendingApproval}
                 onApprove={approveToolCall}
                 onReject={rejectToolCall}
+                onAttachDocs={() => setRagPanelOpen(true)}
               />
             </>)}
             </div>

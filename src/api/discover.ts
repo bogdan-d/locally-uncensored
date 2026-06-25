@@ -259,6 +259,13 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
 
   // Dispatch event so CreateView refreshes model list
   window.dispatchEvent(new CustomEvent('comfyui-model-downloaded'))
+  // Also fire the canonical model-list refresh: the Model Manager's Installed
+  // tab and the shared model store (chat + create pickers) listen on
+  // 'lu-models-refresh', NOT the comfy-specific event above. Without this a
+  // freshly downloaded image/video model showed as installed in Discover but
+  // was missing from the Installed tab and unselectable until a manual refresh
+  // (d37d7bf5 + neejuh, 2026-06-24, on v2.5.5).
+  window.dispatchEvent(new CustomEvent('lu-models-refresh'))
 
   if (errors.length > 0) {
     throw new Error(`Bundle install had ${errors.length} issue(s): ${errors.join('; ')}`)

@@ -55,6 +55,20 @@ export function DownloadBadge() {
     if (totalActive > 0) setOpen(true)
   }, [totalActive])
 
+  // Self-heal polling: comfy download progress comes from a polled Rust/bridge
+  // endpoint, and polling was only ever kicked off from the Discover page. So a
+  // download watched from anywhere else — or after the idle auto-stop fired —
+  // showed a frozen progress bar until the user opened the Models page, which
+  // restarted polling (konata, web build, 2026-06-22). The global badge is
+  // always mounted, so let it keep polling alive whenever a comfy download is
+  // active. Strictly additive: it only starts polling, never stops it.
+  const polling = useDownloadStore(s => s.polling)
+  useEffect(() => {
+    if (comfyActiveCount > 0 && !polling) {
+      useDownloadStore.getState().startPolling()
+    }
+  }, [comfyActiveCount, polling])
+
   return (
     <div ref={ref} className="relative">
       {/* Icon trigger */}
