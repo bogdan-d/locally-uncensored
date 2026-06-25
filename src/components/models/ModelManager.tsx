@@ -236,7 +236,17 @@ export function ModelManager() {
       <div className="max-w-4xl mx-auto">
         {tab === 'installed' && (
           <>
-            {imageOrVideo && filteredModels.length === 0 && comfyReachable === false ? (
+            {imageOrVideo && filteredModels.length === 0 && comfyReachable !== true ? (
+              // comfyReachable: null = still probing, false = confirmed down.
+              // Never show the misleading "no models installed" here while the
+              // probe is pending — on desktop checkComfyConnection has to time
+              // out when ComfyUI is down (a few seconds), and that flashed the
+              // wrong message before the hint appeared (caught in desktop E2E).
+              comfyReachable === null ? (
+                <div className="text-center py-16 px-6">
+                  <p className="text-[0.7rem] text-gray-500">Checking ComfyUI…</p>
+                </div>
+              ) : (
               <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
                 <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
                   {installedMode === 'video' ? <Video size={22} className="text-gray-400 dark:text-gray-500" /> : <Image size={22} className="text-gray-400 dark:text-gray-500" />}
@@ -254,6 +264,7 @@ export function ModelManager() {
                   <Sparkles size={11} /> Go to Create
                 </button>
               </div>
+              )
             ) : models.length === 0 ? (
               <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
                 <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
