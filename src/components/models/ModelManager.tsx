@@ -101,6 +101,11 @@ export function ModelManager() {
   useEffect(() => {
     if (!(tab === 'installed' && imageOrVideo && filteredModels.length === 0)) return
     let alive = true
+    // Reset to "probing" on every (re)check — e.g. switching image<->video, or
+    // re-entering an empty mode after ComfyUI went down. Without this the prior
+    // resolved value lingers and briefly shows the wrong empty state before the
+    // fresh probe resolves; null makes it show "Checking ComfyUI..." each time.
+    setComfyReachable(null)
     checkComfyConnection()
       .then((ok) => { if (alive) setComfyReachable(ok) })
       .catch(() => { if (alive) setComfyReachable(false) })
