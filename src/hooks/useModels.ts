@@ -39,7 +39,19 @@ export function useModels() {
   useEffect(() => {
     const handler = () => { fetchModels().catch(() => {}) }
     window.addEventListener('lu-models-refresh', handler)
-    return () => window.removeEventListener('lu-models-refresh', handler)
+    // A finished ComfyUI image/video download fires 'comfyui-model-downloaded' —
+    // from the download-store poller on completion AND from installBundleComplete
+    // after it rescans ComfyUI. useModels must refetch on it too, or a freshly
+    // downloaded model stays missing from the Installed tab + the chat/create
+    // pickers until a manual reload (d37d7bf5 + neejuh, 2026-06-24, v2.5.5).
+    // 'lu-models-refresh' alone did NOT cover this: installBundleComplete can bail
+    // before any dispatch when ComfyUI is not fully up, while the file still
+    // downloads and only the poller's event fires (verified live 2026-06-25).
+    window.addEventListener('comfyui-model-downloaded', handler)
+    return () => {
+      window.removeEventListener('lu-models-refresh', handler)
+      window.removeEventListener('comfyui-model-downloaded', handler)
+    }
     // fetchModels is reassigned below on every render but always wraps the
     // same setModels — depending on it would just churn listeners.
     // eslint-disable-next-line react-hooks/exhaustive-deps
