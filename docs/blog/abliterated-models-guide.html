@@ -190,9 +190,9 @@ footer a:hover{color:var(--text);text-decoration:none}
 
     <h2 id="llama-4-abliterated">Llama 4 Abliterated</h2>
 
-    <p>Llama 4 is Meta&rsquo;s MoE flagship (Scout and Maverick) with native vision and long context. Abliterated GGUF conversions follow each release within days &mdash; the maintainers to watch are <strong>huihui-ai</strong> and <strong>mlabonne</strong>, who ship the canonical decensored variants. Because Llama 4 is mixture-of-experts, VRAM peak tracks the active-expert size, not the full parameter count, so a quantised Scout runs on far less than its headline weight suggests.</p>
+    <p>Llama 4 Scout (17B active, 16 experts, ~109B total) is Meta&rsquo;s MoE model with native vision and long context. A working abliterated GGUF is live: <strong><a href="https://huggingface.co/mradermacher/Llama-4-Scout-17B-16E-Instruct-abliterated-GGUF">mradermacher/Llama-4-Scout-17B-16E-Instruct-abliterated-GGUF</a></strong> &mdash; mradermacher&rsquo;s quant of jiangchengchengNLP&rsquo;s abliteration. Imatrix quants live in the companion <a href="https://huggingface.co/mradermacher/Llama-4-Scout-17B-16E-Instruct-abliterated-i1-GGUF">-i1-GGUF</a> repo.</p>
 
-    <p>Fastest route: open the <strong>UNCENSORED</strong> filter in Locally Uncensored&rsquo;s Model Manager (it tracks the current working Llama 4 abliterations and their hardware tags), or search <code>huihui-ai llama-4 abliterated</code> / <code>mlabonne llama-4 abliterated</code> on HuggingFace for the latest GGUF mirror.</p>
+    <p>Reality check on size: this is frontier-class. With llama.cpp every expert has to stay resident, so VRAM/RAM tracks the <em>full</em> file, not the 17B active slice &mdash; Q4_K_M is ~66 GB, Q2_K ~40 GB. You need a multi-GPU rig, a 64&ndash;128 GB unified-memory Mac, or heavy CPU offload. If you just want an uncensored model that fits a normal GPU, use <a href="#qwen-3-6-abliterated">Qwen 3.6</a> or <a href="#gemma-4-abliterated">Gemma 4</a> above &mdash; reach for Llama 4 abliterated only when you specifically need its capabilities and have the hardware.</p>
 
     <h2 id="llama-3-1-abliterated">Llama 3.1 Abliterated</h2>
 
