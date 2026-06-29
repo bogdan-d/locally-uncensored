@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Abliterated Models Guide — Qwen 3.6, Gemma 4 Heretic, Llama 3.1 Uncensored Download Links</title>
-<meta name="description" content="Complete guide to abliterated AI models in 2026. What abliteration is, which models are available (Qwen 3.6, Gemma 4 Heretic, Llama 3.1, Hermes 3), where to download GGUF files, and how to run them locally with one click.">
+<title>Abliterated Models Guide — Qwen 3.6, Gemma 4 & Llama 4 Heretic / Uncensored Download Links (2026)</title>
+<meta name="description" content="Complete guide to abliterated AI models in 2026. What abliteration is, which models are available — Qwen 3.6 Abliterated, Gemma 4 Abliterated (Heretic), Llama 4, Llama 3.1, Hermes 3, GLM 5.1 Heretic — where to download GGUF files, and how to run them locally with one click.">
 <meta property="og:title" content="Abliterated Models Guide — Qwen 3.6, Gemma 4 Heretic, Llama 3.1 Uncensored">
 <meta property="og:description" content="What abliteration is, which models are available, where to download, and how to run abliterated models locally.">
 <meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
@@ -146,7 +146,16 @@ footer a:hover{color:var(--text);text-decoration:none}
 
     <h2>The Recommended Abliterated Models (2026)</h2>
 
-    <h3>Qwen 3.6 Family</h3>
+    <p>Jump to a model:
+      <a href="#qwen-3-6-abliterated">Qwen 3.6 Abliterated</a> &middot;
+      <a href="#gemma-4-abliterated">Gemma 4 Abliterated</a> &middot;
+      <a href="#llama-4-abliterated">Llama 4 Abliterated</a> &middot;
+      <a href="#llama-3-1-abliterated">Llama 3.1 Abliterated</a> &middot;
+      <a href="#hermes-3">Hermes 3</a> &middot;
+      <a href="#glm-5-1-heretic">GLM 5.1 Heretic</a>
+    </p>
+
+    <h3 id="qwen-3-6-abliterated">Qwen 3.6 Abliterated (Heretic &amp; &ldquo;Obliterated&rdquo;)</h3>
 
     <p>Qwen 3.6 (April 2026) is currently the strongest base for abliteration. Two notable releases:</p>
 
@@ -155,7 +164,9 @@ footer a:hover{color:var(--text);text-decoration:none}
       <li><strong>Qwen 3.6 27B Samantha (huihui-ai variant)</strong> &mdash; abliterated dense 27B with the Samantha personality finetune layered on top. Released April 22 2026. Needs GGUF conversion as of writing.</li>
     </ul>
 
-    <h3>Gemma 4 Heretic</h3>
+    <p>A note on naming: searches for <strong>&ldquo;Qwen 3.6 Heretic&rdquo;</strong> and <strong>&ldquo;Qwen 3.6 Obliterated&rdquo;</strong> point at the same family. <em>Heretic</em> is the decensoring method popularised on the Gemma line and now applied to Qwen; <em>Obliterated</em> is simply a common misspelling of <em>abliterated</em>. All three terms land you at the huihui-ai and richardyoung Qwen 3.6 variants above.</p>
+
+    <h3 id="gemma-4-abliterated">Gemma 4 Abliterated (Heretic)</h3>
 
     <ul>
       <li><strong>Stabhappy/gemma-4-31B-it-heretic-Gguf</strong> &mdash; the Gemma 4 31B base abliterated. ~17 GB at Q4_K_M. Strong general-purpose, native vision, tool calling.</li>
@@ -163,14 +174,20 @@ footer a:hover{color:var(--text);text-decoration:none}
       <li><strong>Gemma 4 26B MoE HERETIC</strong> &mdash; 26B brain with 4B active. Smaller VRAM peak than the 31B dense, MoE-fast inference.</li>
     </ul>
 
-    <h3>Llama 3.1 Family</h3>
+    <h3 id="llama-4-abliterated">Llama 4 Abliterated</h3>
+
+    <p>Llama 4 is Meta&rsquo;s MoE flagship (Scout and Maverick) with native vision and long context. Abliterated GGUF conversions follow each release within days &mdash; the maintainers to watch are <strong>huihui-ai</strong> and <strong>mlabonne</strong>, who ship the canonical decensored variants. Because Llama 4 is mixture-of-experts, VRAM peak tracks the active-expert size, not the full parameter count, so a quantised Scout runs on far less than its headline weight suggests.</p>
+
+    <p>Fastest route: open the <strong>UNCENSORED</strong> filter in Locally Uncensored&rsquo;s Model Manager (it tracks the current working Llama 4 abliterations and their hardware tags), or search <code>huihui-ai llama-4 abliterated</code> / <code>mlabonne llama-4 abliterated</code> on HuggingFace for the latest GGUF mirror.</p>
+
+    <h3 id="llama-3-1-abliterated">Llama 3.1 Abliterated</h3>
 
     <ul>
       <li><strong>mannix/llama3.1-8b-abliterated:q5_K_M</strong> &mdash; 5.7 GB. The most-pulled abliterated Llama on Ollama. Comes with <code>:agent</code> tag for tool calling.</li>
       <li><strong>mlabonne/Meta-Llama-3.1-8B-Instruct-abliterated</strong> &mdash; the canonical reference variant. Multiple GGUF mirrors available.</li>
     </ul>
 
-    <h3>Hermes 3</h3>
+    <h3 id="hermes-3">Hermes 3</h3>
 
     <p>Hermes 3 (Nous Research) is technically a full finetune, not abliteration, but functions similarly &mdash; no refusals, strong instruction-following, agent-friendly. Variants:</p>
 
@@ -179,7 +196,7 @@ footer a:hover{color:var(--text);text-decoration:none}
       <li><strong>hermes3:70b</strong> &mdash; 40 GB, needs 48 GB VRAM or aggressive quantisation.</li>
     </ul>
 
-    <h3>GLM 5.1 Heretic</h3>
+    <h3 id="glm-5-1-heretic">GLM 5.1 Heretic</h3>
 
     <p>The newest entrant: <strong>huihui-ai/Huihui-GLM-5.1-abliterated-GGUF</strong>. The 754B MoE GLM 5.1 abliterated. 236 GB at IQ2_M &mdash; not consumer hardware, but if you have a multi-GPU rig or a Mac Studio M4 Ultra, it&rsquo;s the strongest open abliterated model period.</p>
 
