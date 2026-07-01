@@ -257,7 +257,10 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
     await refreshComfyModels()
   } catch { /* non-fatal — fetchModels also calls refresh */ }
 
-  // Dispatch event so CreateView refreshes model list
+  // Dispatch event so CreateView + the Model Manager refresh their lists. This
+  // fires AFTER refreshComfyModels() above, so a consumer that refetches here
+  // sees ComfyUI's rescanned /object_info (the new file). useModels listens for
+  // this event too (see its effect) so the Installed tab + pickers update.
   window.dispatchEvent(new CustomEvent('comfyui-model-downloaded'))
 
   if (errors.length > 0) {

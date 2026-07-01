@@ -12,6 +12,7 @@ import {
   isTauri,
   ollamaUrl,
   comfyuiUrl,
+  comfyAbsoluteFallback,
   comfyuiWsUrl,
   setComfyPort,
   getComfyPort,
@@ -363,6 +364,46 @@ describe('backend — URL helpers', () => {
       delete windowMock.__TAURI__
       setComfyHost('remote-server')
       expect(comfyuiUrl('/prompt')).toBe('/comfyui/prompt')
+    })
+  })
+
+  // ─── comfyAbsoluteFallback (konata web video-gallery fix, 2026-06-25) ───
+
+  describe('comfyAbsoluteFallback', () => {
+    it('rewrites a relative /comfyui/view path to an absolute host URL', () => {
+      setComfyHost('localhost')
+      setComfyPort(8188)
+      expect(comfyAbsoluteFallback('/comfyui/view?filename=out.mp4&type=output'))
+        .toBe('http://localhost:8188/view?filename=out.mp4&type=output')
+    })
+
+    it('rewrites a bare /view path (no /comfyui prefix) too', () => {
+      setComfyHost('localhost')
+      setComfyPort(8188)
+      expect(comfyAbsoluteFallback('/view?filename=out.webm'))
+        .toBe('http://localhost:8188/view?filename=out.webm')
+    })
+
+    it('honours a custom host + port (remote ComfyUI via tunnel)', () => {
+      setComfyHost('192.168.1.50')
+      setComfyPort(9999)
+      expect(comfyAbsoluteFallback('/comfyui/view?filename=clip.mp4'))
+        .toBe('http://192.168.1.50:9999/view?filename=clip.mp4')
+    })
+
+    it('leaves an already-absolute URL untouched (Tauri path)', () => {
+      setComfyHost('localhost')
+      setComfyPort(8188)
+      const abs = 'http://localhost:8188/view?filename=x.png'
+      expect(comfyAbsoluteFallback(abs)).toBe(abs)
+    })
+
+    it('only strips the leading /comfyui segment, not an inner one', () => {
+      setComfyHost('localhost')
+      setComfyPort(8188)
+      // subfolder happening to contain the word should not be mangled
+      expect(comfyAbsoluteFallback('/comfyui/view?filename=a&subfolder=comfyui_out'))
+        .toBe('http://localhost:8188/view?filename=a&subfolder=comfyui_out')
     })
   })
 

@@ -11,6 +11,17 @@ import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
 import type { AIModel } from '../../types/models'
 
+// True when `prev` already holds exactly the names in `next`. Lets the 1.5 s
+// loaded-state poll bail out of a state update (return the SAME Set ref) when
+// nothing changed, so React skips the re-render instead of reconciling the whole
+// dropdown every tick — the common case once the user has stopped loading models
+// (vedaiorobotics GH #70: "interface laggy, even when loading models").
+function sameStringSet(prev: Set<string>, next: string[]): boolean {
+  if (prev.size !== next.length) return false
+  for (const n of next) if (!prev.has(n)) return false
+  return true
+}
+
 // ── Bug Q (v2.4.7 — wakeywakeynow GH #41) ─────────────────────
 //
 // Symptom: user has LM Studio installed with models on disk, opens LU's
@@ -379,6 +390,10 @@ export function ModelSelector() {
     setSelectError(null) // fresh open — drop any stale auto-load error
     let cancelled = false
     const refresh = () => {
+      // Skip the tick entirely while the window is hidden/minimized — there's
+      // nothing to repaint and we re-sync the moment it's visible again. Stops a
+      // backgrounded app from hitting Ollama / LM Studio every 1.5 s (#70).
+      if (typeof document !== 'undefined' && document.hidden) return
       // Only probe LM Studio's loaded-state when LM Studio models are actually
       // listed. When its server is down there are NO LM Studio rows, so this
       // skips the probe entirely — removing the last frontend reason the
@@ -389,17 +404,22 @@ export function ModelSelector() {
         isLmStudioProvider(('providerName' in m && (m as any).providerName) as string | undefined),
       )
       if (hasLmsRows) {
-        void listLoadedLmStudioModels().then((list) => { if (!cancelled) setLmsLoaded(new Set(list)) }).catch(() => {})
+        void listLoadedLmStudioModels().then((list) => { if (!cancelled) setLmsLoaded((prev) => sameStringSet(prev, list) ? prev : new Set(list)) }).catch(() => {})
       } else if (!cancelled) {
         setLmsLoaded((prev) => (prev.size ? new Set() : prev))
       }
-      void listRunningModels().then((list) => { if (!cancelled) setOllamaLoaded(new Set(list)) }).catch(() => {})
+      void listRunningModels().then((list) => { if (!cancelled) setOllamaLoaded((prev) => sameStringSet(prev, list) ? prev : new Set(list)) }).catch(() => {})
     }
     refresh()
     const id = setInterval(refresh, 1500)
+    // Re-sync immediately when the user comes back to the window (the hidden
+    // ticks above were skipped, so the loaded-state could be stale).
+    const onVisible = () => { if (typeof document !== 'undefined' && !document.hidden) refresh() }
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
       cancelled = true
       clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [open])
 

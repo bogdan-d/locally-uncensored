@@ -13,6 +13,7 @@ import { DiscoverModels } from './DiscoverModels'
 import { Modal } from '../ui/Modal'
 import { GlowButton } from '../ui/GlowButton'
 import { showModel } from '../../api/ollama'
+import { checkComfyConnection } from '../../api/comfyui'
 import type { ModelCategory, AIModel } from '../../types/models'
 
 // Three-mode filter shared by both Installed and Discover banners. There is no
@@ -86,6 +87,30 @@ export function ModelManager() {
   }
 
   const filteredModels = models.filter((m: AIModel) => m.type === installedMode)
+
+  // d37d7bf5 + neejuh (2.5.5): "models show installed in Discover but the
+  // Installed tab is empty and I can't select them." Image/video models are
+  // enumerated live from ComfyUI's /object_info — when ComfyUI isn't running,
+  // fetchModels gets zero of them, so the Installed section looks empty even
+  // though the files are on disk (the Discover "installed" badge comes from the
+  // download record, a different source — hence the mismatch). Detect that case
+  // with a ONE-SHOT reachability check (never a poll — keep the app light, #70)
+  // so we can show the real reason instead of a misleading "no models installed".
+  const [comfyReachable, setComfyReachable] = useState<boolean | null>(null)
+  const imageOrVideo = installedMode === 'image' || installedMode === 'video'
+  useEffect(() => {
+    if (!(tab === 'installed' && imageOrVideo && filteredModels.length === 0)) return
+    let alive = true
+    // Reset to "probing" on every (re)check — e.g. switching image<->video, or
+    // re-entering an empty mode after ComfyUI went down. Without this the prior
+    // resolved value lingers and briefly shows the wrong empty state before the
+    // fresh probe resolves; null makes it show "Checking ComfyUI..." each time.
+    setComfyReachable(null)
+    checkComfyConnection()
+      .then((ok) => { if (alive) setComfyReachable(ok) })
+      .catch(() => { if (alive) setComfyReachable(false) })
+    return () => { alive = false }
+  }, [tab, imageOrVideo, filteredModels.length])
 
   // ── Render ──────────────────────────────────────────────────────
 
@@ -216,7 +241,36 @@ export function ModelManager() {
       <div className="max-w-4xl mx-auto">
         {tab === 'installed' && (
           <>
-            {models.length === 0 ? (
+            {imageOrVideo && filteredModels.length === 0 && comfyReachable !== true ? (
+              // comfyReachable: null = still probing, false = confirmed down.
+              // Never show the misleading "no models installed" here while the
+              // probe is pending — on desktop checkComfyConnection has to time
+              // out when ComfyUI is down (a few seconds), and that flashed the
+              // wrong message before the hint appeared (caught in desktop E2E).
+              comfyReachable === null ? (
+                <div className="text-center py-16 px-6">
+                  <p className="text-[0.7rem] text-gray-500">Checking ComfyUI…</p>
+                </div>
+              ) : (
+              <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
+                <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
+                  {installedMode === 'video' ? <Video size={22} className="text-gray-400 dark:text-gray-500" /> : <Image size={22} className="text-gray-400 dark:text-gray-500" />}
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {installedMode} models</p>
+                  <p className="text-[0.6rem] text-gray-500 max-w-[300px] leading-relaxed">
+                    {installedMode === 'image' ? 'Image' : 'Video'} models are served by ComfyUI, which isn't running right now — so the ones you've downloaded can't be listed yet. Open the Create tab and start ComfyUI (the power button next to the model picker), then come back.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setView('create')}
+                  className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
+                >
+                  <Sparkles size={11} /> Go to Create
+                </button>
+              </div>
+              )
+            ) : models.length === 0 ? (
               <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
                 <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
                   <PackageOpen size={22} className="text-gray-400 dark:text-gray-500" />

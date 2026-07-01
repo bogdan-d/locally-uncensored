@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Download, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Info } from 'lucide-react'
 import { getImageUrl } from '../../api/comfyui'
-import { downloadComfyFile } from '../../api/backend'
+import { downloadComfyFile, comfyAbsoluteFallback } from '../../api/backend'
 import type { GalleryItem } from '../../stores/createStore'
 
 interface Props {
@@ -78,7 +78,11 @@ export function MediaViewer({ gallery, initialIndex, onClose }: Props) {
   // Stable URL: keyed on the item's immutable createdAt, so the string is
   // identical across every re-render (zoom/pan/mouse-move) → no refetch, no
   // flicker. Empty when the gallery has emptied out.
-  const url = item ? getImageUrl(item.filename, item.subfolder, 'output', item.createdAt) : ''
+  const rawUrl = item ? getImageUrl(item.filename, item.subfolder, 'output', item.createdAt) : ''
+  // konata 2026-06-25: web build — fall back to an absolute host URL if the
+  // relative /comfyui/view path fails to paint (reverse-proxy/tunnel).
+  const [failedId, setFailedId] = useState<string | null>(null)
+  const url = item && failedId === item.id ? comfyAbsoluteFallback(rawUrl) : rawUrl
   const ready = !!url && loadedUrl === url
 
   const resetView = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [])
@@ -228,6 +232,7 @@ export function MediaViewer({ gallery, initialIndex, onClose }: Props) {
             playsInline
             className="max-w-[92vw] max-h-[82vh] rounded-lg shadow-2xl bg-black"
             onLoadedData={() => setLoadedUrl(url)}
+            onError={() => { if (item && failedId !== item.id) setFailedId(item.id) }}
             onClick={(e) => e.stopPropagation()}
             style={{ opacity: ready ? 1 : 0, transition: 'opacity 0.2s ease-out' }}
           />
@@ -237,6 +242,7 @@ export function MediaViewer({ gallery, initialIndex, onClose }: Props) {
             src={url}
             alt={item.prompt}
             onLoad={() => setLoadedUrl(url)}
+            onError={() => { if (item && failedId !== item.id) setFailedId(item.id) }}
             draggable={false}
             onMouseDown={onMouseDown}
             className="max-w-[92vw] max-h-[82vh] object-contain rounded-lg shadow-2xl"

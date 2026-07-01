@@ -557,6 +557,25 @@ export function comfyuiUrl(path: string): string {
   return `/comfyui${path}`;
 }
 
+/**
+ * Web-build fallback for a relative ComfyUI media URL (konata 2026-06-08 chat,
+ * 2026-06-25 Create page). In the browser build, media URLs are the RELATIVE
+ * Vite-proxy path (`/comfyui/view?…`). That loads fine under `npm run dev`, but
+ * a static host — or a reverse-proxy / SSH tunnel in front of a remote ComfyUI —
+ * can mishandle the `<video>` byte-range subrequest and never paint it, while a
+ * plain `<img>` GET and a direct top-level navigation to the same URL still work
+ * (exactly konata's "video not in gallery, direct link works" report). When the
+ * relative load fires onError, retry with an ABSOLUTE URL straight to the
+ * ComfyUI host — `<img>`/`<video>` display is not CORS-gated, so it needs no
+ * proxy. Tauri URLs are already absolute (never start with '/') and pass through
+ * untouched. The chat path (ToolCallBlock) has shipped this since 2026-06-08;
+ * this is the same logic, shared so the Create-page renderers match it. */
+export function comfyAbsoluteFallback(url: string): string {
+  if (!url.startsWith('/')) return url;
+  const path = url.startsWith('/comfyui/') ? url.slice('/comfyui'.length) : url;
+  return `http://${_comfyHost}:${_comfyPort}${path}`;
+}
+
 /** Get the WebSocket URL for ComfyUI */
 export function comfyuiWsUrl(): string {
   return `ws://${_comfyHost}:${_comfyPort}/ws`;

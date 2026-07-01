@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { Download, Maximize2, Copy, Check, RefreshCw, HardDrive, Brain, Cpu, Zap } from 'lucide-react'
 import { getImageUrl } from '../../api/comfyui'
-import { downloadComfyFile } from '../../api/backend'
+import { downloadComfyFile, comfyAbsoluteFallback } from '../../api/backend'
 import { useCreateStore, type GalleryItem } from '../../stores/createStore'
 import { MediaViewer } from './MediaViewer'
 
@@ -14,6 +14,9 @@ export function OutputDisplay() {
   // generation never shows a half-painted frame. Keyed by item id so it
   // auto-resets when a new result arrives.
   const [loadedId, setLoadedId] = useState<string | null>(null)
+  // konata 2026-06-25: web build — if the relative /comfyui/view URL fails to
+  // paint (reverse-proxy/tunnel), retry once with an absolute URL to the host.
+  const [failedId, setFailedId] = useState<string | null>(null)
   const latest = gallery[0]
 
   const handleDownload = (item: GalleryItem) => {
@@ -136,7 +139,8 @@ export function OutputDisplay() {
 
   // Show latest result — stable URL (item's createdAt as cache token) so the
   // element never refetches across re-renders.
-  const url = getImageUrl(latest.filename, latest.subfolder, 'output', latest.createdAt)
+  const rawUrl = getImageUrl(latest.filename, latest.subfolder, 'output', latest.createdAt)
+  const url = failedId === latest.id ? comfyAbsoluteFallback(rawUrl) : rawUrl
   const ready = loadedId === latest.id
 
   return (
@@ -156,6 +160,7 @@ export function OutputDisplay() {
               loop
               playsInline
               onLoadedData={() => setLoadedId(latest.id)}
+              onError={() => { if (failedId !== latest.id) setFailedId(latest.id) }}
               className="max-w-full max-h-full rounded-xl border border-gray-200 dark:border-white/10 object-contain cursor-pointer bg-black"
               style={{ opacity: ready ? 1 : 0, transition: 'opacity 0.25s ease-out' }}
               onClick={() => setViewerIndex(0)}
@@ -166,6 +171,7 @@ export function OutputDisplay() {
               src={url}
               alt={latest.prompt}
               onLoad={() => setLoadedId(latest.id)}
+              onError={() => { if (failedId !== latest.id) setFailedId(latest.id) }}
               className="max-w-full max-h-full rounded-xl border border-gray-200 dark:border-white/10 object-contain cursor-pointer"
               style={{ opacity: ready ? 1 : 0, transition: 'opacity 0.25s ease-out' }}
               onClick={() => setViewerIndex(0)}

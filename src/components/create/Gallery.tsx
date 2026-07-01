@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Trash2, Download, ChevronDown, ChevronUp } from 'lucide-react'
 import { getImageUrl } from '../../api/comfyui'
-import { downloadComfyFile } from '../../api/backend'
+import { downloadComfyFile, comfyAbsoluteFallback } from '../../api/backend'
 import { useCreateStore, type GalleryItem } from '../../stores/createStore'
 import { MediaViewer } from './MediaViewer'
 
@@ -13,6 +13,12 @@ export function Gallery() {
   const [expanded, setExpanded] = useState(true)
   const [page, setPage] = useState(0)
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
+  // konata 2026-06-25: in the web build, a video tile's relative /comfyui/view
+  // URL can fail to paint through a reverse-proxy/tunnel while the raw URL works.
+  // Track tiles whose primary load errored and retry them with an absolute URL.
+  const [failedIds, setFailedIds] = useState<Set<string>>(new Set())
+  const markFailed = (id: string) =>
+    setFailedIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)))
 
   if (gallery.length === 0) {
     return (
@@ -65,7 +71,8 @@ export function Gallery() {
               <div className="flex gap-2 overflow-x-auto scrollbar-thin px-4 pb-3">
                 {visible.map((item, i) => {
                   // Stable URL (item's createdAt token) → no per-render refetch.
-                  const url = getImageUrl(item.filename, item.subfolder, 'output', item.createdAt)
+                  const rawUrl = getImageUrl(item.filename, item.subfolder, 'output', item.createdAt)
+                  const url = failedIds.has(item.id) ? comfyAbsoluteFallback(rawUrl) : rawUrl
                   return (
                     <motion.div
                       key={item.id}
@@ -82,11 +89,13 @@ export function Gallery() {
                           className="w-20 h-20 object-cover"
                           muted
                           playsInline
+                          preload="metadata"
+                          onError={() => markFailed(item.id)}
                           onMouseEnter={(e) => e.currentTarget.play()}
                           onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0 }}
                         />
                       ) : (
-                        <img src={url} alt="" className="w-20 h-20 object-cover" loading="lazy" />
+                        <img src={url} alt="" className="w-20 h-20 object-cover" loading="lazy" onError={() => markFailed(item.id)} />
                       )}
                       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                         <button

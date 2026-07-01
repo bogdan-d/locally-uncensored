@@ -23,6 +23,13 @@ interface Props {
    * — slash commands belong there, not in the normal chat (David 2026-06-12).
    */
   slashCommands?: boolean
+  /**
+   * Open the Documents (RAG) panel. The clip button is images-only; this lets the
+   * composer point a user who tried to attach a PDF/doc to the right place
+   * (GH #69 — a PDF was silently dropped and the model hallucinated it couldn't
+   * receive attachments).
+   */
+  onAttachDocs?: () => void
 }
 
 function fileToImageAttachment(file: File): Promise<ImageAttachment> {
@@ -38,10 +45,13 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
   })
 }
 
-export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject, disabled, slashCommands }: Props) {
+export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject, disabled, slashCommands, onAttachDocs }: Props) {
   const [input, setInput] = useState('')
   const [images, setImages] = useState<ImageAttachment[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
+  // Transient hint shown when a non-image file is attached. The clip + drop are
+  // images-only; PDFs/Word/text belong in the Documents (RAG) panel (GH #69).
+  const [docHint, setDocHint] = useState(false)
   const [isVoiceRecording, setIsVoiceRecording] = useState(false)
   // Slash-command autocomplete (v2.5.3). When the input is a lone "/token", show
   // the matching agent commands; ↑/↓ to move, Enter/Tab to pick, Esc to dismiss.
@@ -68,11 +78,25 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   }, [input])
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
-    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'))
+    const all = Array.from(files)
+    const imageFiles = all.filter(f => f.type.startsWith('image/'))
+    // A non-image file (PDF, Word, text, …) can't ride along as a chat image —
+    // it belongs in the Documents panel (RAG) so the model can actually read it.
+    // Silently dropping it made a user think their PDF attached when it didn't,
+    // and the model then hallucinated that it "couldn't receive attachments"
+    // (GH #69). Surface a hint pointing at the right place instead.
+    if (imageFiles.length < all.length) setDocHint(true)
     if (imageFiles.length === 0) return
     const newImages = await Promise.all(imageFiles.map(fileToImageAttachment))
     setImages(prev => [...prev, ...newImages].slice(0, 5)) // max 5 images
   }, [])
+
+  // Auto-dismiss the document hint after a few seconds.
+  useEffect(() => {
+    if (!docHint) return
+    const t = setTimeout(() => setDocHint(false), 8000)
+    return () => clearTimeout(t)
+  }, [docHint])
 
   const removeImage = (index: number) => {
     setImages(prev => prev.filter((_, i) => i !== index))
@@ -236,6 +260,29 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           </div>
         )}
 
+        {/* Non-image attach hint (GH #69) — the clip is images-only; PDFs, Word,
+            and text files go through the Documents panel so the model can read them. */}
+        {docHint && (
+          <div className="flex items-center gap-2 mb-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-[0.62rem] text-amber-700 dark:text-amber-300">
+            <span className="flex-1">The clip attaches images. To ask about a PDF, Word, or text file, add it in the Documents panel.</span>
+            {onAttachDocs && (
+              <button
+                onMouseDown={(e) => { e.preventDefault(); setDocHint(false); onAttachDocs() }}
+                className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 font-medium transition-colors"
+              >
+                Open Documents
+              </button>
+            )}
+            <button
+              onMouseDown={(e) => { e.preventDefault(); setDocHint(false) }}
+              className="shrink-0 text-amber-600/70 hover:text-amber-700 dark:text-amber-400/70 dark:hover:text-amber-300"
+              aria-label="Dismiss"
+            >
+              <X size={11} />
+            </button>
+          </div>
+        )}
+
         {/* Image previews */}
         {images.length > 0 && (
           <div className="flex gap-1.5 mb-1.5 flex-wrap">
@@ -277,7 +324,7 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             onClick={() => fileInputRef.current?.click()}
             disabled={isGenerating}
             className="p-1.5 rounded-md text-gray-500 hover:text-gray-300 hover:bg-white/5 disabled:opacity-20 transition-all shrink-0"
-            title="Attach images"
+            title="Attach images — for PDFs and documents use the Documents panel"
           >
             <Paperclip size={14} />
           </button>
