@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { backendCall } from '../../api/backend'
+import { backendCall, isTauri } from '../../api/backend'
 import { Cpu, RefreshCw, AlertTriangle } from 'lucide-react'
 
 interface DetectedGpu {
@@ -81,6 +81,15 @@ export function HardwareSettings() {
       ? indices.filter(i => i !== idx)
       : [...indices, idx].sort((a, b) => a - b)
     updateSettings({ gpuIndices: next })
+    setShowRestartHint(true)
+  }
+
+  const comfyGpuMode = (settings.comfyGpuMode || 'auto') as 'auto' | 'cpu' | 'gpu'
+  const setComfyGpuMode = (mode: 'auto' | 'cpu' | 'gpu') => {
+    updateSettings({ comfyGpuMode: mode })
+    // Desktop-only command; the web build points at a remote ComfyUI and never
+    // starts a local one, so this is a no-op there.
+    if (isTauri()) backendCall('set_comfy_gpu_mode', { mode }).catch(() => {})
     setShowRestartHint(true)
   }
 
@@ -176,6 +185,34 @@ export function HardwareSettings() {
             No {vendor.toUpperCase()} GPUs detected on this system. Either install the vendor tool ({vendor === 'nvidia' ? 'nvidia-smi' : vendor === 'amd' ? 'rocm-smi' : 'driver providing lspci/wmic info'}) or switch back to "Auto".
           </div>
         )}
+      </div>
+
+      <div className="pt-2 border-t border-white/[0.06]">
+        <div className="text-[0.7rem] text-gray-700 dark:text-gray-300 font-medium mb-1">ComfyUI GPU (image / video)</div>
+        <div className="grid grid-cols-1 gap-1">
+          {([
+            ['auto', 'Auto (recommended)', 'NVIDIA runs on the GPU. On an AMD / other card LU checks whether your ComfyUI has a GPU-capable torch (ROCm or ZLUDA) and uses it, otherwise falls back to CPU.'],
+            ['gpu', 'Force GPU', 'Never fall back to CPU. Use if you run a DirectML / ROCm ComfyUI that LU cannot auto-detect. If your ComfyUI has no working GPU torch it will fail to start.'],
+            ['cpu', 'Force CPU', 'Always run image / video on the CPU. Slow but stable — useful if generation crashes your GPU by running out of VRAM.'],
+          ] as const).map(([val, label, help]) => (
+            <label key={val} className="flex items-start gap-2 cursor-pointer p-1.5 rounded hover:bg-white/[0.04] border border-transparent has-[input:checked]:border-white/10 has-[input:checked]:bg-white/[0.03]">
+              <input
+                type="radio"
+                name="comfy-gpu-mode"
+                checked={comfyGpuMode === val}
+                onChange={() => setComfyGpuMode(val)}
+                className="mt-0.5"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="text-[0.65rem] text-gray-300">{label}</div>
+                <div className="text-[0.55rem] text-gray-500 mt-0.5 leading-relaxed">{help}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+        <div className="text-[0.55rem] text-gray-500 mt-1 leading-relaxed">
+          AMD image / video needs a ComfyUI built for your card (ROCm or ZLUDA). LU installs an NVIDIA / CPU ComfyUI by default. Takes effect on next ComfyUI start.
+        </div>
       </div>
 
       {showRestartHint && (vendor !== 'auto' || indices.length > 0) && (

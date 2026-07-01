@@ -106,6 +106,15 @@ export function AppShell() {
     }
   }, [appMode])
 
+  // Push the persisted ComfyUI GPU override to the backend on boot + change
+  // (rhodium92 AMD, 2026-07-01). The backend resets to "auto" each launch, so
+  // without this a saved force-cpu / force-gpu wouldn't apply until the user
+  // re-opened Settings. Desktop-only — the web build has no local ComfyUI.
+  useEffect(() => {
+    if (!isTauri()) return
+    backendCall('set_comfy_gpu_mode', { mode: settings.comfyGpuMode || 'auto' }).catch(() => {})
+  }, [settings.comfyGpuMode])
+
   // ── Store backup/restore: survive NSIS updates that wipe WebView2 data ──
   const STORE_KEYS = [
     'chat-conversations', 'chat-settings', 'chat-models', 'lu-providers',

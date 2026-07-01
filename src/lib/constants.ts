@@ -52,6 +52,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // 'auto' = evict the local text model only when it wouldn't co-exist with the
   // ComfyUI model in VRAM. Safest default (no eviction on unknown sizes).
   exclusiveVramMode: 'auto',
+  // ComfyUI GPU device policy (rhodium92 AMD RX 6600 XT, 2026-07-01). 'auto' =
+  // NVIDIA fast-path, else probe the comfy python's torch and use the GPU if it
+  // is a ROCm/ZLUDA build, otherwise CPU. Existing NVIDIA users are unaffected.
+  comfyGpuMode: 'auto',
   // ── v2.5.0 Codex sprint A/B/C defaults (ported from uselu) ──────
   codexArchitectMode: false,
   codexArchitectModel: '',

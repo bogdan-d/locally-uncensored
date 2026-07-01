@@ -230,6 +230,16 @@ pub struct AppState {
     /// The probe imports torch (~5-10 s), so only the first ComfyUI start /
     /// Create-tab check per python pays it.
     pub flash_attn_cache: Mutex<HashMap<String, bool>>,
+    /// ComfyUI GPU torch-availability probe, keyed by python path (2026-07-01,
+    /// rhodium92 AMD RX 6600 XT). `torch.cuda.is_available()` is true for CUDA,
+    /// ROCm AND ZLUDA builds — the exact condition under which ComfyUI's main.py
+    /// won't crash on `torch.cuda.current_device()`. Lets an AMD/ROCm ComfyUI run
+    /// on the GPU instead of being force-dropped to `--cpu`.
+    pub comfy_gpu_cache: Mutex<HashMap<String, bool>>,
+    /// Frontend-owned override for the ComfyUI CPU/GPU decision
+    /// (settings.comfyGpuMode): "auto" (probe), "cpu" (force --cpu), "gpu"
+    /// (never --cpu). Pushed via set_comfy_gpu_mode on boot + change.
+    pub comfy_gpu_mode: Mutex<String>,
 }
 
 impl AppState {
@@ -296,6 +306,8 @@ impl AppState {
             // unchanged until the user explicitly picks a GPU in Settings.
             gpu_selection: Mutex::new(GpuSelection::default()),
             flash_attn_cache: Mutex::new(HashMap::new()),
+            comfy_gpu_cache: Mutex::new(HashMap::new()),
+            comfy_gpu_mode: Mutex::new("auto".to_string()),
         }
     }
 }

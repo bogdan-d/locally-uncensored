@@ -99,6 +99,13 @@ export interface Settings {
   // local VRAM and are always skipped.
   /** VRAM exclusivity policy for image/video generation. Default 'auto'. */
   exclusiveVramMode: 'auto' | 'always' | 'never'
+  /** ComfyUI GPU device policy (rhodium92 AMD RX 6600 XT, 2026-07-01).
+   *  'auto'  — NVIDIA fast-path; on a non-NVIDIA box probe the ComfyUI python's
+   *            torch and run on the GPU if it reports one (ROCm/ZLUDA), else CPU.
+   *  'cpu'   — always force ComfyUI's --cpu (stable but slow).
+   *  'gpu'   — never force --cpu (for DirectML / setups the probe can't confirm).
+   *  Desktop-only effect — the web build points at a remote ComfyUI. */
+  comfyGpuMode: 'auto' | 'cpu' | 'gpu'
   // ── v2.5.0 Codex sprint A/B/C settings (ported from uselu) ──────
   /**
    * Codex Architect/Editor split. When on, a separate `codexArchitectModel`

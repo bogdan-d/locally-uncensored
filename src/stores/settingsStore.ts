@@ -30,7 +30,10 @@ import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 // 'local'). Same additive merge backfills it — without the bump, v10 blobs
 // skip migrate entirely and the header ModeSwitch renders with appMode
 // undefined, highlighting neither Local nor Cloud.
-const STORE_VERSION = 11
+// v12 (2.5.7): added settings.comfyGpuMode ('auto'|'cpu'|'gpu', default
+// 'auto') for the AMD ComfyUI GPU path (rhodium92). Additive — the merge
+// fills the default while preserving every existing value; NVIDIA unaffected.
+const STORE_VERSION = 12
 
 interface SettingsState {
   settings: Settings

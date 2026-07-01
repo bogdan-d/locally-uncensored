@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use tauri::{Manager, State};
 use tracing::{error, info};
 
@@ -88,8 +90,69 @@ pub fn needs_cpu_fallback() -> bool {
     if cfg!(target_os = "macos") {
         return false;
     }
-    let probe = Command::new("nvidia-smi").output();
-    !probe.map(|o| o.status.success()).unwrap_or(false)
+    !nvidia_present()
+}
+
+/// Is an NVIDIA driver present (nvidia-smi exits 0)?
+fn nvidia_present() -> bool {
+    Command::new("nvidia-smi")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// User override for the ComfyUI CPU/GPU decision (settings.comfyGpuMode).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ComfyGpuMode {
+    /// Probe: NVIDIA fast-path, else the comfy python's torch GPU availability.
+    Auto,
+    /// Always pass `--cpu` (stable but slow — e.g. a card that OOMs on image gen).
+    ForceCpu,
+    /// Never pass `--cpu` (user vouches for a non-NVIDIA accel, e.g. DirectML).
+    ForceGpu,
+}
+
+impl ComfyGpuMode {
+    pub fn parse(s: &str) -> Self {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "cpu" => ComfyGpuMode::ForceCpu,
+            "gpu" => ComfyGpuMode::ForceGpu,
+            _ => ComfyGpuMode::Auto,
+        }
+    }
+}
+
+/// Pure decision (all probes done by the caller): pass `--cpu` to ComfyUI?
+///
+/// - `baseline_needs_cpu`: `needs_cpu_fallback()` — false when NVIDIA present or macOS.
+/// - `torch_gpu`: Some(true) = the comfy python's torch reports a usable GPU
+///   (CUDA / ROCm / ZLUDA all answer via `torch.cuda.is_available()`),
+///   Some(false) = no usable GPU, None = not probed / probe failed.
+///
+/// rhodium92 (AMD RX 6600 XT, 2026-07-01): before this, ANY non-NVIDIA box was
+/// force-dropped to `--cpu`, so a ROCm/ZLUDA ComfyUI never used the AMD card.
+pub fn decide_comfy_cpu_flag(
+    mode: ComfyGpuMode,
+    baseline_needs_cpu: bool,
+    torch_gpu: Option<bool>,
+) -> bool {
+    match mode {
+        ComfyGpuMode::ForceCpu => true,
+        ComfyGpuMode::ForceGpu => false,
+        ComfyGpuMode::Auto => {
+            if !baseline_needs_cpu {
+                // NVIDIA present (or macOS MPS) — the GPU is already fine.
+                false
+            } else {
+                // No NVIDIA driver: a torch that reports a usable GPU (ROCm/ZLUDA)
+                // means main.py won't crash on torch.cuda → run on the GPU.
+                match torch_gpu {
+                    Some(true) => false,
+                    _ => true, // Some(false) = no GPU, None = probe failed → conservative --cpu
+                }
+            }
+        }
+    }
 }
 
 /// Skip these directories during ComfyUI search
@@ -748,6 +811,85 @@ fn flash_attention_cached(state: &AppState, python: &str) -> bool {
     }
 }
 
+/// GPU-aware version of the Bug J `--cpu` check used at ComfyUI start. Only
+/// probes the comfy python's torch when it might change the answer (Auto + no
+/// NVIDIA driver), so NVIDIA machines keep the EXACT fast-path they had before.
+fn comfy_needs_cpu(
+    python: &str,
+    mode: ComfyGpuMode,
+    cache: Option<&Mutex<HashMap<String, bool>>>,
+) -> bool {
+    let baseline = needs_cpu_fallback();
+    let torch_gpu = if mode == ComfyGpuMode::Auto && baseline && !python.is_empty() {
+        comfy_gpu_available_cached(python, cache)
+    } else {
+        None
+    };
+    decide_comfy_cpu_flag(mode, baseline, torch_gpu)
+}
+
+/// torch-GPU probe with an optional per-python cache (mirrors flash_attention_cached).
+/// Only DEFINITIVE results are cached; a timeout returns None and is retried next start.
+fn comfy_gpu_available_cached(
+    python: &str,
+    cache: Option<&Mutex<HashMap<String, bool>>>,
+) -> Option<bool> {
+    if let Some(c) = cache {
+        if let Some(v) = c.lock().unwrap().get(python).copied() {
+            return Some(v);
+        }
+    }
+    match probe_comfy_gpu(python) {
+        Some(v) => {
+            if let Some(c) = cache {
+                c.lock().unwrap().insert(python.to_string(), v);
+            }
+            Some(v)
+        }
+        None => {
+            println!("[ComfyUI] GPU probe timed out — treating as no accel for this start (will retry)");
+            None
+        }
+    }
+}
+
+/// Does `python`'s torch report a usable GPU (CUDA / ROCm / ZLUDA)?
+///
+/// `torch.cuda.is_available()` is SAFE — it never raises (unlike
+/// `current_device()`): on a stock-CUDA torch on an AMD box it simply returns
+/// False. So this cleanly separates "ROCm/ZLUDA torch → run on GPU" from "stock
+/// torch, no GPU → --cpu". Some(true/false) = definitive, None = timeout / spawn fail.
+pub(crate) fn probe_comfy_gpu(python: &str) -> Option<bool> {
+    if python.is_empty() {
+        return Some(false);
+    }
+    let mut cmd = Command::new(python);
+    cmd.args([
+        "-c",
+        "import torch,sys; sys.exit(0 if torch.cuda.is_available() else 1)",
+    ])
+    .stdin(Stdio::null())
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return None,
+    };
+    // 60 s ceiling: torch import is ~4 s warm but can lag during an app-boot disk
+    // storm; a missing/broken torch exits non-zero fast.
+    for _ in 0..300 {
+        match child.try_wait() {
+            Ok(Some(status)) => return Some(status.success()),
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(200)),
+            Err(_) => return None,
+        }
+    }
+    let _ = child.kill();
+    None
+}
+
 /// Same bundled-portable → venv → system resolution order as start_comfyui,
 /// without the logging — used by check_flash_attention so the Create tab
 /// probes the EXACT interpreter that will run ComfyUI.
@@ -901,7 +1043,8 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
     // the underlying spawn-then-crash loop wastes the user's time on every
     // start). Detect NVIDIA via `nvidia-smi` and pass --cpu when absent,
     // except on macOS where PyTorch uses MPS and never calls cuda APIs.
-    let needs_cpu_fallback = needs_cpu_fallback();
+    let gpu_mode = ComfyGpuMode::parse(&state.comfy_gpu_mode.lock().unwrap());
+    let needs_cpu_fallback = comfy_needs_cpu(&python, gpu_mode, Some(&state.comfy_gpu_cache));
     let mut comfy_args: Vec<&str> = vec![
         "main.py",
         "--listen", "127.0.0.1",
@@ -1137,6 +1280,24 @@ pub fn find_comfyui() -> Result<serde_json::Value, String> {
             "complete": false,
         })),
     }
+}
+
+/// Frontend-owned override for the ComfyUI CPU/GPU device decision
+/// (settings.comfyGpuMode). "auto" | "cpu" | "gpu". Desktop-relevant only — the
+/// web build points at a remote ComfyUI and never starts a local one.
+#[tauri::command]
+pub fn set_comfy_gpu_mode(mode: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let normalized = match mode.trim().to_ascii_lowercase().as_str() {
+        "cpu" => "cpu",
+        "gpu" => "gpu",
+        _ => "auto",
+    };
+    *state.comfy_gpu_mode.lock().unwrap() = normalized.to_string();
+    // The mode can flip the target device, so drop cached probe results; the
+    // next start re-probes cleanly under the new mode.
+    state.comfy_gpu_cache.lock().unwrap().clear();
+    println!("[ComfyUI] GPU mode = {}", normalized);
+    Ok(serde_json::json!({ "mode": normalized }))
 }
 
 #[tauri::command]
@@ -1443,7 +1604,8 @@ pub fn auto_start_comfyui(state: &AppState) {
 
             // Bug J: same --cpu fallback as start_comfyui to avoid the
             // "Found no NVIDIA driver" crash loop on non-NVIDIA systems.
-            let auto_needs_cpu = needs_cpu_fallback();
+            let auto_gpu_mode = ComfyGpuMode::parse(&state.comfy_gpu_mode.lock().unwrap());
+            let auto_needs_cpu = comfy_needs_cpu(&python, auto_gpu_mode, Some(&state.comfy_gpu_cache));
             let mut comfy_args: Vec<&str> = vec![
                 "main.py",
                 "--listen", "127.0.0.1",
@@ -1539,5 +1701,67 @@ mod tests {
         let a = needs_cpu_fallback();
         let b = needs_cpu_fallback();
         assert_eq!(a, b, "needs_cpu_fallback returned inconsistent results");
+    }
+
+    // ── AMD/ROCm ComfyUI GPU decision (rhodium92, 2026-07-01) ────────────
+
+    #[test]
+    fn comfy_gpu_mode_parse_maps_known_values_and_defaults_to_auto() {
+        assert_eq!(ComfyGpuMode::parse("auto"), ComfyGpuMode::Auto);
+        assert_eq!(ComfyGpuMode::parse("cpu"), ComfyGpuMode::ForceCpu);
+        assert_eq!(ComfyGpuMode::parse("gpu"), ComfyGpuMode::ForceGpu);
+        assert_eq!(ComfyGpuMode::parse("GPU"), ComfyGpuMode::ForceGpu);
+        assert_eq!(ComfyGpuMode::parse("  Cpu "), ComfyGpuMode::ForceCpu);
+        assert_eq!(ComfyGpuMode::parse("nonsense"), ComfyGpuMode::Auto);
+        assert_eq!(ComfyGpuMode::parse(""), ComfyGpuMode::Auto);
+    }
+
+    #[test]
+    fn decide_force_modes_ignore_baseline_and_probe() {
+        // ForceCpu is always --cpu; ForceGpu is never --cpu, no matter what the
+        // baseline check or the torch probe report.
+        for &baseline in &[true, false] {
+            for torch in [Some(true), Some(false), None] {
+                assert!(
+                    decide_comfy_cpu_flag(ComfyGpuMode::ForceCpu, baseline, torch),
+                    "ForceCpu must always request --cpu"
+                );
+                assert!(
+                    !decide_comfy_cpu_flag(ComfyGpuMode::ForceGpu, baseline, torch),
+                    "ForceGpu must never request --cpu"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn decide_auto_nvidia_or_macos_never_uses_cpu() {
+        // baseline_needs_cpu == false means NVIDIA present (or macOS MPS): the GPU
+        // is already fine, so the torch probe is irrelevant and it's never --cpu.
+        assert!(!decide_comfy_cpu_flag(ComfyGpuMode::Auto, false, None));
+        assert!(!decide_comfy_cpu_flag(ComfyGpuMode::Auto, false, Some(false)));
+        assert!(!decide_comfy_cpu_flag(ComfyGpuMode::Auto, false, Some(true)));
+    }
+
+    #[test]
+    fn decide_auto_amd_rocm_or_zluda_torch_skips_cpu() {
+        // No NVIDIA driver (baseline == true) but the comfy python's torch reports
+        // a usable GPU (ROCm/ZLUDA) → run on the GPU, no --cpu. The rhodium92 fix.
+        assert!(!decide_comfy_cpu_flag(ComfyGpuMode::Auto, true, Some(true)));
+    }
+
+    #[test]
+    fn decide_auto_no_usable_gpu_falls_back_to_cpu() {
+        // No NVIDIA and torch has no usable GPU (stock CUDA torch on an AMD box,
+        // or a CPU-only install) → --cpu, exactly the pre-fix safe behaviour.
+        assert!(decide_comfy_cpu_flag(ComfyGpuMode::Auto, true, Some(false)));
+        // Probe failed / timed out → conservative --cpu (never risk the main.py
+        // "Found no NVIDIA driver" crash loop).
+        assert!(decide_comfy_cpu_flag(ComfyGpuMode::Auto, true, None));
+    }
+
+    #[test]
+    fn probe_comfy_gpu_on_empty_python_is_definitive_false() {
+        assert_eq!(probe_comfy_gpu(""), Some(false));
     }
 }
