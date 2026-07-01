@@ -23,6 +23,7 @@ const PIPER_VOICES: { id: string; label: string }[] = [
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { MemorySettings } from './MemorySettings'
+import { ChatBackupSettings } from './ChatBackupSettings'
 import { RemoteAccessSettings } from './RemoteAccessSettings'
 import { RemoteAccessDocs } from './RemoteAccessDocs'
 import { HardwareSettings } from './HardwareSettings'
@@ -1020,6 +1021,10 @@ export function SettingsPage() {
               chat's RAG store. */}
           <Section title="Import from other chatbots">
             <ChatbotImporter />
+          </Section>
+
+          <Section title="Chat Backup">
+            <ChatBackupSettings />
           </Section>
 
           <Section title="Image / Video Generation Timeouts">

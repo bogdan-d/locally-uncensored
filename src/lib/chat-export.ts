@@ -116,3 +116,99 @@ export async function exportConversation(
   downloadFile(content, filename, mime)
   return { status: 'downloaded' }
 }
+
+// ── Bulk backup (konata 2026-06-28: the web build has no store_backup.json,
+// so a tunnel/origin change loses chats). Export ALL conversations to one JSON
+// file the user can re-import into any LU (web or desktop). ─────────────────
+
+export interface ChatExportBundle {
+  app: 'locally-uncensored'
+  kind: 'chat-export'
+  version: 1
+  exportedAt: number
+  count: number
+  conversations: Conversation[]
+}
+
+export function serializeAllConversations(conversations: Conversation[]): string {
+  const bundle: ChatExportBundle = {
+    app: 'locally-uncensored',
+    kind: 'chat-export',
+    version: 1,
+    exportedAt: Date.now(),
+    count: conversations.length,
+    conversations,
+  }
+  return JSON.stringify(bundle, null, 2)
+}
+
+/**
+ * Export every conversation to a single JSON backup. Tauri → native Save As;
+ * browser → blob download (the whole point for web users on a tunnel).
+ */
+export async function exportAllConversations(
+  conversations: Conversation[],
+): Promise<{ status: 'saved' | 'cancelled' | 'downloaded'; path?: string; count: number; error?: string }> {
+  const count = conversations.length
+  const content = serializeAllConversations(conversations)
+  const filename = `locally-uncensored-chats-${count}.json`
+
+  if (isTauri()) {
+    try {
+      const chosenPath = await backendCall<string | null>('save_text_file_dialog', {
+        content,
+        defaultName: filename,
+        extension: 'json',
+        extLabel: 'JSON',
+      })
+      if (!chosenPath) return { status: 'cancelled', count }
+      return { status: 'saved', path: chosenPath, count }
+    } catch (e) {
+      downloadFile(content, filename, 'application/json')
+      return { status: 'downloaded', count, error: String(e) }
+    }
+  }
+
+  downloadFile(content, filename, 'application/json')
+  return { status: 'downloaded', count }
+}
+
+/**
+ * Parse an exported file back into conversations. Accepts three shapes:
+ *  - a bundle `{ conversations: [...] }` (export-all),
+ *  - a bare array `[...]`,
+ *  - a single conversation `{ id, messages, ... }` (per-chat .json export).
+ * Returns only structurally-valid conversations (string id + title + messages
+ * array). Throws on unparseable JSON or when nothing valid is found, so the UI
+ * can show a precise message.
+ */
+export function parseImportedChats(json: string): Conversation[] {
+  let data: unknown
+  try {
+    data = JSON.parse(json)
+  } catch {
+    throw new Error('That file is not valid JSON.')
+  }
+  let raw: unknown[]
+  if (Array.isArray(data)) {
+    raw = data
+  } else if (data && typeof data === 'object' && Array.isArray((data as { conversations?: unknown[] }).conversations)) {
+    raw = (data as { conversations: unknown[] }).conversations
+  } else if (data && typeof data === 'object' && Array.isArray((data as { messages?: unknown[] }).messages)) {
+    raw = [data] // a single per-chat export
+  } else {
+    throw new Error('No conversations found in that file. Use a Locally Uncensored chat export (.json).')
+  }
+  const valid = raw.filter(
+    (c): c is Conversation =>
+      !!c &&
+      typeof c === 'object' &&
+      typeof (c as Conversation).id === 'string' &&
+      typeof (c as Conversation).title === 'string' &&
+      Array.isArray((c as Conversation).messages),
+  )
+  if (valid.length === 0) {
+    throw new Error('No valid conversations found in that file.')
+  }
+  return valid
+}

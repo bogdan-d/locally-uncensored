@@ -50,6 +50,11 @@ interface ChatState {
   deleteMessagesAfter: (conversationId: string, messageId: string) => void
   getActiveConversation: () => Conversation | undefined
   searchConversations: (query: string) => Conversation[]
+  /** Bulk-import conversations from an exported backup (konata 2026-06-28: the
+   *  web build has no store_backup.json, so a tunnel/origin change loses chats).
+   *  merge = add unseen ids + refresh ones with a newer updatedAt; existing
+   *  chats are never dropped. replace = swap the whole list. Returns counts. */
+  importConversations: (incoming: Conversation[], mode?: 'merge' | 'replace') => { added: number; skipped: number }
 }
 
 export const useChatStore = create<ChatState>()(
@@ -252,6 +257,36 @@ export const useChatStore = create<ChatState>()(
             c.title.toLowerCase().includes(lower) ||
             c.messages.some((m) => m.content.toLowerCase().includes(lower))
         )
+      },
+
+      importConversations: (incoming, mode = 'merge') => {
+        // Normalize legacy block shapes on the way in (the same migration the
+        // persist layer runs on load), so an older export hydrates cleanly.
+        const clean = ((migratePersistedChat({ conversations: incoming })?.conversations ?? incoming) as Conversation[])
+        let added = 0
+        let skipped = 0
+        set((state) => {
+          if (mode === 'replace') {
+            added = clean.length
+            return { conversations: [...clean].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)) }
+          }
+          const byId = new Map(state.conversations.map((c) => [c.id, c]))
+          for (const conv of clean) {
+            const existing = byId.get(conv.id)
+            if (!existing) {
+              byId.set(conv.id, conv)
+              added++
+            } else if ((conv.updatedAt || 0) > (existing.updatedAt || 0)) {
+              byId.set(conv.id, conv) // imported copy is newer → refresh it
+              added++
+            } else {
+              skipped++ // already present and not newer
+            }
+          }
+          const merged = Array.from(byId.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+          return { conversations: merged }
+        })
+        return { added, skipped }
       },
     }),
     {
