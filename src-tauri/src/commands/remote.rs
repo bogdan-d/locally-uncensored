@@ -240,16 +240,52 @@ async fn auth_middleware(
     let jwt_secret = state.jwt_secret.lock().await;
     match validate_jwt(&jwt_secret, token) {
         Ok(claims) => {
+            // #73 (ossobucco): the JWT expired 60 min after PAIRING no matter
+            // how active the session was — the next request 401'd, the mobile
+            // page reloaded to the passcode view, and the typed message was
+            // lost. Sliding refresh: once a valid token is past half its TTL,
+            // mint a fresh one and hand it back on the response (header for
+            // the JS client, Set-Cookie for /comfyui asset loads). An idle
+            // token still dies after the full TTL and needs re-pairing —
+            // deliberate on this surface; only USE keeps a session alive.
+            let refreshed = if should_refresh_jwt(claims.exp as u64, chrono_now_secs(), JWT_TTL_SECS) {
+                generate_jwt(&jwt_secret, &claims.ip, &claims.sub).ok()
+            } else {
+                None
+            };
             drop(jwt_secret);
             // Update last_seen for this device
-            let mut devices = state.connected_devices.lock().await;
-            if let Some(dev) = devices.iter_mut().find(|d| d.id == claims.sub) {
-                dev.last_seen = chrono_now_secs();
+            {
+                let mut devices = state.connected_devices.lock().await;
+                if let Some(dev) = devices.iter_mut().find(|d| d.id == claims.sub) {
+                    dev.last_seen = chrono_now_secs();
+                }
             }
-            next.run(req).await
+            let mut response = next.run(req).await;
+            if let Some(fresh) = refreshed {
+                let cookie = format!(
+                    "lu-remote-token={}; Path=/; Max-Age={}; SameSite=Strict",
+                    fresh, JWT_TTL_SECS
+                );
+                // Defensive parses — a malformed value must not panic
+                // (the process runs with panic = "abort").
+                if let Ok(hv) = fresh.parse() {
+                    response.headers_mut().insert("x-lu-refreshed-token", hv);
+                }
+                if let Ok(cv) = cookie.parse() {
+                    response.headers_mut().append(header::SET_COOKIE, cv);
+                }
+            }
+            response
         }
         Err(_) => (StatusCode::UNAUTHORIZED, "Invalid or expired token").into_response(),
     }
+}
+
+/// #73: slide the session once a still-valid token is past half of its
+/// lifetime. Pure so it is unit-testable. `exp`/`now` in unix seconds.
+fn should_refresh_jwt(exp: u64, now: u64, ttl_secs: u64) -> bool {
+    exp > now && exp.saturating_sub(now) < ttl_secs / 2
 }
 
 // ─── Route handlers ───
@@ -1286,6 +1322,17 @@ button{-webkit-appearance:none;appearance:none}
 <script>
 (function(){
   var TOKEN = localStorage.getItem('lu-remote-token');
+  // #73 (ossobucco): the server slides the session — when any authed request
+  // comes back with a fresh token header, adopt it so an actively used /
+  // open session never hits the 60-minute JWT cliff. The Set-Cookie on the
+  // same response keeps /comfyui asset loads working too.
+  function absorbRefresh(r){
+    try{
+      var t = r && r.headers && r.headers.get ? r.headers.get('x-lu-refreshed-token') : null;
+      if(t){ TOKEN = t; localStorage.setItem('lu-remote-token', t); }
+    }catch(_){}
+    return r;
+  }
   var currentModel = '';
   var dispatchedSystemPrompt = '';
   var availableModels = [];
@@ -1691,7 +1738,7 @@ button{-webkit-appearance:none;appearance:none}
         headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},
         body: JSON.stringify(b),
         signal: abortCtrl ? abortCtrl.signal : undefined
-      });
+      }).then(absorbRefresh);
     }
 
     return doPost(body).then(function(r){
@@ -1747,7 +1794,7 @@ button{-webkit-appearance:none;appearance:none}
       // chat gets its own isolated `~/agent-workspace/<chatId>/` folder
       // so agents across chats don't trample each other's files.
       body: JSON.stringify({tool:tool, args:args||{}, chatId: currentChatId || ''})
-    }).then(function(r){
+    }).then(absorbRefresh).then(function(r){
       if(r.status===401){ clearAuthAndReload(); return 'Auth required'; }
       return r.text().then(function(text){
         // Try to parse JSON regardless of status — the new bridge always
@@ -1996,11 +2043,18 @@ button{-webkit-appearance:none;appearance:none}
 
   // ── Load config + models then render ──
   function clearAuthAndReload(){
+    // #73: keep whatever the user had typed across the re-pairing round-trip.
+    // The reload lands on the passcode view; the draft is restored after auth.
+    try{
+      var inp = document.getElementById('msg-input');
+      if(inp && inp.value && inp.value.trim()) localStorage.setItem('lu-remote-draft', inp.value);
+    }catch(_){}
     localStorage.removeItem('lu-remote-token');
     location.reload();
   }
   function authJson(url){
     return fetch(url,{headers:{'Authorization':'Bearer '+TOKEN}})
+      .then(absorbRefresh)
       .then(function(r){
         if(r.status===401){clearAuthAndReload();throw new Error('401');}
         if(!r.ok) throw new Error('HTTP '+r.status);
@@ -2010,6 +2064,42 @@ button{-webkit-appearance:none;appearance:none}
   }
 
   loadPersisted();
+
+  // #73: restore a message that survived a re-pairing (stashed on 401 /
+  // clearAuthAndReload). The composer is rendered asynchronously, so poll
+  // briefly for it instead of racing the first render.
+  (function(){
+    var savedDraft = '';
+    try{ savedDraft = localStorage.getItem('lu-remote-draft') || ''; }catch(_){}
+    if(!savedDraft) return;
+    try{ localStorage.removeItem('lu-remote-draft'); }catch(_){}
+    var tries = 0;
+    var timer = setInterval(function(){
+      tries++;
+      var inp = document.getElementById('msg-input');
+      if(inp){
+        if(!inp.value) inp.value = savedDraft;
+        clearInterval(timer);
+      } else if(tries > 40){
+        clearInterval(timer);
+      }
+    }, 250);
+  })();
+
+  // #73: while the tab is open and visible, ping an authed endpoint every
+  // 10 minutes. Each ping runs through the auth middleware, which slides the
+  // token once it is past half its TTL — so a session stays alive as long as
+  // the tab is actually kept open. A closed/backgrounded tab still expires
+  // after the full 60 min and needs re-pairing (deliberate: this surface can
+  // reach the whole bridge, an unbounded offline token would be worse).
+  // A failed/401 ping stays silent — no surprise reload while reading; the
+  // next real action shows the passcode view and the draft is preserved.
+  setInterval(function(){
+    if(document.visibilityState && document.visibilityState !== 'visible') return;
+    fetch('/remote-api/status/full',{headers:{'Authorization':'Bearer '+TOKEN}})
+      .then(absorbRefresh)
+      .catch(function(){});
+  }, 10*60*1000);
 
   // ── Keyboard / viewport tracking ────────────────────────────────
   // iOS Safari + some Android browsers do NOT resize `window.innerHeight`
@@ -2711,7 +2801,7 @@ button{-webkit-appearance:none;appearance:none}
   function fetchRemotePerms(){
     return fetch('/remote-api/permissions',{
       headers:{'Authorization':'Bearer '+TOKEN}
-    }).then(function(r){
+    }).then(absorbRefresh).then(function(r){
       if(r.status===401){ clearAuthAndReload(); throw new Error('401'); }
       if(!r.ok) throw new Error('HTTP '+r.status);
       return r.json();
@@ -3006,14 +3096,25 @@ button{-webkit-appearance:none;appearance:none}
       body:JSON.stringify(body),
       signal:abortCtrl.signal
     })
+    .then(absorbRefresh)
     .then(function(r){
-      if(r.status===401){clearAuthAndReload();return;}
+      if(r.status===401){
+        // #73: without this the reload swallowed the just-sent message —
+        // stash it so it is back in the composer after re-pairing.
+        try{
+          var lastUser = null;
+          for(var qi=msgs.length-1; qi>=0; qi--){ if(msgs[qi].role==='user'){ lastUser=msgs[qi].content; break; } }
+          if(lastUser) localStorage.setItem('lu-remote-draft', lastUser);
+        }catch(_){}
+        clearAuthAndReload();
+        return;
+      }
       if(!r.ok){
         // Retry without the think field at all if the server rejects it
         // (old Ollama or model that refuses the flag).
         if(r.status===400 && ('think' in body)){
           delete body.think;
-          return fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify(body),signal:abortCtrl.signal}).then(streamResponse);
+          return fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+TOKEN},body:JSON.stringify(body),signal:abortCtrl.signal}).then(absorbRefresh).then(streamResponse);
         }
         msgs[msgs.length-1].content='Error: HTTP '+r.status;
         finishStream();
@@ -4561,6 +4662,42 @@ async fn mobile_monogram() -> Response {
         .header(header::CACHE_CONTROL, "public, max-age=86400")
         .body(Body::from(MONOGRAM))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+#[cfg(test)]
+mod jwt_refresh_tests {
+    use super::{generate_jwt, validate_jwt, should_refresh_jwt, JWT_TTL_SECS};
+
+    // #73 (ossobucco): sliding-session decision boundaries.
+    #[test]
+    fn refresh_only_in_second_half_of_ttl() {
+        let ttl = JWT_TTL_SECS; // 3600
+        let now = 1_000_000u64;
+        // Fresh token (full TTL left) — no refresh yet
+        assert!(!should_refresh_jwt(now + ttl, now, ttl));
+        // Just past half spent — refresh
+        assert!(should_refresh_jwt(now + ttl / 2 - 1, now, ttl));
+        // Exactly half left — boundary, no refresh
+        assert!(!should_refresh_jwt(now + ttl / 2, now, ttl));
+        // Expired or exactly-now — never refresh (the 401 path owns that)
+        assert!(!should_refresh_jwt(now - 1, now, ttl));
+        assert!(!should_refresh_jwt(now, now, ttl));
+    }
+
+    #[test]
+    fn refreshed_jwt_roundtrips_with_same_identity() {
+        let secret = "test-secret";
+        let tok = generate_jwt(secret, "1.2.3.4", "device-1").unwrap();
+        let claims = validate_jwt(secret, &tok).unwrap();
+        assert_eq!(claims.sub, "device-1");
+        assert_eq!(claims.ip, "1.2.3.4");
+        // A refresh mints a token for the SAME identity that validates again
+        let fresh = generate_jwt(secret, &claims.ip, &claims.sub).unwrap();
+        let fresh_claims = validate_jwt(secret, &fresh).unwrap();
+        assert_eq!(fresh_claims.sub, "device-1");
+        assert_eq!(fresh_claims.ip, "1.2.3.4");
+        assert!(fresh_claims.exp >= claims.exp);
+    }
 }
 
 #[cfg(test)]
