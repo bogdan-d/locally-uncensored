@@ -106,11 +106,12 @@ describe('Custom Node Registry', () => {
     expect(new Set(repos).size).toBe(repos.length)
   })
 
-  it('has 6 custom node entries', () => {
-    // v2.4.5 added 'videohelpersuite' for Bug A (MP4 video output) — when this
-    // registry grows again, bump the number AND add a smoke test below for the
-    // new entry so future drift is loud.
-    expect(Object.keys(CUSTOM_NODE_REGISTRY).length).toBe(6)
+  it('has 7 custom node entries', () => {
+    // v2.4.5 added 'videohelpersuite' for Bug A (MP4 video output); v2.5.7 added
+    // 'rmbg' for the Remove-Background cutout. When this registry grows again,
+    // bump the number AND add a smoke test below for the new entry so future
+    // drift is loud.
+    expect(Object.keys(CUSTOM_NODE_REGISTRY).length).toBe(7)
   })
 
   it('videohelpersuite entry routes to Kosinkadink upstream', () => {
@@ -118,6 +119,13 @@ describe('Custom Node Registry', () => {
     expect(entry).toBeTruthy()
     expect(entry.repo).toBe('https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite')
     expect(entry.requiredNodes).toContain('VHS_VideoCombine')
+  })
+
+  it('rmbg entry routes to 1038lab upstream and requires the RMBG node', () => {
+    const entry = CUSTOM_NODE_REGISTRY['rmbg']
+    expect(entry).toBeTruthy()
+    expect(entry.repo).toBe('https://github.com/1038lab/ComfyUI-RMBG')
+    expect(entry.requiredNodes).toContain('RMBG')
   })
 })
 
