@@ -2608,19 +2608,42 @@ pub fn install_tts_status(state: State<'_, AppState>) -> Result<serde_json::Valu
 
 #[allow(non_snake_case)]
 #[tauri::command]
-pub fn install_custom_node(
+pub async fn install_custom_node(
     state: State<'_, AppState>,
     repoUrl: String,
     nodeName: String,
 ) -> Result<serde_json::Value, String> {
+    // Snapshot the state the blocking worker needs before spawning it: a Tauri
+    // `State` (and the MutexGuard behind it) is not Send, so clone the values
+    // out and move owned copies into the worker.
+    let comfy_path = { state.comfy_path.lock().unwrap().clone() };
+    let fallback_python = { state.python_bin.lock().unwrap().clone() };
+    // Freeze fix (David 2026-07-04): the git clone + pip below are blocking. As
+    // a plain sync #[command] they ran on the Tauri main thread and froze the
+    // WebView2 window for the entire 30s-2min install with no feedback ("hängt
+    // sich auf, keine Rückmeldung"). Run them on the blocking pool so the UI
+    // stays responsive and the staged status messages actually paint — the JS
+    // caller still awaits this command's result exactly as before.
+    tauri::async_runtime::spawn_blocking(move || {
+        install_custom_node_blocking(repoUrl, nodeName, comfy_path, &fallback_python)
+    })
+    .await
+    .map_err(|e| format!("Custom node install task failed to run: {e}"))?
+}
+
+/// Blocking half of `install_custom_node`, run on the blocking pool. Holds all
+/// the ComfyUI-path resolution, git clone/pull healing (#72) and pip work so
+/// the async command above never stalls the UI thread.
+#[allow(non_snake_case)]
+fn install_custom_node_blocking(
+    repoUrl: String,
+    nodeName: String,
+    comfy_path: Option<String>,
+    fallback_python: &str,
+) -> Result<serde_json::Value, String> {
     let repo_url = repoUrl;
     let node_name = nodeName;
     info!(node = %node_name, "custom node install start");
-    // Find ComfyUI path from state
-    let comfy_path = {
-        let path = state.comfy_path.lock().unwrap();
-        path.clone()
-    };
 
     let comfy_dir = match comfy_path {
         Some(p) => PathBuf::from(p),
@@ -2719,8 +2742,7 @@ pub fn install_custom_node(
         }
     }
 
-    let fallback_python = state.python_bin.lock().unwrap().clone();
-    install_node_requirements(&comfy_dir, &target_dir, &node_name, &fallback_python)?;
+    install_node_requirements(&comfy_dir, &target_dir, &node_name, fallback_python)?;
 
     Ok(serde_json::json!({
         "status": if fresh_clone { "installed" } else { "updated" },
