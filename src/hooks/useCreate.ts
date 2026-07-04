@@ -25,8 +25,10 @@ import {
   LOADER_NODES, CLIP_LOADER_NODES, VAE_LOADER_NODES, SAMPLER_NODES, DECODE_NODES,
   type ComfyWSEvent,
 } from '../api/comfyui-ws'
-import { buildDynamicWorkflow } from '../api/dynamic-workflow'
-import { getAllNodeInfo } from '../api/comfyui-nodes'
+import { buildDynamicWorkflow, checkVideoOutputCapability } from '../api/dynamic-workflow'
+import { getAllNodeInfo, clearNodeCache } from '../api/comfyui-nodes'
+import { installCustomNodes } from '../api/discover'
+import { backendCall } from '../api/backend'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 import { useCreateStore } from '../stores/createStore'
 import { useWorkflowStore } from '../stores/workflowStore'
@@ -363,6 +365,81 @@ export function useCreate() {
           } else {
             workflow = await buildTxt2ImgWorkflow(baseParams, imageModelType)
           }
+        }
+        // Bug A (v2.4.5 — miguelkodoatie Discord 2026-05-14, Turbulent_Tomato7559
+        // Reddit 2026-05-10): when ComfyUI lacks VHS_VideoCombine the video
+        // workflow falls back to SaveAnimatedWEBP and produces an animated
+        // .webp instead of an .mp4. v2.4.4 added a warning banner; v2.4.5
+        // turns it into a blocking modal with a one-click install, so users
+        // get actual videos instead of trying to figure out why "video gen"
+        // gave them an image.
+        if (mode === 'video' && builderUsed === 'dynamic') {
+          try {
+            const caps = await checkVideoOutputCapability()
+            if (caps.webpOnly) {
+              const choice = await new Promise<'install' | 'webp' | 'cancel'>((resolve) => {
+                useCreateStore.getState().setVhsInstallPrompt(resolve)
+              })
+              useCreateStore.getState().setVhsInstallPrompt(null)
+
+              if (choice === 'cancel') {
+                setIsGenerating(false)
+                setProgress(0, '')
+                return
+              }
+              if (choice === 'install') {
+                setProgress(8, 'Installing VHS_VideoCombine (git clone + pip)...')
+                try {
+                  await installCustomNodes(['videohelpersuite'])
+                  setProgress(9, 'Restarting ComfyUI to register the new node...')
+                  try {
+                    await backendCall('stop_comfyui')
+                  } catch { /* may already be stopped */ }
+                  await new Promise(r => setTimeout(r, 2000))
+                  await backendCall('start_comfyui')
+                  // Wait for ComfyUI to come back; poll /object_info up to 30s
+                  let backUp = false
+                  for (let i = 0; i < 15; i++) {
+                    await new Promise(r => setTimeout(r, 2000))
+                    try {
+                      const ok = await checkComfyConnection()
+                      if (ok) { backUp = true; break }
+                    } catch { /* not yet */ }
+                  }
+                  if (!backUp) {
+                    setError('VHS_VideoCombine installed but ComfyUI did not come back online within 30s. Please restart ComfyUI manually and re-generate.')
+                    setIsGenerating(false)
+                    return
+                  }
+                  // #72 (bob): the node catalogue is cached for 5 minutes, so
+                  // without a forced refresh the rebuild below still saw the
+                  // pre-install catalogue (no VHS) and silently produced a
+                  // .webp even after a successful install + restart.
+                  clearNodeCache()
+                  const capsAfter = await checkVideoOutputCapability()
+                  if (!capsAfter.mp4Capable) {
+                    setError(
+                      'VHS_VideoCombine was installed and ComfyUI restarted, but ComfyUI still does not list the node. ' +
+                      'Check the ComfyUI startup log for "IMPORT FAILED: ComfyUI-VideoHelperSuite" (usually a Python requirements problem), then generate again.'
+                    )
+                    setIsGenerating(false)
+                    return
+                  }
+                  // Re-build the workflow now that the new node is available
+                  const genParams = { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}) }
+                  workflow = await buildDynamicWorkflow(genParams, imageModelType)
+                  setProgress(10, 'VHS installed — generating MP4...')
+                } catch (instErr) {
+                  setError(`Failed to install VHS_VideoCombine: ${instErr instanceof Error ? instErr.message : String(instErr)}. You can install it manually in ComfyUI Manager.`)
+                  setIsGenerating(false)
+                  return
+                }
+              } else {
+                // 'webp' — user opted to continue with the animated .webp
+                setProgress(8, 'Continuing with animated .webp output (no VHS_VideoCombine)')
+              }
+            }
+          } catch { /* non-fatal */ }
         }
       }
 

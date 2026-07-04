@@ -201,6 +201,10 @@ interface CreateState {
   imageModelList: ClassifiedModel[]
   videoModelList: ClassifiedModel[]
   comfyRunning: boolean
+  /** Bug A (v2.4.5) + #72 (bob): resolver for the VHS_VideoCombine install
+   *  prompt. Runtime-only — useCreate sets it when a video gen would fall
+   *  back to animated .webp; the modal resolves with the user's choice. */
+  vhsInstallPrompt: ((choice: 'install' | 'webp' | 'cancel') => void) | null
 
   setPreflightStatus: (ready: boolean | null, errors: PreflightError[], warnings: string[]) => void
   setMode: (mode: 'image' | 'video') => void
@@ -246,6 +250,7 @@ interface CreateState {
   setProgress: (progress: number, text?: string) => void
   setProgressPhase: (phase: ProgressPhase) => void
   setCurrentPromptId: (id: string | null) => void
+  setVhsInstallPrompt: (resolver: ((choice: 'install' | 'webp' | 'cancel') => void) | null) => void
   setError: (error: string | null) => void
   setLastGenTime: (time: string | null) => void
   addToGallery: (item: GalleryItem) => void
@@ -328,6 +333,7 @@ export const useCreateStore = create<CreateState>()(
       imageModelList: [],
       videoModelList: [],
       comfyRunning: false,
+      vhsInstallPrompt: null,
 
       setPreflightStatus: (ready, errors, warnings) => set({ preflightReady: ready, preflightErrors: errors, preflightWarnings: warnings }),
       setVideoBackend: (videoBackend) => set({ videoBackend, videoBackendInitialized: true }),
@@ -459,6 +465,7 @@ export const useCreateStore = create<CreateState>()(
       setProgress: (progress, text) => set({ progress, progressText: text ?? '' }),
       setProgressPhase: (phase) => set({ progressPhase: phase }),
       setCurrentPromptId: (id) => set({ currentPromptId: id }),
+      setVhsInstallPrompt: (resolver) => set({ vhsInstallPrompt: resolver }),
       setError: (error) => set({ error }),
       setLastGenTime: (time) => set({ lastGenTime: time }),
       addToGallery: (item) => set((s) => ({ gallery: [item, ...s.gallery].slice(0, 200) })),

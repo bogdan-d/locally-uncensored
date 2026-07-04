@@ -10,6 +10,7 @@ import { GalleryStrip } from './GalleryStrip'
 import { Lightbox } from './Lightbox'
 import { AdvancedDrawer } from './AdvancedDrawer'
 import { MaskEditor } from './MaskEditor'
+import { VhsInstallModal } from './VhsInstallModal'
 import { INTENT_MAP } from './intents'
 import { galleryItemUrl } from './galleryUrl'
 import { loadImageRef } from './loadImage'
@@ -126,6 +127,7 @@ function CreateExperimentalInner() {
       </div>
 
       <Lightbox item={lightbox} onClose={() => setLightbox(null)} />
+      <VhsInstallModal />
     </div>
   )
 }

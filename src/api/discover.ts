@@ -167,6 +167,18 @@ export async function checkBundlesInstalled(bundles: ModelBundle[]): Promise<Rec
   return result
 }
 
+/** #72: the backend used to resolve a failed `git pull` as
+ *  `{status:"update_failed"}` instead of rejecting — anything but an
+ *  installed/updated status must be treated as a failure, not success. */
+export function assertNodeInstallOk(result: unknown, name: string): void {
+  if (result && typeof result === 'object' && 'status' in result) {
+    const status = String((result as { status?: unknown }).status)
+    if (status !== 'installed' && status !== 'updated') {
+      throw new Error(`backend reported status "${status}"`)
+    }
+  }
+}
+
 export async function installCustomNodes(nodeKeys: string[]): Promise<void> {
   for (const key of nodeKeys) {
     const entry = CUSTOM_NODE_REGISTRY[key]
@@ -175,7 +187,8 @@ export async function installCustomNodes(nodeKeys: string[]): Promise<void> {
       continue
     }
     try {
-      await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
+      const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
+      assertNodeInstallOk(result, entry.name)
       log.info(`[discover] Installed custom node: ${entry.name}`)
     } catch (err) {
       log.error(`[discover] Failed to install ${entry.name}`, { err })
@@ -232,7 +245,8 @@ export async function installBundleComplete(bundle: ModelBundle): Promise<void> 
         try {
           const entry = CUSTOM_NODE_REGISTRY[key]
           if (!entry) continue
-          await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
+          const result = await backendCall('install_custom_node', { repoUrl: entry.repo, nodeName: entry.name })
+          assertNodeInstallOk(result, entry.name)
           log.info(`[discover] Installed custom node: ${entry.name}`)
         } catch (err) {
           log.warn('[discover] Custom node install failed', { err })

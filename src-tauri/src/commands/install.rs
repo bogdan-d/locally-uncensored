@@ -2660,24 +2660,50 @@ pub fn install_custom_node(
         }
     }
 
+    // #72 (bob, discussion 72): three silent failure modes lived here.
+    //  1. A leftover non-repo dir (aborted clone, manual unzip) made `git pull`
+    //     fail forever, and the failure came back as Ok(status="update_failed")
+    //     — the UI treated it as success, so the install dialog looped with no
+    //     error and video gen kept falling back to .webp.
+    //  2. The exists/update path never installed requirements.txt, so a repo
+    //     whose requirements failed once could never heal (ComfyUI keeps
+    //     reporting IMPORT FAILED and the node never shows up).
+    // Now: a non-repo leftover is moved aside (".disabled" so ComfyUI ignores
+    // it) and re-cloned, a failed pull is a real Err, and requirements are
+    // ensured on BOTH the clone and the update path.
+    let mut fresh_clone = true;
     if target_dir.exists() {
-        // Already exists — git pull to update
-        println!("[Install] Custom node {} already exists, updating...", node_name);
-        let mut cmd = Command::new("git");
-        cmd.args(["pull"]).current_dir(&target_dir)
-            .stdout(Stdio::piped()).stderr(Stdio::piped());
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(CREATE_NO_WINDOW);
-        let output = cmd.output()
-            .map_err(|e| format!("Git pull failed: {}", e))?;
+        if target_dir.join(".git").exists() {
+            println!("[Install] Custom node {} already exists, updating...", node_name);
+            let mut cmd = Command::new("git");
+            cmd.args(["pull"]).current_dir(&target_dir)
+                .stdout(Stdio::piped()).stderr(Stdio::piped());
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(CREATE_NO_WINDOW);
+            let output = cmd.output()
+                .map_err(|e| format!("Git pull failed: {}", e))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                error!(node = %node_name, "custom node git pull failed");
+                return Err(format!(
+                    "Failed to update {} (git pull): {}\n\nIf this keeps failing, \
+                     delete the folder {} and try the install again.",
+                    node_name, stderr.trim(), target_dir.to_string_lossy()
+                ));
+            }
+            fresh_clone = false;
+        } else {
+            // Not a git repo — pull can never succeed. Move it aside and re-clone.
+            let moved_to = move_aside_broken_node_dir(&target_dir)?;
+            println!(
+                "[Install] Custom node {} folder exists but is not a git repo — moved aside to {}, re-cloning",
+                node_name,
+                moved_to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+            );
+        }
+    }
 
-        let status = if output.status.success() { "updated" } else { "update_failed" };
-        Ok(serde_json::json!({
-            "status": status,
-            "path": target_dir.to_string_lossy(),
-        }))
-    } else {
-        // Clone the repo
+    if fresh_clone {
         println!("[Install] Cloning custom node {} from {}", node_name, repo_url);
         let mut cmd = Command::new("git");
         cmd.args(["clone", &repo_url]).arg(&target_dir)
@@ -2686,71 +2712,98 @@ pub fn install_custom_node(
         cmd.creation_flags(CREATE_NO_WINDOW);
         let output = cmd.output()
             .map_err(|e| format!("Git clone failed: {}", e))?;
-
-        if output.status.success() {
-            // Install requirements.txt if it exists
-            let reqs = target_dir.join("requirements.txt");
-            if reqs.exists() {
-                // Bug F (discovered during Arch live test on 2026-05-17):
-                // ComfyUI was installed into a venv by the Bug E path, but
-                // this function used to call pip against `state.python_bin`
-                // (the system Python). On Arch / Debian 12+ / Fedora 38+
-                // that hits PEP 668's `externally-managed-environment` and
-                // the requirements install silently fails (`let _ = pip.output()`
-                // ignored the exit code, so the user got "installed" even
-                // when requirements never landed — the next workflow build
-                // would then crash with `ModuleNotFoundError`).
-                //
-                // Fix: prefer the ComfyUI venv's Python (matches the launcher
-                // in `process.rs::start_comfyui` and the installer in
-                // `install_comfyui`) so requirements land in the same
-                // site-packages ComfyUI actually imports from. Plus we now
-                // surface a useful error when pip fails instead of swallowing it.
-                let venv_python = crate::python::resolve_comfyui_venv_python(&comfy_dir);
-                let python_bin = venv_python.unwrap_or_else(|| {
-                    state.python_bin.lock().unwrap().clone()
-                });
-                if python_bin.is_empty() {
-                    return Err(format!(
-                        "Custom node {} cloned, but cannot install requirements: \
-                         no Python available. Install Python first \
-                         (Settings → ComfyUI → Install Python).",
-                        node_name
-                    ));
-                }
-                println!("[Install] Installing requirements for {} via {}", node_name, python_bin);
-                let mut pip = Command::new(&python_bin);
-                pip.args(["-m", "pip", "install", "--no-input", "-r"]).arg(&reqs)
-                    .stdout(Stdio::piped()).stderr(Stdio::piped());
-                #[cfg(target_os = "windows")]
-                pip.creation_flags(CREATE_NO_WINDOW);
-                let pip_out = pip.output()
-                    .map_err(|e| format!("Failed to spawn pip for {} requirements: {}", node_name, e))?;
-                if !pip_out.status.success() {
-                    let stderr = String::from_utf8_lossy(&pip_out.stderr);
-                    let stdout = String::from_utf8_lossy(&pip_out.stdout);
-                    let combined = format!("{}{}", stdout, stderr);
-                    // Reuse the install_comfyui diagnose path so PEP 668 +
-                    // friends produce actionable messages here too.
-                    let diagnosis = diagnose_pip_error(&combined);
-                    error!(node = %node_name, "custom node requirements install failed");
-                    return Err(format!(
-                        "Custom node {} cloned, but requirements install failed.\n\n{}",
-                        node_name, diagnosis
-                    ));
-                }
-            }
-
-            Ok(serde_json::json!({
-                "status": "installed",
-                "path": target_dir.to_string_lossy(),
-            }))
-        } else {
+        if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!(node = %node_name, "custom node clone failed");
-            Err(format!("Failed to clone {}: {}", node_name, stderr))
+            return Err(format!("Failed to clone {}: {}", node_name, stderr));
         }
     }
+
+    let fallback_python = state.python_bin.lock().unwrap().clone();
+    install_node_requirements(&comfy_dir, &target_dir, &node_name, &fallback_python)?;
+
+    Ok(serde_json::json!({
+        "status": if fresh_clone { "installed" } else { "updated" },
+        "path": target_dir.to_string_lossy(),
+    }))
+}
+
+/// Move a non-repo custom-node leftover out of the way so a fresh clone can
+/// land. The ".disabled" suffix matches the ComfyUI(-Manager) convention, so
+/// ComfyUI never tries to load the moved-aside folder as a node pack.
+fn move_aside_broken_node_dir(target_dir: &std::path::Path) -> Result<PathBuf, String> {
+    let base = target_dir.to_string_lossy().into_owned();
+    let mut backup = PathBuf::from(format!("{}.broken.disabled", base));
+    let mut n = 1;
+    while backup.exists() {
+        n += 1;
+        backup = PathBuf::from(format!("{}.broken{}.disabled", base, n));
+    }
+    fs::rename(target_dir, &backup).map_err(|e| {
+        format!(
+            "The folder {} exists but is not a valid git checkout, and it could \
+             not be moved aside: {}. Delete it manually and try again.",
+            target_dir.display(), e
+        )
+    })?;
+    Ok(backup)
+}
+
+/// Install a custom node's requirements.txt (when present) into the Python
+/// that ComfyUI actually runs with. Shared by the clone AND the update path
+/// of `install_custom_node` — #72 was partly caused by the update path
+/// skipping this entirely.
+///
+/// Bug F (discovered during Arch live test on 2026-05-17): ComfyUI was
+/// installed into a venv by the Bug E path, but this used to call pip against
+/// `state.python_bin` (the system Python). On Arch / Debian 12+ / Fedora 38+
+/// that hits PEP 668's `externally-managed-environment` and the requirements
+/// install silently fails. Prefer the ComfyUI venv's Python (matches the
+/// launcher in `process.rs::start_comfyui` and the installer in
+/// `install_comfyui`) so requirements land in the same site-packages ComfyUI
+/// actually imports from, and surface a useful error when pip fails.
+fn install_node_requirements(
+    comfy_dir: &std::path::Path,
+    target_dir: &std::path::Path,
+    node_name: &str,
+    fallback_python: &str,
+) -> Result<(), String> {
+    let reqs = target_dir.join("requirements.txt");
+    if !reqs.exists() {
+        return Ok(());
+    }
+    let venv_python = crate::python::resolve_comfyui_venv_python(comfy_dir);
+    let python_bin = venv_python.unwrap_or_else(|| fallback_python.to_string());
+    if python_bin.is_empty() {
+        return Err(format!(
+            "Custom node {} cloned, but cannot install requirements: \
+             no Python available. Install Python first \
+             (Settings → ComfyUI → Install Python).",
+            node_name
+        ));
+    }
+    println!("[Install] Installing requirements for {} via {}", node_name, python_bin);
+    let mut pip = Command::new(&python_bin);
+    pip.args(["-m", "pip", "install", "--no-input", "-r"]).arg(&reqs)
+        .stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    pip.creation_flags(CREATE_NO_WINDOW);
+    let pip_out = pip.output()
+        .map_err(|e| format!("Failed to spawn pip for {} requirements: {}", node_name, e))?;
+    if !pip_out.status.success() {
+        let stderr = String::from_utf8_lossy(&pip_out.stderr);
+        let stdout = String::from_utf8_lossy(&pip_out.stdout);
+        let combined = format!("{}{}", stdout, stderr);
+        // Reuse the install_comfyui diagnose path so PEP 668 +
+        // friends produce actionable messages here too.
+        let diagnosis = diagnose_pip_error(&combined);
+        error!(node = %node_name, "custom node requirements install failed");
+        return Err(format!(
+            "Custom node {} is cloned, but its requirements install failed.\n\n{}",
+            node_name, diagnosis
+        ));
+    }
+    Ok(())
 }
 
 // ── tests (issue #32: PyTorch / ComfyUI install reliability) ────────────────
@@ -2758,6 +2811,66 @@ pub fn install_custom_node(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── install_custom_node helpers (#72 bob: VHS install loop) ─────────
+
+    #[test]
+    fn move_aside_renames_non_repo_dir_to_disabled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let node_dir = tmp.path().join("ComfyUI-VideoHelperSuite");
+        std::fs::create_dir(&node_dir).unwrap();
+        std::fs::write(node_dir.join("leftover.txt"), "junk").unwrap();
+
+        let moved = move_aside_broken_node_dir(&node_dir).unwrap();
+
+        assert!(!node_dir.exists(), "original dir must be gone");
+        assert!(moved.exists(), "moved-aside dir must exist");
+        let name = moved.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            name.ends_with(".disabled"),
+            "must end with .disabled so ComfyUI never loads it, got {name}"
+        );
+        assert!(moved.join("leftover.txt").exists(), "content preserved");
+    }
+
+    #[test]
+    fn move_aside_picks_a_fresh_name_when_backup_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let node_dir = tmp.path().join("SomeNode");
+        std::fs::create_dir(&node_dir).unwrap();
+        // First backup slot already taken
+        std::fs::create_dir(tmp.path().join("SomeNode.broken.disabled")).unwrap();
+
+        let moved = move_aside_broken_node_dir(&node_dir).unwrap();
+
+        assert!(!node_dir.exists());
+        let name = moved.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(name, "SomeNode.broken2.disabled");
+    }
+
+    #[test]
+    fn requirements_install_is_a_noop_without_requirements_txt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("comfy");
+        let node = tmp.path().join("comfy/custom_nodes/NoReqs");
+        std::fs::create_dir_all(&node).unwrap();
+
+        // No requirements.txt → must succeed without ever spawning pip
+        // (an empty fallback python would otherwise be an instant Err).
+        assert!(install_node_requirements(&comfy, &node, "NoReqs", "").is_ok());
+    }
+
+    #[test]
+    fn requirements_install_without_python_is_actionable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let comfy = tmp.path().join("comfy");
+        let node = tmp.path().join("comfy/custom_nodes/WithReqs");
+        std::fs::create_dir_all(&node).unwrap();
+        std::fs::write(node.join("requirements.txt"), "imageio-ffmpeg").unwrap();
+
+        let err = install_node_requirements(&comfy, &node, "WithReqs", "").unwrap_err();
+        assert!(err.contains("no Python available"), "got: {err}");
+    }
 
     // ── is_transient_pip_error ────────────────────────────────────────────
 
