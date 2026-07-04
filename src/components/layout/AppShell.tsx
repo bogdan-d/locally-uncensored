@@ -23,6 +23,7 @@ import { extractMemoriesFromPair } from '../../hooks/useMemory'
 import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-detector'
 import { backendCall, isTauri } from '../../api/backend'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
+import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { ShortcutsModal } from './ShortcutsModal'
 import { Titlebar } from './Titlebar'
 
@@ -39,6 +40,9 @@ export function AppShell() {
   const [showSelector, setShowSelector] = useState(false)
 
   useKeyboardShortcuts()
+  // LU Cloud account boot: keychain session restore + /api/me probe; keeps
+  // the cloud Create axis and the lu-cloud chat provider in sync.
+  useCloudAuth()
 
   // ── Store backup/restore: survive NSIS updates that wipe WebView2 data ──
   const STORE_KEYS = [

@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import { useCreate } from '../../../hooks/useCreate'
+import { useCloudCreate } from '../../../hooks/useCloudCreate'
+import { useCloudSession } from '../../../hooks/useCloudSession'
 import { useCreateStore } from '../../../stores/createStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { getLoraModels, getVAEModels } from '../../../api/comfyui'
@@ -46,10 +48,8 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     generate, cancel, samplerList, schedulerList,
     connected, modelsLoaded, modelLoadError, checkConnection, fetchModels,
   } = useCreate()
-  // Desktop build: no hosted rendering — the cloud axis is permanently off.
-  const cloudAvailable = false
-  const quota: CloudQuota | null = null
-  const refreshQuota = useCallback(async () => {}, [])
+  const { cloudAvailable, quota, refreshQuota } = useCloudSession()
+  const cloud = useCloudCreate({ onQuotaChange: refreshQuota })
   const backend = useCreateStore((s) => s.backend)
   const setBackend = useCreateStore((s) => s.setBackend)
   const setView = useUIStore((s) => s.setView)
@@ -115,8 +115,8 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   const installCapability = useCallback((_cap: 'rmbg') => { setView('models') }, [setView])
 
   const value: CreateExpValue = {
-    generate,
-    cancel,
+    generate: backend === 'cloud' ? cloud.generate : generate,
+    cancel: backend === 'cloud' ? cloud.cancel : cancel,
     samplerList, schedulerList, loraList, vaeList,
     connected, modelsLoaded, modelLoadError, installCapability,
     cloudAvailable, quota, refreshQuota,

@@ -7,7 +7,7 @@
 
 // ── Provider Identity ──────────────────────────────────────────
 
-export type ProviderId = 'ollama' | 'openai' | 'anthropic'
+export type ProviderId = 'ollama' | 'openai' | 'anthropic' | 'lu-cloud'
 
 export interface ProviderConfig {
   id: ProviderId

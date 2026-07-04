@@ -9,6 +9,7 @@ import type { ProviderId, ProviderClient, ProviderConfig } from './types'
 import { OllamaProvider } from './ollama-provider'
 import { OpenAIProvider } from './openai-provider'
 import { AnthropicProvider } from './anthropic-provider'
+import { LuCloudProvider } from './lu-cloud-provider'
 import { useProviderStore } from '../../stores/providerStore'
 
 // ── Provider client cache ──────────────────────────────────────
@@ -34,6 +35,8 @@ function createClient(config: ProviderConfig): ProviderClient {
       return new OpenAIProvider(config)
     case 'anthropic':
       return new AnthropicProvider(config)
+    case 'lu-cloud':
+      return new LuCloudProvider(config)
     default:
       throw new Error(`Unknown provider: ${config.id}`)
   }

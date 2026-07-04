@@ -2,6 +2,8 @@ import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
 import { Tooltip } from '../ui/Tooltip'
+import { openExternal } from '../../../api/backend'
+import { CLOUD_BASE } from '../../../api/cloud/config'
 import { cn } from '../ui/cn'
 
 // Compact credits meter for the cloud backend: remaining vs monthly budget,
@@ -22,12 +24,12 @@ export function CreditsMeter() {
 
   if (!enough) {
     return (
-      <a
-        href="/pricing"
+      <button
+        onClick={() => void openExternal(`${CLOUD_BASE}/pricing`)}
         className="t-control px-2 h-[var(--control-h-sm)] inline-flex items-center rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-colors"
       >
         {remaining <= 0 ? 'Out of credits — upgrade' : `Needs ${cost} credits (${remaining} left)`}
-      </a>
+      </button>
     )
   }
 
