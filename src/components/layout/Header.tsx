@@ -10,7 +10,6 @@ import { MemoryDebugToggle } from '../chat/MemoryDebugPanel'
 import { UpdateBadge } from './UpdateBadge'
 import { DownloadBadge } from './DownloadBadge'
 import { CloudWaitlistBadge } from './CloudWaitlistBadge'
-import { CreateTopControls } from '../create/CreateTopControls'
 import { loadModel } from '../../api/ollama'
 import { getProviderIdFromModel } from '../../api/providers'
 import { ModelLoadError } from '../../lib/ollama-errors'
@@ -202,9 +201,10 @@ export function Header() {
           live here has moved INTO the dropdown — each model row in
           `ModelSelector` has its own load/unload toggle next to the name. */}
       <div className="lg:absolute lg:left-1/2 lg:-translate-x-1/2 flex items-center justify-center gap-2 min-w-0 ">
-        {currentView === 'create' ? (
-          <CreateTopControls />
-        ) : (
+        {/* The redesigned Create surface owns its own controls (IntentBar/
+            Composer) — the header center stays empty there, like the chat
+            model picker does not apply to Create. */}
+        {currentView === 'create' ? null : (
           <>
             <ModelSelector />
             {/* Lichtschalter (load/unload into VRAM) now lives per-row inside the

@@ -7,22 +7,78 @@ import type { PreflightError } from '../api/preflight'
 
 export type ProgressPhase = 'idle' | 'queued' | 'loading-model' | 'loading-clip' | 'loading-vae' | 'sampling' | 'decoding' | 'complete'
 
+/**
+ * Backend the redesigned Create page generates against. Runtime-only — derived
+ * from session/license (a paired Bridge → `local`; a logged-in hosted tier →
+ * `cloud`) and never persisted. Orthogonal to `videoBackend` (comfy|mlx), which
+ * stays a local-only concern.
+ */
+export type CreateBackend = 'local' | 'cloud'
+
+/**
+ * The redesigned Create page's flat creation intents, derived over
+ * mode / image sub-mode / video sub-mode / removebg. The `mode` + sub-mode
+ * enums stay the load-bearing state; `intent` is a derived view over them.
+ */
+export type CreateIntent = 'image' | 'edit' | 'removebg' | 'video' | 'animate'
+
+/**
+ * A source or mask image loaded into the Stage input slot. `filename` is the
+ * backend handle (a ComfyUI /upload/image name on the local path, or a
+ * render-inputs storage path on the cloud path); `url` is a local object/data
+ * URL for preview. Runtime-only — never persisted.
+ */
+export interface ImageRef { filename: string; url: string; width: number; height: number }
+
+/** Flatten mode / sub-mode / removebg into the single intent the UI drives. */
+export function deriveIntent(s: {
+  removebg: boolean
+  mode: 'image' | 'video'
+  imageSubMode: 'text2img' | 'img2img'
+  videoSubMode: 't2v' | 'i2v'
+}): CreateIntent {
+  if (s.removebg) return 'removebg'
+  if (s.mode === 'video') return s.videoSubMode === 'i2v' ? 'animate' : 'video'
+  return s.imageSubMode === 'img2img' ? 'edit' : 'image'
+}
+
+/**
+ * Where video generation runs.
+ *
+ * - `comfy` — local ComfyUI server. Works on every OS; FP8 quirks on Mac
+ *   MPS, fastest on CUDA. Default for Windows + Linux.
+ *
+ * - `mlx` — `mlx-video` subprocess driven by the Bridge. Apple Silicon
+ *   only, uses Apple's MLX framework against unified memory. Faster than
+ *   ComfyUI-on-MPS for the models it supports (Wan 2.2, LTX-2). Default
+ *   for Apple Silicon Macs with ≥32 GB unified memory.
+ */
+export type VideoBackendKind = 'comfy' | 'mlx'
+
 // ─── Optimal defaults per model type (research-backed: Draw Things, Fooocus, ComfyUI) ───
 
 export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   steps: number; cfgScale: number; sampler: string; scheduler: string
   width: number; height: number; frames?: number; fps?: number
 }> = {
-  sd15:    { steps: 25, cfgScale: 7.0, sampler: 'euler_ancestral', scheduler: 'normal', width: 512,  height: 512 },
-  sdxl:    { steps: 25, cfgScale: 7.0, sampler: 'dpmpp_2m',       scheduler: 'karras', width: 1024, height: 1024 },
-  flux:    { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
-  flux2:   { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
-  zimage:  { steps: 12, cfgScale: 3.5, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
-  wan:     { steps: 30, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 832,  height: 480, frames: 49, fps: 16 },
-  wan22:   { steps: 30, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
-  hunyuan: { steps: 30, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 45, fps: 24 },
-  ltx:     { steps: 20, cfgScale: 3.0, sampler: 'euler',           scheduler: 'normal', width: 768,  height: 512, frames: 97, fps: 24 },
-  unknown: { steps: 20, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1024, height: 1024 },
+  sd15:        { steps: 25, cfgScale: 7.0, sampler: 'euler_ancestral', scheduler: 'normal', width: 512,  height: 512 },
+  sdxl:        { steps: 25, cfgScale: 7.0, sampler: 'dpmpp_2m',       scheduler: 'karras', width: 1024, height: 1024 },
+  flux:        { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
+  flux2:       { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
+  zimage:      { steps: 12, cfgScale: 3.5, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
+  ernie_image: { steps: 20, cfgScale: 4.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
+  wan:         { steps: 25, cfgScale: 5.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 49, fps: 16 },
+  wan22:       { steps: 30, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 576, frames: 49, fps: 24 },
+  hunyuan:     { steps: 30, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 45, fps: 15 },
+  ltx:         { steps: 20, cfgScale: 1.0, sampler: 'euler',           scheduler: 'simple', width: 768,  height: 512, frames: 97, fps: 24 },
+  mochi:       { steps: 40, cfgScale: 4.5, sampler: 'euler',           scheduler: 'normal', width: 848,  height: 480, frames: 49, fps: 24 },
+  cosmos:      { steps: 30, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1280, height: 704, frames: 57, fps: 24 },
+  cogvideo:    { steps: 50, cfgScale: 6.0, sampler: 'euler',           scheduler: 'normal', width: 720,  height: 480, frames: 49, fps: 8  },
+  svd:         { steps: 25, cfgScale: 2.5, sampler: 'euler',           scheduler: 'karras', width: 1024, height: 576, frames: 25, fps: 6  },
+  framepack:   { steps: 30, cfgScale: 5.0, sampler: 'euler',           scheduler: 'normal', width: 832,  height: 480, frames: 33, fps: 16 },
+  pyramidflow: { steps: 20, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1280, height: 768, frames: 121, fps: 24 },
+  allegro:     { steps: 100, cfgScale: 7.5, sampler: 'euler',          scheduler: 'normal', width: 1280, height: 720, frames: 88, fps: 15 },
+  unknown:     { steps: 20, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1024, height: 1024 },
 }
 
 export interface GalleryItem {
@@ -46,15 +102,28 @@ export interface GalleryItem {
   builderUsed?: 'dynamic' | 'legacy' | 'custom'
   resolvedVAE?: string
   resolvedCLIP?: string
+  /** Self-contained PNG data URL for backends that don't serve files over
+   *  ComfyUI's /view route (e.g. MLX on Apple Silicon). When set, display +
+   *  download read from this instead of filename/subfolder. */
+  dataUrl?: string
+  /** Cloud jobs: signed result URL from the render queue. Display prefers
+   *  `remoteUrl` → `dataUrl` → the ComfyUI /view path (filename/subfolder). */
+  remoteUrl?: string
+  /** Cloud jobs: TEE attestation receipt (null on non-attested lanes). */
+  attestation?: { quote: string; verify_url: string } | null
+  /** Cloud jobs: the render_jobs id, so the client can re-poll/re-sign. */
+  jobId?: string
+  /** Which redesign intent produced this item (gallery tagging). */
+  intent?: CreateIntent
 }
 
 interface CreateState {
   mode: 'image' | 'video'
+  videoBackend: VideoBackendKind
+  /** Set once auto-detect has run (or the user clicked the backend picker)
+   *  so we don't keep overriding their choice on every launch. */
+  videoBackendInitialized: boolean
   imageSubMode: 'text2img' | 'img2img'
-  // Video sub-mode mirrors imageSubMode so the main Create screen can offer a
-  // Text-to-Video / Image-to-Video switch (the I2V upload + model filter key
-  // off this). Session-only (not persisted), defaults to 't2v' each launch.
-  videoSubMode: 't2v' | 'i2v'
   prompt: string
   negativePrompt: string
   imageModel: string
@@ -71,19 +140,31 @@ interface CreateState {
   frames: number
   fps: number
   denoise: number  // Denoise strength for I2I (0.0–1.0)
-  // F2 (cinemazverev GH#4), multi-LoRA (konata 2026-06-09) — ordered LoRA
-  // stack. Each entry chains another LoraLoader in the workflow; per-entry
-  // strength mirrors LoraLoader's `strength_model` slider (0..2 in the UI).
-  // Empty array = no LoRA. Session-only (not in partialize), like before.
-  selectedLoras: { name: string; strength: number }[]
-  // F3 (vanja-san GH#4) — top extended ComfyUI params surfaced in
-  // the param panel. selectedVae = 'auto' lets the checkpoint's
-  // bundled VAE win; an explicit pick overrides with a VAELoader.
-  // clipSkip = 0 means no Skip-CLIP layer is injected.
-  selectedVae: string
-  clipSkip: number
   i2iImage: string | null  // Uploaded image filename for I2I
   i2vImage: string | null  // Uploaded image filename for I2V models (SVD, FramePack)
+
+  // ── redesign additions: flat-intent model + unified inputs + extra params ──
+  videoSubMode: 't2v' | 'i2v'
+  removebg: boolean
+  showNegative: boolean
+  selectedLoras: { name: string; strength: number }[]
+  selectedVae: string
+  clipSkip: number
+  growMaskBy: number  // inpaint mask edge feather (VAEEncodeForInpaint grow_mask_by)
+  /** Unified Stage input slot (runtime-only). On the local path source.filename
+   *  maps to i2iImage/i2vImage; on the cloud path it is a render-inputs path. */
+  source: ImageRef | null
+  sourceSetAt: number
+  mask: ImageRef | null
+  /** Runtime-only: local (Bridge) vs cloud (/api/jobs), derived from session. */
+  backend: CreateBackend
+  /** Runtime-only: hosted model slugs (lib/render/cloud-models) for the cloud
+   *  backend — separate from the persisted local checkpoint names. */
+  cloudImageModel: string
+  cloudVideoModel: string
+  /** Runtime-only: which local custom-node capabilities are installed. */
+  caps: Record<'rmbg' | 'inpaint-nodes', boolean>
+
   isGenerating: boolean
   progress: number
   progressText: string
@@ -102,16 +183,11 @@ interface CreateState {
   imageModelList: ClassifiedModel[]
   videoModelList: ClassifiedModel[]
   comfyRunning: boolean
-  /** Bug A (v2.4.5): when video generation is about to fall back to .webp
-   * because VHS_VideoCombine is missing, useCreate sets this resolver and
-   * CreateView pops the modal. The user picks "install", "webp", or
-   * "cancel"; resolver fires with the choice and useCreate continues. */
-  vhsInstallPrompt: ((choice: 'install' | 'webp' | 'cancel') => void) | null
 
   setPreflightStatus: (ready: boolean | null, errors: PreflightError[], warnings: string[]) => void
   setMode: (mode: 'image' | 'video') => void
+  setVideoBackend: (backend: VideoBackendKind) => void
   setImageSubMode: (subMode: 'text2img' | 'img2img') => void
-  setVideoSubMode: (subMode: 't2v' | 'i2v') => void
   setPrompt: (prompt: string) => void
   setNegativePrompt: (negativePrompt: string) => void
   setImageModel: (model: string, type: ModelType) => void
@@ -126,15 +202,27 @@ interface CreateState {
   setFrames: (frames: number) => void
   setFps: (fps: number) => void
   setDenoise: (denoise: number) => void
-  /** Toggle a LoRA in/out of the stack (added at the end, default 0.8). */
+  setI2iImage: (image: string | null) => void
+  setI2vImage: (image: string | null) => void
+
+  // ── redesign additions ──
+  intent: () => CreateIntent
+  setIntent: (intent: CreateIntent) => void
+  toggleNegative: () => void
   toggleLora: (name: string) => void
-  /** Set the strength of one stacked LoRA (clamped 0..2 like the old slider). */
   setLoraStrengthFor: (name: string, strength: number) => void
   clearLoras: () => void
   setSelectedVae: (name: string) => void
-  setClipSkip: (skip: number) => void
-  setI2iImage: (image: string | null) => void
-  setI2vImage: (image: string | null) => void
+  setClipSkip: (n: number) => void
+  setGrowMaskBy: (n: number) => void
+  setSource: (img: ImageRef | null) => void
+  setMask: (img: ImageRef | null) => void
+  setBackend: (backend: CreateBackend) => void
+  setCloudImageModel: (id: string) => void
+  setCloudVideoModel: (id: string) => void
+  setCaps: (caps: Record<'rmbg' | 'inpaint-nodes', boolean>) => void
+  resetParamsToModelDefaults: () => void
+
   setIsGenerating: (generating: boolean) => void
   setProgress: (progress: number, text?: string) => void
   setProgressPhase: (phase: ProgressPhase) => void
@@ -145,20 +233,28 @@ interface CreateState {
   removeFromGallery: (id: string) => void
   clearGallery: () => void
   addToPromptHistory: (prompt: string) => void
-  /** GitHub #66 (rubacc80-png) — wipe the Create-tab prompt history. */
-  clearPromptHistory: () => void
   setImageModelList: (list: ClassifiedModel[]) => void
   setVideoModelList: (list: ClassifiedModel[]) => void
   setComfyRunning: (running: boolean) => void
-  setVhsInstallPrompt: (resolver: ((choice: 'install' | 'webp' | 'cancel') => void) | null) => void
 }
 
 export const useCreateStore = create<CreateState>()(
   persist(
-    (set) => ({
+    // Explicit param/return types: LU compiles with `strict: true` (the web
+    // repo does not), and zustand v5's persist loses contextual typing of the
+    // state-creator there — annotating restores set/get and setter types.
+    (
+      set: (p: Partial<CreateState> | ((s: CreateState) => Partial<CreateState>)) => void,
+      get: () => CreateState,
+    ): CreateState => ({
       mode: 'image',
+      // Default to ComfyUI; AppShell/Onboarding flips this to 'mlx' on
+      // Apple Silicon Macs with enough RAM after the bridge reports
+      // arch + memory. Persisted across sessions so the auto-detect only
+      // runs once.
+      videoBackend: 'comfy' as VideoBackendKind,
+      videoBackendInitialized: false,
       imageSubMode: 'text2img' as 'text2img' | 'img2img',
-      videoSubMode: 't2v' as 't2v' | 'i2v',
       prompt: '',
       negativePrompt: '',
       imageModel: '',
@@ -175,11 +271,25 @@ export const useCreateStore = create<CreateState>()(
       frames: 24,
       fps: 8,
       denoise: 0.7,
-      selectedLoras: [],
-      selectedVae: 'auto',
-      clipSkip: 0,
       i2iImage: null,
       i2vImage: null,
+
+      // ── redesign additions ──
+      videoSubMode: 't2v' as 't2v' | 'i2v',
+      removebg: false,
+      showNegative: false,
+      selectedLoras: [] as { name: string; strength: number }[],
+      selectedVae: 'auto',
+      clipSkip: 0,
+      growMaskBy: 6,
+      source: null as ImageRef | null,
+      sourceSetAt: 0,
+      mask: null as ImageRef | null,
+      backend: 'local' as CreateBackend,
+      cloudImageModel: '',
+      cloudVideoModel: '',
+      caps: { rmbg: false, 'inpaint-nodes': false } as Record<'rmbg' | 'inpaint-nodes', boolean>,
+
       isGenerating: false,
       progress: 0,
       progressText: '',
@@ -195,9 +305,9 @@ export const useCreateStore = create<CreateState>()(
       imageModelList: [],
       videoModelList: [],
       comfyRunning: false,
-      vhsInstallPrompt: null,
 
       setPreflightStatus: (ready, errors, warnings) => set({ preflightReady: ready, preflightErrors: errors, preflightWarnings: warnings }),
+      setVideoBackend: (videoBackend) => set({ videoBackend, videoBackendInitialized: true }),
       setMode: (mode) => set((state) => {
         // Reset parameters to the correct defaults when switching modes
         // This prevents image resolution (1024x1024) leaking into video mode (causes HTTP 500)
@@ -225,10 +335,6 @@ export const useCreateStore = create<CreateState>()(
         return { mode }
       }),
       setImageSubMode: (subMode) => set({ imageSubMode: subMode }),
-      // Plain setter — CreateView owns an always-mounted effect that re-points
-      // videoModel to a valid entry for the chosen sub-mode (so toggling works
-      // whether or not the Advanced panel is open).
-      setVideoSubMode: (subMode: 't2v' | 'i2v') => set({ videoSubMode: subMode }),
       setPrompt: (prompt) => set({ prompt }),
       setNegativePrompt: (negativePrompt) => set({ negativePrompt }),
       setImageModel: (model, type) => {
@@ -265,28 +371,57 @@ export const useCreateStore = create<CreateState>()(
       setFrames: (frames) => set({ frames: Math.max(1, Math.min(120, Math.floor(frames))) }),
       setFps: (fps) => set({ fps: Math.max(1, Math.min(60, Math.floor(fps))) }),
       setDenoise: (denoise) => set({ denoise: Math.max(0, Math.min(1, denoise)) }),
-      // Explicit param types: this file's creator lost contextual typing long
-      // ago (pre-existing TS2740 on MODEL_TYPE_DEFAULTS) — without these the
-      // params would be implicit-any like the older setters around them.
-      toggleLora: (name: string) => set((s: CreateState) => {
-        if (!name) return {}
-        const exists = s.selectedLoras.some((l) => l.name === name)
-        return {
-          selectedLoras: exists
-            ? s.selectedLoras.filter((l) => l.name !== name)
-            : [...s.selectedLoras, { name, strength: 0.8 }],
-        }
-      }),
-      setLoraStrengthFor: (name: string, strength: number) => set((s: CreateState) => ({
-        selectedLoras: s.selectedLoras.map((l) =>
-          l.name === name ? { ...l, strength: Math.max(0, Math.min(2, strength)) } : l,
-        ),
-      })),
-      clearLoras: () => set({ selectedLoras: [] }),
-      setSelectedVae: (name) => set({ selectedVae: name || 'auto' }),
-      setClipSkip: (skip) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(skip))) }),
       setI2iImage: (image) => set({ i2iImage: image }),
       setI2vImage: (image) => set({ i2vImage: image }),
+
+      // ── redesign additions ──
+      intent: () => deriveIntent(get()),
+      setIntent: (intent) => set((s) => {
+        // Clear intent-incompatible inputs: intents without a source drop both;
+        // removebg/animate keep the source but drop a stale mask. Video/animate
+        // mirror setMode's reset so image resolution never leaks into video.
+        // A stale error from the previous intent never carries over.
+        const dropAll = { source: null, mask: null, sourceSetAt: 0 }
+        const base = { removebg: false, error: null }
+        switch (intent) {
+          case 'image':    return { ...base, mode: 'image' as const, imageSubMode: 'text2img' as const, ...dropAll }
+          case 'edit':     return { ...base, mode: 'image' as const, imageSubMode: 'img2img' as const }
+          case 'removebg': return { removebg: true, error: null, mode: 'image' as const, imageSubMode: 'img2img' as const, mask: null }
+          case 'video': {
+            const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
+            return { ...base, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
+              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
+              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+          }
+          case 'animate': {
+            const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
+            return { ...base, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null,
+              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
+              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+          }
+        }
+      }),
+      toggleNegative: () => set((s) => ({ showNegative: !s.showNegative })),
+      toggleLora: (name) => set((s) => ({ selectedLoras: s.selectedLoras.some((l) => l.name === name) ? s.selectedLoras.filter((l) => l.name !== name) : [...s.selectedLoras, { name, strength: 0.8 }] })),
+      setLoraStrengthFor: (name, strength) => set((s) => ({ selectedLoras: s.selectedLoras.map((l) => l.name === name ? { ...l, strength: Math.max(0, Math.min(2, strength)) } : l) })),
+      clearLoras: () => set({ selectedLoras: [] }),
+      setSelectedVae: (name) => set({ selectedVae: name || 'auto' }),
+      setClipSkip: (n) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(n))) }),
+      setGrowMaskBy: (n) => set({ growMaskBy: Math.max(0, Math.min(64, Math.floor(n))) }),
+      setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null }) }),
+      setMask: (mask) => set({ mask }),
+      setBackend: (backend) => set({ backend }),
+      setCloudImageModel: (cloudImageModel) => set({ cloudImageModel }),
+      setCloudVideoModel: (cloudVideoModel) => set({ cloudVideoModel }),
+      setCaps: (caps) => set({ caps }),
+      resetParamsToModelDefaults: () => {
+        const s = get()
+        const d = s.mode === 'video'
+          ? (MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown)
+          : MODEL_TYPE_DEFAULTS[s.imageModelType]
+        set({ sampler: d.sampler, scheduler: d.scheduler, steps: d.steps, cfgScale: d.cfgScale, width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) })
+      },
+
       setIsGenerating: (generating) => set({ isGenerating: generating, ...(generating ? {} : { progressPhase: 'idle' as ProgressPhase }) }),
       setProgress: (progress, text) => set({ progress, progressText: text ?? '' }),
       setProgressPhase: (phase) => set({ progressPhase: phase }),
@@ -300,16 +435,16 @@ export const useCreateStore = create<CreateState>()(
         const filtered = s.promptHistory.filter(p => p !== prompt)
         return { promptHistory: [prompt, ...filtered].slice(0, 50) }
       }),
-      clearPromptHistory: () => set({ promptHistory: [] }),
       setImageModelList: (list) => set({ imageModelList: list }),
       setVideoModelList: (list) => set({ videoModelList: list }),
       setComfyRunning: (running) => set({ comfyRunning: running }),
-      setVhsInstallPrompt: (resolver) => set({ vhsInstallPrompt: resolver }),
     }),
     {
       name: 'create-store',
       partialize: (state) => ({
         mode: state.mode,
+        videoBackend: state.videoBackend,
+        videoBackendInitialized: state.videoBackendInitialized,
         imageModel: state.imageModel,
         imageModelType: state.imageModelType,
         videoModel: state.videoModel,
@@ -325,10 +460,28 @@ export const useCreateStore = create<CreateState>()(
         denoise: state.denoise,
         gallery: state.gallery,
         promptHistory: state.promptHistory,
+        // ── redesign additions (advanced params only; runtime inputs
+        //    source/mask/backend/caps stay unpersisted). No version bump: these
+        //    are additive and merge() backfills missing keys from defaults. ──
+        showNegative: state.showNegative,
+        selectedLoras: state.selectedLoras,
+        selectedVae: state.selectedVae,
+        clipSkip: state.clipSkip,
+        growMaskBy: state.growMaskBy,
       }),
-      // Migrate old 'i2i' mode to imageSubMode (v2.3.0 refactor)
+      // Future schema bumps hook into migrate. NOTE: zustand only invokes it
+      // when the stored blob carries a NUMERIC version that differs — legacy
+      // pre-version blobs skip it entirely, so their fixups must live in merge.
+      version: 1,
+      migrate: (persisted: any) => persisted,
       merge: (persisted: any, current: any) => {
-        const merged = { ...current, ...persisted }
+        // Never let runtime-only fields rehydrate (a foreign/corrupt blob must
+        // not flip the backend axis or inject a stale source/mask), backfill
+        // missing keys from defaults, and fix up legacy pre-version blobs
+        // ('i2i' mode from the v2.3.0 refactor).
+        const { backend, source, mask, caps, isGenerating, ...safe } =
+          persisted ?? {}
+        const merged = { ...current, ...safe }
         if (merged.mode === 'i2i') {
           merged.mode = 'image'
           merged.imageSubMode = 'img2img'

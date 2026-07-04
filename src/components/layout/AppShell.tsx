@@ -6,7 +6,7 @@ import { Sidebar } from './Sidebar'
 import { ChatView } from '../chat/ChatView'
 import { ModelManager } from '../models/ModelManager'
 import { SettingsPage } from '../settings/SettingsPage'
-import { CreateView } from '../create/CreateView'
+import { CreateExperimental } from '../create/experimental/CreateExperimental'
 import { BenchmarkView } from '../models/BenchmarkView'
 import { Onboarding } from '../onboarding/Onboarding'
 import { BackendSelector } from '../onboarding/BackendSelector'
@@ -592,7 +592,7 @@ export function AppShell() {
             {currentView === 'models' && <ErrorBoundary><ModelManager /></ErrorBoundary>}
             {currentView === 'benchmark' && <ErrorBoundary><BenchmarkView /></ErrorBoundary>}
             {currentView === 'settings' && <ErrorBoundary><SettingsPage /></ErrorBoundary>}
-            {currentView === 'create' && <ErrorBoundary><CreateView /></ErrorBoundary>}
+            {currentView === 'create' && <ErrorBoundary><CreateExperimental /></ErrorBoundary>}
           </main>
         </div>
       </div>
