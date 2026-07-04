@@ -1045,6 +1045,9 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
     // except on macOS where PyTorch uses MPS and never calls cuda APIs.
     let gpu_mode = ComfyGpuMode::parse(&state.comfy_gpu_mode.lock().unwrap());
     let needs_cpu_fallback = comfy_needs_cpu(&python, gpu_mode, Some(&state.comfy_gpu_cache));
+    // shd_scorpion (RX 7900 XTX): remember what we actually launched with so
+    // the Create tab can warn instead of letting a CPU gen time out silently.
+    *state.comfy_started_cpu.lock().unwrap() = Some(needs_cpu_fallback);
     let mut comfy_args: Vec<&str> = vec![
         "main.py",
         "--listen", "127.0.0.1",
@@ -1298,6 +1301,18 @@ pub fn set_comfy_gpu_mode(mode: String, state: State<'_, AppState>) -> Result<se
     state.comfy_gpu_cache.lock().unwrap().clear();
     println!("[ComfyUI] GPU mode = {}", normalized);
     Ok(serde_json::json!({ "mode": normalized }))
+}
+
+/// shd_scorpion (Discord 2026-07-03, RX 7900 XTX): a forced-CPU ComfyUI showed
+/// "Ready to generate" and then died with "timed out after 20 minutes" — no
+/// hint it never used the GPU. Lets the Create tab render an honest warning.
+/// `startedCpu` is None until LU itself has (re)started ComfyUI this session
+/// (an externally started ComfyUI is the user's own device choice).
+#[tauri::command]
+pub fn get_comfy_gpu_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mode = state.comfy_gpu_mode.lock().unwrap().clone();
+    let started_cpu = *state.comfy_started_cpu.lock().unwrap();
+    Ok(serde_json::json!({ "mode": mode, "startedCpu": started_cpu }))
 }
 
 #[tauri::command]
@@ -1606,6 +1621,8 @@ pub fn auto_start_comfyui(state: &AppState) {
             // "Found no NVIDIA driver" crash loop on non-NVIDIA systems.
             let auto_gpu_mode = ComfyGpuMode::parse(&state.comfy_gpu_mode.lock().unwrap());
             let auto_needs_cpu = comfy_needs_cpu(&python, auto_gpu_mode, Some(&state.comfy_gpu_cache));
+            // Mirror of start_comfyui: expose the real launch mode to the UI.
+            *state.comfy_started_cpu.lock().unwrap() = Some(auto_needs_cpu);
             let mut comfy_args: Vec<&str> = vec![
                 "main.py",
                 "--listen", "127.0.0.1",

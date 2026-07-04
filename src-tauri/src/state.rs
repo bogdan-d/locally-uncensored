@@ -240,6 +240,11 @@ pub struct AppState {
     /// (settings.comfyGpuMode): "auto" (probe), "cpu" (force --cpu), "gpu"
     /// (never --cpu). Pushed via set_comfy_gpu_mode on boot + change.
     pub comfy_gpu_mode: Mutex<String>,
+    /// Whether the LAST ComfyUI start actually passed `--cpu` (shd_scorpion,
+    /// RX 7900 XTX: gen "timed out after 20 minutes" with zero hint that it
+    /// ran on the CPU). None = LU hasn't started ComfyUI this session.
+    /// Surfaced to the Create tab via `get_comfy_gpu_status`.
+    pub comfy_started_cpu: Mutex<Option<bool>>,
 }
 
 impl AppState {
@@ -308,6 +313,7 @@ impl AppState {
             flash_attn_cache: Mutex::new(HashMap::new()),
             comfy_gpu_cache: Mutex::new(HashMap::new()),
             comfy_gpu_mode: Mutex::new("auto".to_string()),
+            comfy_started_cpu: Mutex::new(None),
         }
     }
 }

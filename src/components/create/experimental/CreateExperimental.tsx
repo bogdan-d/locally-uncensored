@@ -28,7 +28,8 @@ function CreateExperimentalInner() {
   const gallery = useCreateStore((s) => s.gallery)
   const error = useCreateStore((s) => s.error)
   const setError = useCreateStore((s) => s.setError)
-  const { modelLoadError } = useCreateExp()
+  const backend = useCreateStore((s) => s.backend)
+  const { modelLoadError, connected, comfyOnCpu } = useCreateExp()
 
   const [pinnedId, setPinnedId] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -110,6 +111,20 @@ function CreateExperimentalInner() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* CPU-mode warning — persistent while LU's ComfyUI runs with --cpu.
+          Without it an AMD/non-NVIDIA user sees "Ready to generate" and then
+          a bare 20-minute timeout (shd_scorpion, RX 7900 XTX). Local renders
+          only — cloud jobs never touch the local ComfyUI. */}
+      {backend === 'local' && connected === true && comfyOnCpu && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
+          <AlertTriangle size={12} className="shrink-0" />
+          <span>
+            ComfyUI is running on the CPU (no usable GPU detected) — generation will be extremely slow and may time out.
+            AMD GPU? Point LU at a ROCm/ZLUDA ComfyUI and set Settings → Hardware → ComfyUI GPU to force GPU.
+          </span>
+        </div>
+      )}
 
       {/* Stage + Composer + right Advanced drawer share one relative container */}
       <div className="flex-1 min-h-0 relative flex flex-col">

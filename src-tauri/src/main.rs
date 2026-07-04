@@ -104,6 +104,7 @@ fn main() {
             commands::process::detect_all_comfyui_installs,
             commands::process::set_comfyui_path,
             commands::process::set_comfy_gpu_mode,
+            commands::process::get_comfy_gpu_status,
             commands::process::set_comfyui_port,
             commands::process::set_comfyui_host,
             commands::process::set_ollama_host,

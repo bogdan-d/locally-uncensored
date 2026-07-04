@@ -6,6 +6,7 @@ import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { getLoraModels, getVAEModels } from '../../../api/comfyui'
 import { getAllNodeInfo } from '../../../api/comfyui-nodes'
+import { backendCall } from '../../../api/backend'
 import { ensureLocalFilename } from './loadImage'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
 
@@ -29,6 +30,10 @@ interface CreateExpValue {
   connected: boolean | null
   modelsLoaded: boolean
   modelLoadError: string | null
+  /** True while the ComfyUI that LU launched runs with --cpu (shd_scorpion,
+   *  RX 7900 XTX): surfaces the honest slow-mode warning instead of a silent
+   *  20-minute timeout. */
+  comfyOnCpu: boolean
   /** Route a missing capability (e.g. background-removal nodes) to the Model Manager. */
   installCapability: (cap: 'rmbg') => void
   /** Runtime backend axis: hosted rendering offered for this session? */
@@ -58,6 +63,20 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   const setCaps = useCreateStore((s) => s.setCaps)
   const [loraList, setLoraList] = useState<string[]>([])
   const [vaeList, setVaeList] = useState<string[]>(['auto'])
+  const [comfyOnCpu, setComfyOnCpu] = useState(false)
+
+  // Re-read the CPU/GPU launch flag whenever ComfyUI (re)connects: the Rust
+  // side records it at every ComfyUI (re)start, so a Settings → Hardware
+  // change + restart updates the banner. Fails silent (stays false) when no
+  // Rust backend answers (web build).
+  useEffect(() => {
+    if (connected !== true) { setComfyOnCpu(false); return }
+    let cancelled = false
+    backendCall<{ mode?: string; startedCpu?: boolean | null }>('get_comfy_gpu_status')
+      .then((s) => { if (!cancelled) setComfyOnCpu(s?.startedCpu === true) })
+      .catch(() => { if (!cancelled) setComfyOnCpu(false) })
+    return () => { cancelled = true }
+  }, [connected])
 
   // Never strand the session on a dead axis: losing the license/logging out
   // while 'cloud' is selected falls back to local rendering.
@@ -125,7 +144,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     cancel: () => (hasActiveCloudRun() ? cloud.cancel() : cancel()),
     enhanceVideo: cloud.enhanceVideo,
     samplerList, schedulerList, loraList, vaeList,
-    connected, modelsLoaded, modelLoadError, installCapability,
+    connected, modelsLoaded, modelLoadError, comfyOnCpu, installCapability,
     cloudAvailable, quota, refreshQuota,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
