@@ -1269,6 +1269,16 @@ export const CUSTOM_NODE_REGISTRY: Record<string, { repo: string; name: string; 
     name: 'ComfyUI-VideoHelperSuite',
     requiredNodes: ['VHS_VideoCombine', 'VHS_LoadVideo'],
   },
+  // Background removal (Create → Remove Background). ComfyUI-RMBG registers the
+  // `RMBG` node — the exact class the capability probe + workflow builder look
+  // for — and auto-downloads its cutout model (BiRefNet / RMBG-2.0, ~300 MB)
+  // into ComfyUI/models/RMBG on first use. So the one-click action only needs to
+  // install the node; the model lands on the first cutout run.
+  'rmbg': {
+    repo: 'https://github.com/1038lab/ComfyUI-RMBG',
+    name: 'ComfyUI-RMBG',
+    requiredNodes: ['RMBG'],
+  },
 }
 
 export interface ModelBundle {

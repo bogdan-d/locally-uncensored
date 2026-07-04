@@ -360,6 +360,25 @@ export async function buildDynamicWorkflow(
   const nodes = categorizeNodes(allNodes)
   const models = detectAvailableModels(allNodes)
 
+  // ─── Background removal (RMBG cutout) ───
+  // A cutout needs no diffusion model, so branch out before strategy detection.
+  // ComfyUI-RMBG (node class "RMBG"): LoadImage → RMBG → SaveImage. We read the
+  // node's REAL input schema live and default every widget from it, so we never
+  // hard-code an enum spelling a future RMBG version could reject with a ComfyUI
+  // 400 ("Value not in list"). Gated upstream by caps.rmbg.
+  const gp = params as GenerateParams
+  if (!isVideo && gp.removebg && gp.inputImage) {
+    const rmbgMeta = allNodes['RMBG']
+    if (!rmbgMeta) {
+      throw new WorkflowUnavailableError(
+        'The background-removal node (ComfyUI-RMBG) is not installed in ComfyUI. Install it from the Remove Background tab, then try again.',
+        'unavailable',
+        { pack: 'ComfyUI-RMBG', url: 'https://github.com/1038lab/ComfyUI-RMBG' },
+      )
+    }
+    return buildRemoveBgWorkflow(gp, rmbgMeta)
+  }
+
   const { strategy, reason, installHint } = determineStrategy(type, isVideo, nodes, models)
   log.info(`[dynamic-workflow] Strategy: ${strategy} (${reason})`)
 
@@ -844,6 +863,54 @@ export async function buildDynamicWorkflow(
 }
 
 // ─── Wrapper Workflow Builders ───
+
+// Background removal (ComfyUI-RMBG). Self-contained LoadImage → RMBG → SaveImage
+// graph. Every RMBG widget is defaulted from the node's LIVE object_info schema
+// (`rmbgMeta`) so the graph stays valid across RMBG versions instead of pinning
+// input names/enums we'd have to guess. The `background` widget is nudged toward
+// a transparent/alpha option so the result is a real RGBA cutout, not a matte.
+function buildRemoveBgWorkflow(params: GenerateParams, rmbgMeta: any): Record<string, any> {
+  const workflow: Record<string, any> = {}
+  workflow['1'] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
+
+  const required: Record<string, any> = rmbgMeta?.input?.required ?? {}
+  const rmbgInputs: Record<string, any> = { image: ['1', 0] }
+  for (const [name, spec] of Object.entries(required)) {
+    if (name === 'image') continue
+    const d = rmbgWidgetDefault(name, spec)
+    if (d.set) rmbgInputs[name] = d.value
+  }
+  workflow['2'] = { class_type: 'RMBG', inputs: rmbgInputs }
+
+  // RMBG returns (IMAGE, MASK, …); slot 0 is the cut-out image. SaveImage writes
+  // the transparent PNG, picked up by extractComfyOutputFiles like any output.
+  workflow['3'] = {
+    class_type: 'SaveImage',
+    inputs: { images: ['2', 0], filename_prefix: promptFilenamePrefix(params.prompt, false) },
+  }
+  return workflow
+}
+
+// Resolve a default value for one RMBG widget input from its object_info spec.
+// Combo → prefer a transparent option for the background widget, else the
+// declared default / first entry. Primitives → their declared default. A
+// non-widget connection input (some other IMAGE/MASK) can't be auto-wired, so
+// skip it — ComfyUI surfaces a clear error rather than us guessing wrong.
+function rmbgWidgetDefault(name: string, spec: any): { set: boolean; value?: any } {
+  const t = Array.isArray(spec) ? spec[0] : spec
+  const cfg = Array.isArray(spec) ? spec[1] : undefined
+  if (Array.isArray(t)) {
+    if (/back\s*ground|(^|_)bg($|_)/i.test(name)) {
+      const alpha = t.find((o: any) => typeof o === 'string' && /alpha|transparent/i.test(o))
+      if (alpha) return { set: true, value: alpha }
+    }
+    return { set: true, value: cfg?.default ?? t[0] }
+  }
+  if (t === 'BOOLEAN') return { set: true, value: cfg?.default ?? false }
+  if (t === 'INT' || t === 'FLOAT') return { set: true, value: cfg?.default ?? 0 }
+  if (t === 'STRING') return { set: true, value: cfg?.default ?? '' }
+  return { set: false }
+}
 
 function addVideoOutput(workflow: Record<string, any>, n: number, decodeId: string, fps: number, nodes: CategorizedNodes, prompt?: string): number {
   const saveId = String(n++)

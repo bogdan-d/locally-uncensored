@@ -36,6 +36,7 @@ export interface GenerateParams {
   batchSize: number
   inputImage?: string   // I2I source image filename (uploaded to ComfyUI)
   denoise?: number      // I2I denoise strength (0.0–1.0, default 1.0 = full txt2img)
+  removebg?: boolean    // Background removal: LoadImage → RMBG → SaveImage cutout (no diffusion)
   // F2 (cinemazverev GH#4), extended for multi-LoRA (konata 2026-06-09:
   // "agent cannot load multiple loras"): one filename or an ordered list.
   // Multiple LoRAs are CHAINED — LoraLoader N feeds (model, clip) into
