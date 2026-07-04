@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2 } from 'lucide-react'
+import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { INTENT_MAP } from './intents'
@@ -228,17 +228,53 @@ function ChangeImageButton({ onChange }: { onChange: (r: Awaited<ReturnType<type
   )
 }
 
-// ── Capability missing → route to Model Manager ──
+// ── Capability missing → one-click install right here ──
 function CapabilityCard({ cap }: { cap: 'rmbg' }) {
   const { installCapability } = useCreateExp()
+  const [installing, setInstalling] = useState(false)
+  const [status, setStatus] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+
+  const run = async () => {
+    setInstalling(true); setErr(null); setStatus('Starting…')
+    try {
+      // On success caps.rmbg flips true and Stage swaps this card for the input slot.
+      await installCapability(cap, setStatus)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setInstalling(false)
+    }
+  }
+
   return (
     <EmptyState
       icon={Scissors}
       tone="accent"
-      title="Background Removal needs a quick one-time download"
-      description="The AI cutout model (ComfyUI-RMBG / BiRefNet) runs fully locally. Get it from the Model Manager — about 300 MB — and this becomes a one-click action."
-      action={{ label: 'Get this feature', icon: UploadCloud, onClick: () => installCapability(cap) }}
-      secondaryAction={{ label: 'Open Model Manager', onClick: () => installCapability(cap) }}
-    />
+      title="Background removal needs a one-time download"
+      description="The AI cutout runs fully locally (ComfyUI-RMBG). This installs the node now — the ~300 MB cutout model downloads automatically on your first cutout."
+    >
+      <div className="flex flex-col items-center gap-2.5 pt-1">
+        {installing ? (
+          <div className="t-control text-gray-400 flex items-center gap-2">
+            <Loader2 size={14} className="animate-spin shrink-0" />
+            <span>{status || 'Installing…'}</span>
+          </div>
+        ) : (
+          <Button variant="primary" icon={Download} onClick={run}>Download &amp; install</Button>
+        )}
+        {err && (
+          <div className="relative t-control text-gray-300 bg-white/[0.03] rounded-[var(--radius-control)] px-2.5 py-2 pr-7 max-w-sm text-left">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={13} className="text-gray-400 shrink-0 mt-px" />
+              <span className="min-w-0 break-words">{err}</span>
+            </div>
+            <button onClick={() => setErr(null)} className="absolute top-1.5 right-1.5 text-gray-500 hover:text-gray-300 transition-colors" title="Dismiss" aria-label="Dismiss">
+              <X size={12} />
+            </button>
+          </div>
+        )}
+      </div>
+    </EmptyState>
   )
 }
