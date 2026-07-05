@@ -28,9 +28,9 @@ function getRecommendations(sys: SystemInfo): Recommendation[] {
   // Text models
   if (vram >= 10) {
     recs.push({
-      name: 'Mistral Nemo 12B (Uncensored)',
+      name: 'Mistral Nemo 12B (Unfiltered)',
       pullName: 'krith/mistral-nemo-instruct-2407-abliterated:IQ4_XS',
-      description: 'Very smart, uncensored, fits your GPU',
+      description: 'Very smart, unfiltered, fits your GPU',
       vramNeeded: '~7 GB VRAM',
       category: 'text',
       icon: Brain,
@@ -38,9 +38,9 @@ function getRecommendations(sys: SystemInfo): Recommendation[] {
   }
   if (vram >= 6) {
     recs.push({
-      name: 'Llama 3.1 8B (Uncensored)',
+      name: 'Llama 3.1 8B (Unfiltered)',
       pullName: 'mannix/llama3.1-8b-abliterated:q5_K_M',
-      description: 'Fast & uncensored, ideal to get started',
+      description: 'Fast & unfiltered, ideal to get started',
       vramNeeded: '~5.5 GB VRAM',
       category: 'text',
       icon: Zap,
@@ -48,9 +48,9 @@ function getRecommendations(sys: SystemInfo): Recommendation[] {
   }
   if (vram >= 8) {
     recs.push({
-      name: 'DeepSeek R1 8B (Uncensored)',
+      name: 'DeepSeek R1 8B (Unfiltered)',
       pullName: 'huihui_ai/deepseek-r1-abliterated:8b',
-      description: 'Thinks before it answers, uncensored',
+      description: 'Thinks before it answers, unfiltered',
       vramNeeded: '~6 GB VRAM',
       category: 'text',
       icon: Brain,
@@ -62,7 +62,7 @@ function getRecommendations(sys: SystemInfo): Recommendation[] {
     recs.push({
       name: 'SDXL / Juggernaut XL',
       pullName: '',
-      description: 'Photorealistic, uncensored. Install in ComfyUI.',
+      description: 'Photorealistic, unfiltered. Install in ComfyUI.',
       vramNeeded: '~8 GB VRAM',
       category: 'image',
       icon: Image,

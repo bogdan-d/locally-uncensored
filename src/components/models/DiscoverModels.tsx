@@ -66,7 +66,7 @@ function ModelDiscoverCard({ model, index, isText, getModelDownloadState, isMode
               {model.hot && !isModelFullyInstalled(model) && <span className="text-[0.55rem] px-1.5 py-0.5 rounded bg-orange-500/15 text-orange-500 font-bold border border-orange-500/30 shrink-0">HOT</span>}
               {model.agent && <span className="text-[0.55rem] px-1.5 py-0.5 rounded bg-green-500/15 text-green-500 font-bold border border-green-500/30 shrink-0">AGENT</span>}
               {/* F4 (juliandiggins-stack GH#21) — explicit CPU-only / ≤8 GB RAM badge.
-                  Pinned to a small curated set of uncensored models that we have
+                  Pinned to a small curated set of unfiltered models that we have
                   test-loaded on an 8 GB box without a discrete GPU. */}
               {model.lightweight && (
                 <span
@@ -657,7 +657,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
   return (
     <div className="space-y-4">
-      {/* Sub-tabs: Uncensored / Mainstream — for all text sources and image/video */}
+      {/* Sub-tabs: Unfiltered / Mainstream — for all text sources and image/video */}
       {(isText || isImage || isVideo) && (
         <div className="flex gap-4 mb-4">
           <button
@@ -667,7 +667,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             }`}
           >
             <div className={`w-1 h-5 rounded-full ${subTab === 'uncensored' ? 'bg-red-500' : 'bg-red-500/50'}`} />
-            <span className="text-[0.75rem] font-semibold text-gray-900 dark:text-white uppercase tracking-wider">Uncensored</span>
+            <span className="text-[0.75rem] font-semibold text-gray-900 dark:text-white uppercase tracking-wider">Unfiltered</span>
             <span className="text-[0.55rem] text-gray-500">{isText ? 'No filters, no limits' : 'No content filter'}</span>
           </button>
           <button
@@ -931,7 +931,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                 <ModelDiscoverCard key={model.name} model={model} index={i} isText={isText} getModelDownloadState={getModelDownloadState} isModelFullyInstalled={isModelFullyInstalled} handleDownload={handleTextDownload} />
               ))}
               {filteredUncensored.length === 0 && (
-                <p className="text-center text-gray-500 py-4 col-span-2">No uncensored models match your search</p>
+                <p className="text-center text-gray-500 py-4 col-span-2">No unfiltered models match your search</p>
               )}
             </div>
           )}

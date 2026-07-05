@@ -1560,14 +1560,14 @@ export function Onboarding() {
               </p>
             </div>
 
-            {/* Uncensored / Mainstream tabs — only meaningful when both
+            {/* Unfiltered / Mainstream tabs — only meaningful when both
                 categories have entries. With the curated single-starter list
                 (P4) the tabs are hidden; reintroduce only if the list grows. */}
             {ONBOARDING_MODELS.some(m => m.uncensored) && ONBOARDING_MODELS.some(m => !m.uncensored) && (
               <div className="flex gap-4 justify-center">
                 <button onClick={() => setModelSubTab('uncensored')} className={`flex items-center gap-2 transition-all ${modelSubTab === 'uncensored' ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}>
                   <div className={`w-1 h-4 rounded-full ${modelSubTab === 'uncensored' ? 'bg-red-500' : 'bg-red-500/50'}`} />
-                  <span className="text-[0.65rem] font-semibold uppercase tracking-wider">Uncensored</span>
+                  <span className="text-[0.65rem] font-semibold uppercase tracking-wider">Unfiltered</span>
                 </button>
                 <button onClick={() => setModelSubTab('mainstream')} className={`flex items-center gap-2 transition-all ${modelSubTab === 'mainstream' ? 'opacity-100' : 'opacity-40 hover:opacity-70'}`}>
                   <div className={`w-1 h-4 rounded-full ${modelSubTab === 'mainstream' ? 'bg-blue-500' : 'bg-blue-500/50'}`} />

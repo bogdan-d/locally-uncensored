@@ -22,7 +22,7 @@ export interface DiscoverModel {
   // F4 (juliandiggins-stack GH#21): explicit CPU-only / ≤8 GB RAM
   // tag. Surfaces a green "CPU-friendly" badge in DiscoverModels and
   // exposes the optional "Lightweight" filter. Set true for ≤4B
-  // uncensored models we have personally test-loaded on a CPU-only
+  // unfiltered models we have personally test-loaded on a CPU-only
   // 8 GB box.
   lightweight?: boolean
   // Multi-provider
@@ -397,7 +397,7 @@ function sortByRelease(models: DiscoverModel[]): DiscoverModel[] {
   return models.sort((a, b) => (b.released ?? '').localeCompare(a.released ?? ''))
 }
 
-/** Uncensored / abliterated GGUF models — the core of LU. One entry per size variant. */
+/** Unfiltered / abliterated GGUF models — the core of LU. One entry per size variant. */
 export function getUncensoredTextModels(): DiscoverModel[] {
   return sortByRelease([
     // ── 2026 SOTA sub-4GB UNCENSORED tool caller (deep-researched 2026-06-06,
@@ -408,7 +408,7 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // carries the full Hermes tool scaffold, so Ollama accepts the `tools` array.
     // The DevQuasar HF-GGUF repack dropped the tool template → Ollama returned
     // "does not support tools" for every tool call (verified live 2026-06-06).
-    { name: 'Qwen3 4B Abliterated', description: 'huihui Qwen3 4B abliterated — uncensored + native Hermes tool calling in under 4GB (Ollama). Run thinking-OFF for reliable tool calls. Apache-2.0 base.', pulls: '20K+', tags: ['4B', 'Q4_K_M', '2.4 GB', 'Tools', 'Uncensored'], updated: 'Hot', agent: true, lightweight: true, released: '2025-05', ollamaModel: 'huihui_ai/qwen3-abliterated:4b', sizeGB: 2.4 },
+    { name: 'Qwen3 4B Abliterated', description: 'huihui Qwen3 4B abliterated — unfiltered + native Hermes tool calling in under 4GB (Ollama). Run thinking-OFF for reliable tool calls. Apache-2.0 base.', pulls: '20K+', tags: ['4B', 'Q4_K_M', '2.4 GB', 'Tools', 'Unfiltered'], updated: 'Hot', agent: true, lightweight: true, released: '2025-05', ollamaModel: 'huihui_ai/qwen3-abliterated:4b', sizeGB: 2.4 },
     // ── HOT: Hermes 3 ──
     // Bug Z/b v2.5.0 — leonsk29 GH #48. Pre-v2.5.0 these pointed at
     // `bartowski/Hermes-3-Llama-*-GGUF`. leon's 2026-05-26 CLI repro
@@ -419,31 +419,31 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     // three repos host Q4_K_M files of the expected size). Note the
     // filename convention: mradermacher uses `.` between model name and
     // quant (e.g. `Hermes-3-Llama-3.1-8B.Q4_K_M.gguf`), bartowski uses `-`.
-    { name: 'Hermes 3 Llama 3.2 3B', description: 'NousResearch Hermes 3 — uncensored + native tool calling. Runs on 8 GB RAM, CPU-only.', pulls: '500K+', tags: ['3B', 'Q4_K_M', '2 GB'], updated: 'Hot', agent: true, lightweight: true, released: '2024-08', downloadUrl: HF('mradermacher/Hermes-3-Llama-3.2-3B-GGUF', 'Hermes-3-Llama-3.2-3B.Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.2-3B.Q4_K_M.gguf', sizeGB: 2 },
-    { name: 'Hermes 3 Llama 3.1 8B', description: 'NousResearch Hermes 3 — uncensored + native tool calling. THE agent model.', pulls: '500K+', tags: ['8B', 'Q4_K_M', '5 GB'], updated: 'Hot', agent: true, released: '2024-08', downloadUrl: HF('mradermacher/Hermes-3-Llama-3.1-8B-GGUF', 'Hermes-3-Llama-3.1-8B.Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.1-8B.Q4_K_M.gguf', sizeGB: 5 },
-    { name: 'Hermes 3 Llama 3.1 70B', description: 'NousResearch Hermes 3 70B — maximum intelligence, uncensored.', pulls: '500K+', tags: ['70B', 'Q4_K_M', '42 GB'], updated: 'Hot', agent: true, released: '2024-08', downloadUrl: HF('mradermacher/Hermes-3-Llama-3.1-70B-GGUF', 'Hermes-3-Llama-3.1-70B.Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.1-70B.Q4_K_M.gguf', sizeGB: 42 },
+    { name: 'Hermes 3 Llama 3.2 3B', description: 'NousResearch Hermes 3 — unfiltered + native tool calling. Runs on 8 GB RAM, CPU-only.', pulls: '500K+', tags: ['3B', 'Q4_K_M', '2 GB'], updated: 'Hot', agent: true, lightweight: true, released: '2024-08', downloadUrl: HF('mradermacher/Hermes-3-Llama-3.2-3B-GGUF', 'Hermes-3-Llama-3.2-3B.Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.2-3B.Q4_K_M.gguf', sizeGB: 2 },
+    { name: 'Hermes 3 Llama 3.1 8B', description: 'NousResearch Hermes 3 — unfiltered + native tool calling. THE agent model.', pulls: '500K+', tags: ['8B', 'Q4_K_M', '5 GB'], updated: 'Hot', agent: true, released: '2024-08', downloadUrl: HF('mradermacher/Hermes-3-Llama-3.1-8B-GGUF', 'Hermes-3-Llama-3.1-8B.Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.1-8B.Q4_K_M.gguf', sizeGB: 5 },
+    { name: 'Hermes 3 Llama 3.1 70B', description: 'NousResearch Hermes 3 70B — maximum intelligence, unfiltered.', pulls: '500K+', tags: ['70B', 'Q4_K_M', '42 GB'], updated: 'Hot', agent: true, released: '2024-08', downloadUrl: HF('mradermacher/Hermes-3-Llama-3.1-70B-GGUF', 'Hermes-3-Llama-3.1-70B.Q4_K_M.gguf'), filename: 'Hermes-3-Llama-3.1-70B.Q4_K_M.gguf', sizeGB: 42 },
     // ── HOT: Dolphin 3 ──
-    { name: 'Dolphin 3 Llama 3.1 8B', description: 'Dolphin 3 — uncensored from training. Coding, math, general purpose.', pulls: '3.7M', tags: ['8B', 'Q4_K_M', '5 GB'], updated: 'Hot', released: '2024-12', downloadUrl: HF('bartowski/dolphin-2.9.4-llama3.1-8b-GGUF', 'dolphin-2.9.4-llama3.1-8b-Q4_K_M.gguf'), filename: 'dolphin-2.9.4-llama3.1-8b-Q4_K_M.gguf', sizeGB: 5 },
+    { name: 'Dolphin 3 Llama 3.1 8B', description: 'Dolphin 3 — unfiltered from training. Coding, math, general purpose.', pulls: '3.7M', tags: ['8B', 'Q4_K_M', '5 GB'], updated: 'Hot', released: '2024-12', downloadUrl: HF('bartowski/dolphin-2.9.4-llama3.1-8b-GGUF', 'dolphin-2.9.4-llama3.1-8b-Q4_K_M.gguf'), filename: 'dolphin-2.9.4-llama3.1-8b-Q4_K_M.gguf', sizeGB: 5 },
     // ── HOT: Qwen 3.5 Abliterated ──
     { name: 'Qwen 3.5 9B Abliterated', description: 'Qwen 3.5 abliterated — newest, strongest reasoning + coding.', pulls: '10K+', tags: ['9B', 'Q4_K_M', '6 GB'], updated: 'Hot', agent: true, released: '2026-03', downloadUrl: HF('mradermacher/Qwen3.5-9B-abliterated-GGUF', 'Qwen3.5-9B-abliterated.Q4_K_M.gguf'), filename: 'Qwen3.5-9B-abliterated.Q4_K_M.gguf', sizeGB: 5 },
     // ── HOT: GPT-OSS Abliterated ──
     { name: 'GPT-OSS 20B Abliterated', description: 'OpenAI GPT-OSS — abliterated open-source GPT model.', pulls: '15K+', tags: ['20B', 'Q4_K_M', '13 GB'], updated: 'Hot', agent: true, released: '2026-03', downloadUrl: HF('bartowski/huihui-ai_Huihui-gpt-oss-20b-BF16-abliterated-GGUF', 'huihui-ai_Huihui-gpt-oss-20b-BF16-abliterated-Q4_K_M.gguf'), filename: 'huihui-ai_Huihui-gpt-oss-20b-BF16-abliterated-Q4_K_M.gguf', sizeGB: 13 },
-    // ── HOT: Qwen 3.6 Uncensored (April 2026) ──
-    { name: 'Qwen 3.6 27B Samantha Uncensored', description: 'Qwen 3.6 27B dense — Samantha personality, uncensored finetune. Released April 22 2026. Needs GGUF conversion (see HF).', pulls: 'New', tags: ['27B', 'Vision', 'Uncensored', '50 GB'], updated: 'Hot', agent: true, released: '2026-04', url: 'https://huggingface.co/cloudbjorn/Qwen3.6-27B_Samantha-Uncensored', canPull: false, sizeGB: 50 },
-    { name: 'Qwen 3.6 35B MoE Abliterated', description: 'Qwen 3.6 35B MoE abliterated — brand new uncensored. 3B active, vision + agentic coding + thinking. 256K context.', pulls: '1K+', tags: ['35B MoE', 'Vision', 'Q4_K_M', '24 GB'], updated: 'Hot', agent: true, released: '2026-04', ollamaModel: 'huihui_ai/Qwen3.6-abliterated:35b', sizeGB: 24 },
+    // ── HOT: Qwen 3.6 Unfiltered (April 2026) ──
+    { name: 'Qwen 3.6 27B Samantha Unfiltered', description: 'Qwen 3.6 27B dense — Samantha personality, unfiltered finetune. Released April 22 2026. Needs GGUF conversion (see HF).', pulls: 'New', tags: ['27B', 'Vision', 'Unfiltered', '50 GB'], updated: 'Hot', agent: true, released: '2026-04', url: 'https://huggingface.co/cloudbjorn/Qwen3.6-27B_Samantha-Uncensored', canPull: false, sizeGB: 50 },
+    { name: 'Qwen 3.6 35B MoE Abliterated', description: 'Qwen 3.6 35B MoE abliterated — brand new unfiltered. 3B active, vision + agentic coding + thinking. 256K context.', pulls: '1K+', tags: ['35B MoE', 'Vision', 'Q4_K_M', '24 GB'], updated: 'Hot', agent: true, released: '2026-04', ollamaModel: 'huihui_ai/Qwen3.6-abliterated:35b', sizeGB: 24 },
     // Task #34 v2.5.0 — leon-recommended Heretic abliteration (GH #48 reply
     // pointed users with weak Ollama-side downloads at this LM-Studio-friendly
     // direct path). 21.2 GB single file, Q4_K_M. 3B-active MoE so it runs
     // surprisingly well on 24 GB cards with -ncmoe expert offload.
-    { name: 'Qwen 3.6 35B MoE Abliterated Heretic', description: 'Qwen 3.6 35B MoE — Heretic abliteration (stronger uncensored). 3B active expert MoE, runs on 24 GB GPUs.', pulls: '12K+', tags: ['35B MoE', 'Vision', 'Q4_K_M', '21 GB', 'Heretic'], updated: 'Hot', agent: true, released: '2026-05', downloadUrl: HF('Youssofal/Qwen3.6-35B-A3B-Abliterated-Heretic-GGUF', 'Qwen3.6-35B-A3B-Abliterated-Heretic-Q4_K_M/Qwen3.6-35B-A3B-Abliterated-Heretic-Q4_K_M.gguf'), filename: 'Qwen3.6-35B-A3B-Abliterated-Heretic-Q4_K_M.gguf', sizeGB: 21 },
+    { name: 'Qwen 3.6 35B MoE Abliterated Heretic', description: 'Qwen 3.6 35B MoE — Heretic abliteration (stronger unfiltered). 3B active expert MoE, runs on 24 GB GPUs.', pulls: '12K+', tags: ['35B MoE', 'Vision', 'Q4_K_M', '21 GB', 'Heretic'], updated: 'Hot', agent: true, released: '2026-05', downloadUrl: HF('Youssofal/Qwen3.6-35B-A3B-Abliterated-Heretic-GGUF', 'Qwen3.6-35B-A3B-Abliterated-Heretic-Q4_K_M/Qwen3.6-35B-A3B-Abliterated-Heretic-Q4_K_M.gguf'), filename: 'Qwen3.6-35B-A3B-Abliterated-Heretic-Q4_K_M.gguf', sizeGB: 21 },
     // ── HOT: Qwen 3.5 Abliterated (larger variants) ──
     { name: 'Qwen 3.5 27B Abliterated', description: 'Qwen 3.5 27B abliterated — Claude Opus-style, strongest reasoning.', pulls: '20K+', tags: ['27B', 'Q4_K_M', '16 GB'], updated: 'Hot', agent: true, released: '2026-03', downloadUrl: HF('mradermacher/Huihui-Qwen3.5-27B-Claude-4.6-Opus-abliterated-GGUF', 'Huihui-Qwen3.5-27B-Claude-4.6-Opus-abliterated.Q4_K_M.gguf'), filename: 'Huihui-Qwen3.5-27B-Claude-4.6-Opus-abliterated.Q4_K_M.gguf', sizeGB: 16 },
     { name: 'Qwen 3.5 35B MoE Abliterated', description: 'Qwen 3.5 35B MoE abliterated — best agentic, 256K context.', pulls: '26K+', tags: ['35B MoE', 'Q4_K_M', '22 GB'], updated: 'Hot', agent: true, released: '2026-03', downloadUrl: HF('mradermacher/Huihui-Qwen3.5-35B-A3B-abliterated-i1-GGUF', 'Huihui-Qwen3.5-35B-A3B-abliterated.i1-Q4_K_M.gguf'), filename: 'Huihui-Qwen3.5-35B-A3B-abliterated.i1-Q4_K_M.gguf', sizeGB: 22 },
     // ── HOT: Qwen3-Coder Abliterated ──
     { name: 'Qwen3-Coder 30B Abliterated', description: 'Qwen3-Coder abliterated — 30B MoE (3B active), built for code agents. 256K context.', pulls: '10K+', tags: ['30B MoE', 'Q4_K_M', '19 GB'], updated: 'Hot', agent: true, released: '2026-02', downloadUrl: HF('mradermacher/Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated-i1-GGUF', 'Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated.i1-Q4_K_M.gguf'), filename: 'Huihui-Qwen3-Coder-30B-A3B-Instruct-abliterated.i1-Q4_K_M.gguf', sizeGB: 19 },
-    // ── HOT: Gemma 4 Uncensored Variants ──
-    { name: 'Gemma 4 31B Uncensored', description: 'Gemma 4 31B uncensored — frontier dense model, native tool calling + vision. 256K context.', pulls: '400+', tags: ['31B', 'Q4_K_M', '17 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('TrevorJS/gemma-4-31B-it-uncensored-GGUF', 'gemma-4-31B-it-uncensored-Q4_K_M.gguf'), filename: 'gemma-4-31B-it-uncensored-Q4_K_M.gguf', sizeGB: 17 },
-    { name: 'Gemma 4 26B MoE Heretic', description: 'Gemma 4 26B MoE HERETIC — 26B brain, 4B active. Uncensored + tools + vision.', pulls: '43K+', tags: ['26B MoE', 'Q4_K_M', '16 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('nohurry/gemma-4-26B-A4B-it-heretic-GUFF', 'gemma-4-26b-a4b-it-heretic.q4_k_m.gguf'), filename: 'gemma-4-26b-a4b-it-heretic.q4_k_m.gguf', sizeGB: 16 },
+    // ── HOT: Gemma 4 Unfiltered Variants ──
+    { name: 'Gemma 4 31B Unfiltered', description: 'Gemma 4 31B unfiltered — frontier dense model, native tool calling + vision. 256K context.', pulls: '400+', tags: ['31B', 'Q4_K_M', '17 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('TrevorJS/gemma-4-31B-it-uncensored-GGUF', 'gemma-4-31B-it-uncensored-Q4_K_M.gguf'), filename: 'gemma-4-31B-it-uncensored-Q4_K_M.gguf', sizeGB: 17 },
+    { name: 'Gemma 4 26B MoE Heretic', description: 'Gemma 4 26B MoE HERETIC — 26B brain, 4B active. Unfiltered + tools + vision.', pulls: '43K+', tags: ['26B MoE', 'Q4_K_M', '16 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('nohurry/gemma-4-26B-A4B-it-heretic-GUFF', 'gemma-4-26b-a4b-it-heretic.q4_k_m.gguf'), filename: 'gemma-4-26b-a4b-it-heretic.q4_k_m.gguf', sizeGB: 16 },
     { name: 'Gemma 4 31B Heretic', description: 'Gemma 4 31B HERETIC — full uncensor, native tool calling, 256K context.', pulls: '32K+', tags: ['31B', 'Q4_K_M', '17 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('Stabhappy/gemma-4-31B-it-heretic-Gguf', 'coder3101_gemma_4_31b_it_heretic-Q4_K_M.gguf'), filename: 'coder3101_gemma_4_31b_it_heretic-Q4_K_M.gguf', sizeGB: 17 },
     { name: 'Gemma 4 31B Abliterated', description: 'Gemma 4 31B abliterated — strong reasoning, Apache 2.0.', pulls: '7K+', tags: ['31B', 'Q4_K_M', '17 GB'], updated: 'New', agent: true, released: '2026-04', downloadUrl: HF('LiconStudio/Gemma-4-31B-it-abliterated-GGUF', 'gemma-4-31B-it-abliterated-Q4_K_M.gguf'), filename: 'gemma-4-31B-it-abliterated-Q4_K_M.gguf', sizeGB: 17 },
     // ── Popular: Qwen3 Abliterated ──
@@ -457,17 +457,17 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     { name: 'DeepSeek R1 14B Abliterated', description: 'DeepSeek R1 abliterated 14B — stronger reasoning.', pulls: '40K+', tags: ['14B', 'Q4_K_M', '9 GB'], updated: 'Popular', released: '2025-01', downloadUrl: HF('QuantFactory/DeepSeek-R1-Distill-Qwen-14B-abliterated-v2-GGUF', 'DeepSeek-R1-Distill-Qwen-14B-abliterated-v2.Q4_K_M.gguf'), filename: 'DeepSeek-R1-Distill-Qwen-14B-abliterated-v2.Q4_K_M.gguf', sizeGB: 9 },
     { name: 'DeepSeek R1 32B Abliterated', description: 'DeepSeek R1 abliterated 32B — powerful reasoning.', pulls: '40K+', tags: ['32B', 'Q4_K_M', '19 GB'], updated: 'Popular', released: '2025-01', downloadUrl: HF('bartowski/DeepSeek-R1-Distill-Qwen-32B-abliterated-GGUF', 'DeepSeek-R1-Distill-Qwen-32B-abliterated-Q4_K_M.gguf'), filename: 'DeepSeek-R1-Distill-Qwen-32B-abliterated-Q4_K_M.gguf', sizeGB: 19 },
     { name: 'DeepSeek R1 70B Abliterated', description: 'DeepSeek R1 abliterated 70B — maximum reasoning for high-VRAM setups.', pulls: '40K+', tags: ['70B', 'Q4_K_M', '42 GB'], updated: 'Popular', released: '2025-01', downloadUrl: HF('bartowski/huihui-ai_DeepSeek-R1-Distill-Llama-70B-abliterated-GGUF', 'huihui-ai_DeepSeek-R1-Distill-Llama-70B-abliterated-Q4_K_M.gguf'), filename: 'huihui-ai_DeepSeek-R1-Distill-Llama-70B-abliterated-Q4_K_M.gguf', sizeGB: 42 },
-    // ── HOT: GLM 4.7 Flash Uncensored Heretic ──
-    { name: 'GLM 4.7 Flash Heretic IQ2', description: 'GLM 4.7 Flash HERETIC — 30B uncensored, fits 12GB VRAM. Strongest 30B class.', pulls: '5K+', tags: ['30B', 'IQ2_M', '10 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-IQ2_M.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-IQ2_M.gguf', sizeGB: 10 },
-    { name: 'GLM 4.7 Flash Heretic Q4', description: 'GLM 4.7 Flash HERETIC — 30B uncensored, best quality/size balance.', pulls: '5K+', tags: ['30B', 'Q4_K_M', '19 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf', sizeGB: 19 },
-    { name: 'GLM 4.7 Flash Heretic Q6', description: 'GLM 4.7 Flash HERETIC — 30B uncensored, high quality quant.', pulls: '5K+', tags: ['30B', 'Q6_K', '25 GB'], updated: 'New', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q6_K.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q6_K.gguf', sizeGB: 25 },
-    { name: 'GLM 4.7 Flash Heretic Q8', description: 'GLM 4.7 Flash HERETIC — 30B uncensored, near-lossless quality.', pulls: '5K+', tags: ['30B', 'Q8_0', '32 GB'], updated: 'New', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q8_0.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q8_0.gguf', sizeGB: 32 },
+    // ── HOT: GLM 4.7 Flash Unfiltered Heretic ──
+    { name: 'GLM 4.7 Flash Heretic IQ2', description: 'GLM 4.7 Flash HERETIC — 30B unfiltered, fits 12GB VRAM. Strongest 30B class.', pulls: '5K+', tags: ['30B', 'IQ2_M', '10 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-IQ2_M.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-IQ2_M.gguf', sizeGB: 10 },
+    { name: 'GLM 4.7 Flash Heretic Q4', description: 'GLM 4.7 Flash HERETIC — 30B unfiltered, best quality/size balance.', pulls: '5K+', tags: ['30B', 'Q4_K_M', '19 GB'], updated: 'Hot', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q4_K_M.gguf', sizeGB: 19 },
+    { name: 'GLM 4.7 Flash Heretic Q6', description: 'GLM 4.7 Flash HERETIC — 30B unfiltered, high quality quant.', pulls: '5K+', tags: ['30B', 'Q6_K', '25 GB'], updated: 'New', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q6_K.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q6_K.gguf', sizeGB: 25 },
+    { name: 'GLM 4.7 Flash Heretic Q8', description: 'GLM 4.7 Flash HERETIC — 30B unfiltered, near-lossless quality.', pulls: '5K+', tags: ['30B', 'Q8_0', '32 GB'], updated: 'New', agent: true, released: '2026-04', downloadUrl: HF('DavidAU/GLM-4.7-Flash-Uncensored-Heretic-NEO-CODE-Imatrix-MAX-GGUF', 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q8_0.gguf'), filename: 'GLM-4.7-Flash-Uncen-Hrt-NEO-CODE-MAX-imat-D_AU-Q8_0.gguf', sizeGB: 32 },
     // ── Popular: GLM 4.6 Abliterated ──
     { name: 'GLM 4 9B Abliterated', description: 'GLM 4 9B abliterated — strong coding and reasoning.', pulls: '5K+', tags: ['9B', 'Q4_K_M', '5 GB'], updated: 'New', agent: true, released: '2026-03', downloadUrl: HF('bartowski/glm-4-9b-chat-abliterated-GGUF', 'glm-4-9b-chat-abliterated-Q4_K_M.gguf'), filename: 'glm-4-9b-chat-abliterated-Q4_K_M.gguf', sizeGB: 5 },
     // ── Popular: Gemma 3 Abliterated ──
     { name: 'Gemma 3 4B Abliterated', description: 'Google Gemma 3 4B abliterated — vision support, runs on 8 GB RAM CPU-only.', pulls: '20K+', tags: ['4B', 'Q4_K_M', '2.3 GB'], updated: 'Popular', lightweight: true, released: '2025-03', downloadUrl: HF('bartowski/mlabonne_gemma-3-4b-it-abliterated-GGUF', 'mlabonne_gemma-3-4b-it-abliterated-Q4_K_M.gguf'), filename: 'mlabonne_gemma-3-4b-it-abliterated-Q4_K_M.gguf', sizeGB: 2.3 },
     // ── Lightweight pinned for CPU-only / ≤8 GB RAM (F4 juliandiggins-stack GH#21) ──
-    { name: 'Llama 3.2 3B Abliterated', description: 'Meta Llama 3.2 3B abliterated — proven small uncensored, low resource footprint.', pulls: '50K+', tags: ['3B', 'Q4_K_M', '2 GB'], updated: 'Popular', agent: true, lightweight: true, released: '2024-09', downloadUrl: HF('mradermacher/Llama-3.2-3B-Instruct-abliterated-GGUF', 'Llama-3.2-3B-Instruct-abliterated.Q4_K_M.gguf'), filename: 'Llama-3.2-3B-Instruct-abliterated.Q4_K_M.gguf', sizeGB: 2 },
+    { name: 'Llama 3.2 3B Abliterated', description: 'Meta Llama 3.2 3B abliterated — proven small unfiltered, low resource footprint.', pulls: '50K+', tags: ['3B', 'Q4_K_M', '2 GB'], updated: 'Popular', agent: true, lightweight: true, released: '2024-09', downloadUrl: HF('mradermacher/Llama-3.2-3B-Instruct-abliterated-GGUF', 'Llama-3.2-3B-Instruct-abliterated.Q4_K_M.gguf'), filename: 'Llama-3.2-3B-Instruct-abliterated.Q4_K_M.gguf', sizeGB: 2 },
     { name: 'Gemma 3 12B Abliterated', description: 'Google Gemma 3 12B abliterated — vision support, great quality.', pulls: '20K+', tags: ['12B', 'Q4_K_M', '8 GB'], updated: 'Popular', released: '2025-03', downloadUrl: HF('bartowski/mlabonne_gemma-3-12b-it-abliterated-GGUF', 'mlabonne_gemma-3-12b-it-abliterated-Q4_K_M.gguf'), filename: 'mlabonne_gemma-3-12b-it-abliterated-Q4_K_M.gguf', sizeGB: 8 },
     { name: 'Gemma 3 27B Abliterated', description: 'Google Gemma 3 27B abliterated — strong reasoning + vision.', pulls: '20K+', tags: ['27B', 'Q4_K_M', '17 GB'], updated: 'Popular', released: '2025-03', downloadUrl: HF('bartowski/mlabonne_gemma-3-27b-it-abliterated-GGUF', 'mlabonne_gemma-3-27b-it-abliterated-Q4_K_M.gguf'), filename: 'mlabonne_gemma-3-27b-it-abliterated-Q4_K_M.gguf', sizeGB: 17 },
     // ── Popular: Qwen3 14B Abliterated (two quants) ──
@@ -477,7 +477,7 @@ export function getUncensoredTextModels(): DiscoverModel[] {
     { name: 'Qwen 2.5 7B Abliterated', description: 'Qwen 2.5 7B abliterated — proven and reliable.', pulls: '50K+', tags: ['7B', 'Q4_K_M', '5 GB'], updated: 'Popular', agent: true, released: '2024-09', downloadUrl: HF('QuantFactory/Qwen2.5-7B-Instruct-abliterated-v2-GGUF', 'Qwen2.5-7B-Instruct-abliterated-v2.Q4_K_M.gguf'), filename: 'Qwen2.5-7B-Instruct-abliterated-v2.Q4_K_M.gguf', sizeGB: 5 },
     { name: 'Qwen 2.5 14B Abliterated', description: 'Qwen 2.5 14B abliterated — stronger reasoning.', pulls: '50K+', tags: ['14B', 'Q4_K_M', '9 GB'], updated: 'Popular', agent: true, released: '2024-09', downloadUrl: HF('mradermacher/Qwen2.5-14B-Instruct-abliterated-GGUF', 'Qwen2.5-14B-Instruct-abliterated.Q4_K_M.gguf'), filename: 'Qwen2.5-14B-Instruct-abliterated.Q4_K_M.gguf', sizeGB: 9 },
     { name: 'Qwen 2.5 32B Abliterated', description: 'Qwen 2.5 32B abliterated — powerful.', pulls: '50K+', tags: ['32B', 'Q4_K_M', '19 GB'], updated: 'Popular', agent: true, released: '2024-09', downloadUrl: HF('RichardErkhov/huihui-ai_-_Qwen2.5-32B-Instruct-abliterated-gguf', 'Qwen2.5-32B-Instruct-abliterated.Q4_K_M.gguf'), filename: 'Qwen2.5-32B-Instruct-abliterated.Q4_K_M.gguf', sizeGB: 19 },
-    // ── Popular: Single-size uncensored ──
+    // ── Popular: Single-size unfiltered ──
     { name: 'Llama 3.3 70B Abliterated', description: 'Llama 3.3 70B abliterated — maximum intelligence for high-VRAM setups.', pulls: '15K+', tags: ['70B', 'Q4_K_M', '42 GB'], updated: 'Popular', agent: true, released: '2024-12', downloadUrl: HF('bartowski/Llama-3.3-70B-Instruct-abliterated-GGUF', 'Llama-3.3-70B-Instruct-abliterated-Q4_K_M.gguf'), filename: 'Llama-3.3-70B-Instruct-abliterated-Q4_K_M.gguf', sizeGB: 42 },
     { name: 'Mistral Small 24B Abliterated', description: 'Mistral Small 24B abliterated — powerful, strong multilingual.', pulls: '10K+', tags: ['24B', 'Q4_K_M', '14 GB'], updated: 'Recent', agent: true, released: '2024-09', downloadUrl: HF('bartowski/huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-GGUF', 'huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-Q4_K_M.gguf'), filename: 'huihui-ai_Mistral-Small-24B-Instruct-2501-abliterated-Q4_K_M.gguf', sizeGB: 14 },
     { name: 'Phi-4 14B Abliterated', description: 'Microsoft Phi-4 abliterated — excellent at math, logic, structured tasks.', pulls: '8K+', tags: ['14B', 'Q4_K_M', '8 GB'], updated: 'Recent', agent: true, released: '2024-12', downloadUrl: HF('mradermacher/phi-4-abliterated-GGUF', 'phi-4-abliterated.Q4_K_M.gguf'), filename: 'phi-4-abliterated.Q4_K_M.gguf', sizeGB: 8 },
@@ -485,7 +485,7 @@ export function getUncensoredTextModels(): DiscoverModel[] {
   ])
 }
 
-/** Mainstream GGUF models — not uncensored but excellent for specific tasks. All URLs verified. */
+/** Mainstream GGUF models — not unfiltered but excellent for specific tasks. All URLs verified. */
 export function getMainstreamTextModels(): DiscoverModel[] {
   return sortByRelease([
     // ── 2026 SOTA sub-4GB TOOL CALLERS (deep-researched + adversarially
@@ -998,9 +998,9 @@ export function getImageBundles(): ModelBundle[] {
       ],
     },
     {
-      name: 'Z-Image Turbo (Uncensored, Fast)',
-      description: 'Explicitly uncensored image model. 8-15 seconds per image. No safety filters. Text-to-Image and Image-to-Image.',
-      tags: ['Z-Image', 'Uncensored', 'Fast', '1024px'],
+      name: 'Z-Image Turbo (Unfiltered, Fast)',
+      description: 'Explicitly unfiltered image model. 8-15 seconds per image. No safety filters. Text-to-Image and Image-to-Image.',
+      tags: ['Z-Image', 'Unfiltered', 'Fast', '1024px'],
       uncensored: true,
       verified: true,
       totalSizeGB: 19.3,
@@ -1010,7 +1010,7 @@ export function getImageBundles(): ModelBundle[] {
       files: [
         {
           name: 'Z-Image Turbo BF16',
-          description: 'Uncensored diffusion model — no safety filters, fast generation.',
+          description: 'Unfiltered diffusion model — no safety filters, fast generation.',
           pulls: '', tags: ['Diffusion Model', '11.5 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors',
           filename: 'z_image_turbo_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 11.5,
@@ -1032,9 +1032,9 @@ export function getImageBundles(): ModelBundle[] {
       ],
     },
     {
-      name: 'Z-Image Base (Uncensored, Quality)',
-      description: 'Highest quality uncensored model. 30-50 steps for maximum detail and composition diversity. Shares VAE/CLIP with Z-Image Turbo.',
-      tags: ['Z-Image', 'Uncensored', 'Quality', '1024px'],
+      name: 'Z-Image Base (Unfiltered, Quality)',
+      description: 'Highest quality unfiltered model. 30-50 steps for maximum detail and composition diversity. Shares VAE/CLIP with Z-Image Turbo.',
+      tags: ['Z-Image', 'Unfiltered', 'Quality', '1024px'],
       uncensored: true,
       verified: true,
       totalSizeGB: 19.3,
@@ -1044,7 +1044,7 @@ export function getImageBundles(): ModelBundle[] {
       files: [
         {
           name: 'Z-Image Base BF16',
-          description: 'Uncensored diffusion model — maximum quality, more compositional diversity.',
+          description: 'Unfiltered diffusion model — maximum quality, more compositional diversity.',
           pulls: '', tags: ['Diffusion Model', '11.5 GB'], updated: 'New',
           downloadUrl: 'https://huggingface.co/Comfy-Org/z_image/resolve/main/split_files/diffusion_models/z_image_bf16.safetensors',
           filename: 'z_image_bf16.safetensors', subfolder: 'diffusion_models', sizeGB: 11.5,
@@ -1805,7 +1805,7 @@ export async function searchCivitaiModels(
       // LU positions itself as "uncensored" — surface adult content too. Without
       // an explicit nsfw flag CivitAI silently filters most of the SFW catalog
       // for an unauthenticated client, which is what made earlier searches come
-      // back near-empty for users who expected to find e.g. uncensored SDXL forks.
+      // back near-empty for users who expected to find e.g. unfiltered SDXL forks.
       nsfw: 'true',
     })
     // Adding the user's API key as a bearer token unlocks the full catalog and
