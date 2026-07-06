@@ -3,6 +3,7 @@ pub mod bg_tasks;
 pub mod repo_map;
 pub mod claude_code;
 pub mod download;
+pub mod engine;
 pub mod filesystem;
 pub mod gpu;
 pub mod health;

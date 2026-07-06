@@ -21,6 +21,16 @@ pub struct DownloadProgress {
     pub error: Option<String>,
 }
 
+/// Handle to a running bundled `llama-server` (built-in engine, P1). One
+/// model per process, so `model_path` identifies what's loaded and `port` is
+/// the loopback port the OpenAI-compatible API is served on. Killed in
+/// `shutdown_subprocesses` like the other spawned children.
+pub struct BundledEngine {
+    pub child: Child,
+    pub model_path: String,
+    pub port: u16,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct InstallState {
     pub status: String,
@@ -129,6 +139,11 @@ pub struct AppState {
     /// running on the box (detected via tasklist before spawn), we leave it
     /// alone, so closing LU never kills someone else's Ollama.
     pub ollama_process: Mutex<Option<Child>>,
+    /// Built-in inference engine (bundled llama-server, P1). `None` until the
+    /// onboarding / provider layer starts it via `start_bundled_engine`. The
+    /// managed lifecycle (start/stop/swap) lives in `commands::engine`; this
+    /// is just the handle so shutdown can reap it.
+    pub bundled_engine: Mutex<Option<BundledEngine>>,
     pub comfy_path: Mutex<Option<String>>,
     pub comfy_port: Mutex<u16>,
     /// Configurable ComfyUI host. Default "localhost". Setting this to a
@@ -240,6 +255,7 @@ impl AppState {
         Self {
             comfy_process: Mutex::new(None),
             ollama_process: Mutex::new(None),
+            bundled_engine: Mutex::new(None),
             comfy_path: Mutex::new(None),
             comfy_port: Mutex::new(initial_port),
             comfy_host: Mutex::new(initial_host),
@@ -311,6 +327,17 @@ impl AppState {
                 }
                 println!("[Ollama] Stopped (explicit shutdown)");
             }
+        }
+
+        // Built-in engine (bundled llama-server, P1). Plain kill on all
+        // platforms — it's a single loopback process with no child tree, so
+        // the taskkill /T dance the daemons need isn't required here.
+        if let Ok(mut engine) = self.bundled_engine.lock() {
+            if let Some(ref mut e) = *engine {
+                let _ = e.child.kill();
+                println!("[Engine] Built-in engine stopped (explicit shutdown)");
+            }
+            *engine = None;
         }
 
         if let Ok(mut proc) = self.comfy_process.lock() {

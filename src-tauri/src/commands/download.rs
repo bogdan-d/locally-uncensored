@@ -532,6 +532,13 @@ pub fn detect_model_path(provider: String) -> Result<serde_json::Value, String> 
     // with a conventional managed dir (most CLI-run backends take a path
     // arg, so there's no one-true-path for them).
     let candidates: Vec<PathBuf> = match provider_lower.as_str() {
+        // Built-in engine (P1): app-owned models dir. Handled before the
+        // detection loop below because it must be auto-created on a fresh box —
+        // returned directly here so onboarding can download into it immediately.
+        "builtin" => {
+            return crate::commands::engine::builtin_models_dir()
+                .map(|p| serde_json::json!(p.to_string_lossy()));
+        }
         // Ollama manages its own blob store — treat as a pointer so LU can
         // later auto-create a Modelfile pointing at the downloaded GGUF.
         "ollama" => vec![

@@ -173,6 +173,12 @@ fn main() {
             commands::download::resume_download,
             commands::download::detect_model_path,
             commands::download::check_model_sizes,
+            // Built-in inference engine (bundled llama-server, P1)
+            commands::engine::start_bundled_engine,
+            commands::engine::stop_bundled_engine,
+            commands::engine::bundled_engine_status,
+            commands::engine::swap_bundled_model,
+            commands::engine::list_bundled_models,
             // Provider API-key keychain (H5)
             commands::secret::secret_set,
             commands::secret::secret_get,
