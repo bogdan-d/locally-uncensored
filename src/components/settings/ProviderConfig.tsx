@@ -94,7 +94,9 @@ export function ProviderSettings() {
     } else if (preset.providerId === 'anthropic') {
       setProviderConfig('anthropic', { enabled: true, name: preset.name, baseUrl: preset.baseUrl, isLocal: false })
     } else {
-      setProviderConfig('openai', { enabled: true, name: preset.name, baseUrl: preset.baseUrl, isLocal: preset.isLocal })
+      // `managed` must be set explicitly so switching to LM Studio/vLLM clears
+      // the built-in flag, and re-selecting Built-in restores it.
+      setProviderConfig('openai', { enabled: true, name: preset.name, baseUrl: preset.baseUrl, isLocal: preset.isLocal, managed: !!preset.managed })
     }
 
     setDropdownOpen(false)
@@ -201,16 +203,23 @@ export function ProviderSettings() {
             {/* Expanded config */}
             {isExpanded && (
               <div className="px-2 pb-2 space-y-1.5 border-t border-white/[0.04]">
-                {/* Endpoint */}
-                <div className="pt-1.5">
-                  <label className="text-[0.6rem] text-gray-500 mb-0.5 block">Endpoint</label>
-                  <input
-                    value={config.baseUrl}
-                    onChange={(e) => setProviderConfig(id, { baseUrl: e.target.value })}
-                    placeholder="http://localhost:..."
-                    className="w-full px-2 py-1 rounded bg-white/5 border border-white/8 text-[0.65rem] text-gray-300 font-mono focus:outline-none focus:border-white/20"
-                  />
-                </div>
+                {/* Endpoint — hidden for the app-managed built-in engine, whose
+                    URL is fixed and lifecycle is owned by the app. */}
+                {config.managed ? (
+                  <p className="pt-1.5 text-[0.6rem] text-gray-500 leading-tight">
+                    Built-in engine — runs locally, nothing to configure.
+                  </p>
+                ) : (
+                  <div className="pt-1.5">
+                    <label className="text-[0.6rem] text-gray-500 mb-0.5 block">Endpoint</label>
+                    <input
+                      value={config.baseUrl}
+                      onChange={(e) => setProviderConfig(id, { baseUrl: e.target.value })}
+                      placeholder="http://localhost:..."
+                      className="w-full px-2 py-1 rounded bg-white/5 border border-white/8 text-[0.65rem] text-gray-300 font-mono focus:outline-none focus:border-white/20"
+                    />
+                  </div>
+                )}
 
                 {/* API Key (cloud only) */}
                 {needsKey && (

@@ -52,22 +52,29 @@ const _keychainFailed = new Set<ProviderId>()
 
 // ── Default provider configs ───────────────────────────────────
 
+// 2.5.7 — the default backend is now the app's built-in engine (bundled
+// llama-server, managed lifecycle) so a fresh install can chat without
+// installing Ollama/LM Studio. It occupies the `openai` slot (OpenAI-compatible)
+// with `managed: true`. Ollama/LM Studio stay available as "Advanced" — the user
+// can re-enable them from Settings → Providers. This default only applies to a
+// FRESH store; existing `lu-providers` persistence is untouched.
 const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
   ollama: {
     id: 'ollama',
     name: 'Ollama',
-    enabled: true,
+    enabled: false,
     baseUrl: 'http://localhost:11434',
     apiKey: '',
     isLocal: true,
   },
   openai: {
     id: 'openai',
-    name: 'LM Studio',
-    enabled: false,
-    baseUrl: 'http://localhost:1234/v1',
+    name: 'Built-in Engine',
+    enabled: true,
+    baseUrl: 'http://127.0.0.1:8127/v1',
     apiKey: '',
     isLocal: true,
+    managed: true,
   },
   anthropic: {
     id: 'anthropic',

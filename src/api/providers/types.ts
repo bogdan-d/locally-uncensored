@@ -16,6 +16,12 @@ export interface ProviderConfig {
   baseUrl: string       // e.g. "http://localhost:11434", "https://openrouter.ai/api/v1"
   apiKey: string        // Encrypted in store. Empty string for local providers.
   isLocal: boolean      // true for Ollama, LM Studio, vLLM — no API key needed
+  // Built-in engine (2.5.7): the app manages this OpenAI-compatible backend's
+  // lifecycle itself (bundled llama-server on 127.0.0.1:8127). When true the UI
+  // hides the URL/key inputs and the model list comes from `list_bundled_models`
+  // (the Tauri command), not `/v1/models`. Undefined = a normal user-configured
+  // backend, unchanged behavior.
+  managed?: boolean
 }
 
 // ── Provider Presets (auto-fill URL) ───────────────────────────
@@ -27,9 +33,14 @@ export interface ProviderPreset {
   baseUrl: string
   isLocal: boolean
   placeholder?: string  // API key placeholder hint
+  managed?: boolean     // App-managed lifecycle (built-in engine). See ProviderConfig.managed.
 }
 
 export const PROVIDER_PRESETS: ProviderPreset[] = [
+  // Built-in engine (2.5.7) — bundled llama.cpp llama-server, OpenAI-compatible,
+  // lifecycle owned by the app. Zero external install. Default backend.
+  { id: 'builtin', name: 'Built-in Engine', providerId: 'openai', baseUrl: 'http://127.0.0.1:8127/v1', isLocal: true, managed: true },
+
   // Ollama (dedicated provider)
   { id: 'ollama', name: 'Ollama', providerId: 'ollama', baseUrl: 'http://localhost:11434', isLocal: true },
 

@@ -5,7 +5,8 @@ import { getCheckpoints as getComfyCheckpoints, getDiffusionModels as getComfyDi
 import { parseNDJSONStream } from '../api/stream'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
-import { getEnabledProviders, prefixModelName } from '../api/providers'
+import { getEnabledProviders, prefixModelName, getProviderIdFromModel } from '../api/providers'
+import { listBundledModels, bundledToAIModels, activateBuiltinModel, isManagedBuiltinActive } from '../api/engine'
 import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, CloudModel } from '../types/models'
 
 const VIDEO_PATTERNS = [/wan/, /svd/, /animatediff/, /animate/, /video/, /cogvideo/, /ltx/i, /framepack/, /mochi/, /cosmos/, /hunyuan/, /pyramidflow/, /allegro/]
@@ -60,7 +61,14 @@ export function useModels() {
   const fetchModels = useCallback(async () => {
     try {
       const allModels: AIModel[] = []
-      const providers = getEnabledProviders()
+      // Built-in engine (2.5.7): when the managed OpenAI-compat backend is the
+      // active provider, its model list is the downloaded GGUFs (via the Tauri
+      // `list_bundled_models` command), NOT `/v1/models` (which reports only the
+      // single loaded model). Skip the openai client's listModels for it.
+      const managedBuiltin = isManagedBuiltinActive()
+      const providers = getEnabledProviders().filter(
+        (p) => !(managedBuiltin && p.id === 'openai'),
+      )
       const providerResults = await Promise.allSettled(
         providers.map(async (provider) => {
           const providerModels = await provider.listModels()
@@ -86,6 +94,14 @@ export function useModels() {
           // Filter out embedding models (e.g. nomic-embed-text) — not usable for chat
           allModels.push(...result.value.filter(m => !isEmbeddingModel(m.name)))
         }
+      }
+      // Built-in engine model list (downloaded GGUFs). Guarded: a missing/older
+      // backend or non-Tauri dev context just yields no built-in models.
+      if (managedBuiltin) {
+        try {
+          const bundled = bundledToAIModels(await listBundledModels())
+          allModels.push(...bundled.filter(m => !isEmbeddingModel(m.name)))
+        } catch { /* engine command unavailable — non-critical */ }
       }
       const ollamaEnabled = useProviderStore.getState().providers.ollama.enabled
       const hasOllamaModels = allModels.some(m => m.provider === 'ollama')
@@ -216,9 +232,20 @@ export function useModels() {
     return models.filter((m: AIModel) => m.type === filter)
   }
 
+  // Selecting a built-in model must also swap the loaded GGUF: the managed
+  // engine serves one model per process, so activation → swap_bundled_model.
+  // Other providers just set the active model as before.
+  const activateModel = useCallback((name: string) => {
+    setActiveModel(name)
+    const cfg = useProviderStore.getState().providers.openai
+    if (cfg.enabled && cfg.managed && getProviderIdFromModel(name) === 'openai') {
+      void activateBuiltinModel(name).catch(() => { /* engine unavailable — non-critical */ })
+    }
+  }, [setActiveModel])
+
   return {
     models, activeModel, activePulls, isPulling, categoryFilter,
     fetchModels, pullModel, pausePull, dismissPull,
-    removeModel, setActiveModel, setCategoryFilter, getFilteredModels, isPullingModel,
+    removeModel, setActiveModel: activateModel, setCategoryFilter, getFilteredModels, isPullingModel,
   }
 }
