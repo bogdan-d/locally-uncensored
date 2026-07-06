@@ -64,3 +64,6 @@ discord_invite.txt
 carl-bot-setup.md
 app-discord-integration.md
 SETUP_REPORT.md
+
+# Built-in engine: llama.cpp build cache (P0 scripts/build-llama.sh)
+.llama-build/
