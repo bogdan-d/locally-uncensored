@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Minus, Square, X as XIcon, ArrowRight, Download, Check, ChevronRight, Loader2, RefreshCw, ExternalLink, FolderOpen } from 'lucide-react'
+import { Minus, Square, X as XIcon, ArrowRight, Download, Check, ChevronRight, Loader2, RefreshCw, ExternalLink, FolderOpen, Cpu } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useProviderStore } from '../../stores/providerStore'
 import { ONBOARDING_MODELS } from '../../lib/constants'
@@ -15,6 +15,8 @@ import { backendCall } from '../../api/backend'
 import { getSystemVRAM } from '../../api/comfyui'
 import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
+import { startBundledEngine } from '../../api/engine'
+import { BUILTIN_BACKEND_ID, classifyOnboardingBackend, resolveOnboardingBackend } from '../../lib/onboarding-backend'
 
 // Bug (h): the dedicated 'theme' onboarding step was removed because users
 // kept ending up on Light by accident, and the project standard is "dark
@@ -65,7 +67,9 @@ export function Onboarding() {
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [detectedBackends, setDetectedBackends] = useState<DetectedBackend[]>([])
   const [detecting, setDetecting] = useState(false)
-  const [selectedBackend, setSelectedBackend] = useState<string>('')
+  // 2.5.7: the built-in engine is the pre-selected default — a fresh install
+  // needs nothing installed. Detected Ollama/LM Studio are offered as Advanced.
+  const [selectedBackend, setSelectedBackend] = useState<string>(BUILTIN_BACKEND_ID)
   const { setProviderConfig } = useProviderStore()
 
   // ComfyUI step state. `comfyFound.complete` distinguishes a working
@@ -174,6 +178,18 @@ export function Onboarding() {
     )
   }
 
+  // Resolve once the download store reports the file finished (or errored).
+  // Used by the built-in engine path, which must not boot llama-server until
+  // the GGUF is fully on disk. Polls the same store the progress UI renders.
+  const awaitDownloadComplete = (filename: string) =>
+    new Promise<void>((resolve, reject) => {
+      const poll = setInterval(() => {
+        const d = useDownloadStore.getState().downloads[filename]
+        if (d?.status === 'complete') { clearInterval(poll); resolve() }
+        else if (d?.status === 'error') { clearInterval(poll); reject(new Error(d.error || 'Download failed')) }
+      }, 500)
+    })
+
   const handleDownloadSelected = async () => {
     setDownloadError(null)
     const providers = useProviderStore.getState().providers
@@ -185,8 +201,10 @@ export function Onboarding() {
     // .gguf into `~/.ollama/models` regardless — Ollama ignores files placed
     // there directly, which is the root cause of the "downloaded model
     // never appears" bug reported on Discord and GH discussion #35.
-    const targetBackend = selectedBackend || (ollamaReady ? 'ollama' : detectedBackends[0]?.id) || 'ollama'
-    const useOllamaPath = targetBackend === 'ollama'
+    const targetBackend = resolveOnboardingBackend(selectedBackend, ollamaReady, detectedBackends)
+    const kind = classifyOnboardingBackend(targetBackend)
+    const useBuiltinPath = kind === 'builtin'
+    const useOllamaPath = kind === 'ollama'
 
     // Sanity-check / auto-start Ollama before pulling. The pull command will
     // otherwise spin in "connecting" with no actionable error if the daemon
@@ -206,9 +224,18 @@ export function Onboarding() {
       }
     }
 
-    // Direct-write providers (LM Studio etc.) still need a base dir.
+    // Direct-write providers (built-in engine, LM Studio etc.) need a base dir.
+    // The built-in engine has a dedicated, app-owned models dir resolved by the
+    // Rust side (detect_model_path("builtin")); other OpenAI-compat providers
+    // reuse the LM-Studio-style detection / user override.
     let destDir: string | null = null
-    if (!useOllamaPath) {
+    if (useBuiltinPath) {
+      destDir = await detectProviderModelPath(BUILTIN_BACKEND_ID)
+      if (!destDir) {
+        setDownloadError('Could not create the built-in engine model folder. Check app permissions and retry.')
+        return
+      }
+    } else if (!useOllamaPath) {
       const settingsOverride = useSettingsStore.getState().settings.hfDownloadPathOverride?.trim() || ''
       destDir = settingsOverride || hfModelPath || (await detectProviderModelPath(providers.openai?.name || 'LM Studio'))
       if (!destDir) {
@@ -272,6 +299,22 @@ export function Onboarding() {
           // Mark complete in case the final progress event didn't include
           // a "success" status string (Ollama varies between versions).
           useDownloadStore.getState().markComplete(model.filename)
+        } else if (useBuiltinPath) {
+          // Built-in engine: write the GGUF flat into the app models dir, wait
+          // for it to finish, then boot llama-server on it. Unlike LM Studio
+          // there's no <user>/<repo> nesting — list_bundled_models scans the
+          // dir directly. We await completion here (not fire-and-forget) so the
+          // engine starts on a fully-downloaded file and the first chat works.
+          dlStore.getState().setMeta(model.filename, model.downloadUrl, 'gguf', destDir!)
+          const expectedBytes = model.sizeGB ? Math.round(model.sizeGB * 1_073_741_824) : undefined
+          await startModelDownloadToPath(model.downloadUrl, destDir!, model.filename, expectedBytes)
+          dlStore.getState().startPolling()
+          await awaitDownloadComplete(model.filename)
+          try {
+            await startBundledEngine(`${destDir}/${model.filename}`)
+          } catch (e) {
+            setDownloadError(`Model downloaded, but the built-in engine failed to start: ${e instanceof Error ? e.message : String(e)}`)
+          }
         } else {
           // LM Studio etc.: nest under <user>/<repo>/ so the scanner finds
           // it. A bare .gguf in the model root is silently ignored by LM
@@ -299,6 +342,32 @@ export function Onboarding() {
     updateSettings({ onboardingDone: true })
     // Persist to filesystem so NSIS updates don't reset onboarding
     if (isTauri) backendCall('set_onboarding_done').catch(() => {})
+  }
+
+  // Commit the chosen backend to the provider store and advance to ComfyUI.
+  // Built-in (default) reasserts the managed OpenAI-slot config; a detected
+  // Ollama takes over the primary slot (managed built-in disabled) so there
+  // aren't two defaults; other OpenAI-compat backends fill the openai slot.
+  const selectBackendAndContinue = () => {
+    if (selectedBackend === BUILTIN_BACKEND_ID) {
+      setProviderConfig('openai', {
+        enabled: true, name: 'Built-in Engine',
+        baseUrl: 'http://127.0.0.1:8127/v1', isLocal: true, managed: true,
+      })
+    } else if (selectedBackend === 'ollama') {
+      setProviderConfig('ollama', { enabled: true })
+      setProviderConfig('openai', { enabled: false, managed: false })
+    } else {
+      const backend = detectedBackends.find(b => b.id === selectedBackend)
+      const preset = backend && PROVIDER_PRESETS.find(p => p.id === backend.id)
+      if (backend && preset && preset.providerId !== 'ollama') {
+        setProviderConfig('openai', {
+          enabled: true, name: backend.name, baseUrl: backend.baseUrl,
+          isLocal: true, managed: false,
+        })
+      }
+    }
+    setStep('comfyui')
   }
 
   /* ── Scan for backends ──────────────────────────────────── */
@@ -679,9 +748,49 @@ export function Onboarding() {
                   Checking {LOCAL_BACKENDS.length} backends on their default ports.
                 </p>
               </>
-            ) : detectedBackends.length > 0 ? (
-              /* ── Backends found ──────────────────────────────── */
+            ) : (
               <>
+                {/* Built-in engine — the 2.5.7 default. Runs locally, nothing to
+                    install. Detected/installable external engines move under the
+                    Advanced disclosure below (kept, just no longer required). */}
+                <h2 className="text-base font-semibold">Ready to chat</h2>
+                <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                  Locally Uncensored runs its own engine on your machine — nothing to install. Pick a starter model next.
+                </p>
+
+                <button
+                  onClick={() => setSelectedBackend(BUILTIN_BACKEND_ID)}
+                  className={`w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg border text-left transition-all ${
+                    selectedBackend === BUILTIN_BACKEND_ID
+                      ? isDark ? 'bg-white/10 border-white/20' : 'bg-gray-100 border-gray-900'
+                      : isDark ? 'border-white/10 hover:border-white/20' : 'border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  <Cpu size={16} className={selectedBackend === BUILTIN_BACKEND_ID ? (isDark ? 'text-white' : 'text-gray-900') : 'text-gray-500'} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[0.72rem] font-medium">Built-in Engine</p>
+                    <p className={`text-[0.55rem] ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>Runs on your machine · nothing to install</p>
+                  </div>
+                  {selectedBackend === BUILTIN_BACKEND_ID && <Check size={14} className="text-green-400 shrink-0" />}
+                </button>
+
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  <button onClick={selectBackendAndContinue} className={primaryBtn}>
+                    Continue <ArrowRight size={14} />
+                  </button>
+                </div>
+
+                {/* Advanced: connect to a detected engine or install another one.
+                    All the existing Ollama/LM-Studio detection + install UI lives
+                    here now — available, but off the critical path. */}
+                <details className="text-left pt-1">
+                  <summary className={`text-[0.6rem] cursor-pointer hover:underline text-center list-none ${isDark ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-600'}`}>
+                    Use another engine (Ollama, LM Studio…)
+                  </summary>
+                  <div className="mt-3 space-y-4 text-center">
+                {detectedBackends.length > 0 ? (
+                  /* ── Backends found ──────────────────────────────── */
+                  <>
                 <h2 className="text-base font-semibold">
                   {detectedBackends.length} backend{detectedBackends.length > 1 ? 's' : ''} detected
                 </h2>
@@ -718,22 +827,7 @@ export function Onboarding() {
                     <RefreshCw size={12} /> Re-Scan
                   </button>
                   <button
-                    onClick={() => {
-                      const backend = detectedBackends.find(b => b.id === selectedBackend)
-                      if (backend) {
-                        const preset = PROVIDER_PRESETS.find(p => p.id === backend.id)
-                        if (preset && preset.providerId !== 'ollama') {
-                          setProviderConfig('openai', {
-                            enabled: true,
-                            name: backend.name,
-                            baseUrl: backend.baseUrl,
-                            isLocal: true,
-                          })
-                        }
-                      }
-                      // Go to ComfyUI step next
-                      setStep('comfyui')
-                    }}
+                    onClick={selectBackendAndContinue}
                     className={primaryBtn}
                   >
                     Continue <ArrowRight size={14} />
@@ -1039,6 +1133,10 @@ export function Onboarding() {
                     </button>
                   )}
                 </div>
+              </>
+                )}
+                  </div>
+                </details>
               </>
             )}
           </motion.div>
@@ -1628,6 +1726,8 @@ export function Onboarding() {
             <p className={`text-[0.75rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               {pulledModels.length > 0
                 ? `${pulledModels.length} model${pulledModels.length > 1 ? 's' : ''} installed. You're ready to go.`
+                : selectedBackend === BUILTIN_BACKEND_ID
+                ? 'The built-in engine is ready. Install a model anytime from Model Manager.'
                 : detectedBackends.length > 0
                 ? `Connected to ${detectedBackends.find(b => b.id === selectedBackend)?.name || detectedBackends[0].name}. You're ready to go.`
                 : 'You can configure backends and install models anytime from Settings and Model Manager.'}
