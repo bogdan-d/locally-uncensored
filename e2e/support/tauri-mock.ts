@@ -102,6 +102,14 @@ export function tauriMockInit(opts: TauriMockOptions) {
           models: [{ name: opts.modelName, path: modelPath, size: 400 * 1024 * 1024, loaded: true }],
         })
 
+      // ── built-in EMBEDDINGS server lifecycle (P5) ─────────────────
+      case 'start_bundled_embed':
+        return Promise.resolve({ status: 'started', port: 8128, model_path: args?.modelPath })
+      case 'stop_bundled_embed':
+        return Promise.resolve(null)
+      case 'bundled_embed_status':
+        return Promise.resolve({ running: true, healthy: true, port: 8128, model_path: `${MODELS_DIR}/nomic.gguf` })
+
       // ── detection: nothing external is running ────────────────────
       case 'get_ollama_host':
         return Promise.resolve('http://localhost:11434')
@@ -147,6 +155,26 @@ export function tauriMockInit(opts: TauriMockOptions) {
       // ever detected as live.
       case 'proxy_localhost': {
         const url: string = args?.url || ''
+        // Record every proxied URL so tests can assert routing (e.g. embeddings
+        // hit the bundled server on 8128, never Ollama on 11434).
+        ;(w.__E2E_PROXY_URLS__ = w.__E2E_PROXY_URLS__ || []).push(url)
+
+        // P5: bundled embeddings server on 8128 speaks OpenAI /v1/embeddings.
+        // Echo one deterministic (content-varying) vector per input so the real
+        // RAG code (indexDocument / retrieveContext) runs end to end, no Ollama.
+        if (url.includes(':8128') || url.includes('/v1/embeddings')) {
+          let inputs: string[] = []
+          try {
+            const parsed = JSON.parse(args?.body || '{}').input
+            inputs = Array.isArray(parsed) ? parsed : [parsed]
+          } catch { /* empty */ }
+          const data = inputs.map((s: string, index: number) => ({
+            index,
+            embedding: [(s?.length ?? 0) % 7, (s?.charCodeAt(0) || 0) % 13, 1],
+          }))
+          return Promise.resolve(JSON.stringify({ object: 'list', data, model: 'nomic-embed-text-v1.5' }))
+        }
+
         if (url.includes('11434') || /\/tags(\?|$)/.test(url)) {
           return Promise.resolve(JSON.stringify({ models: [] }))
         }

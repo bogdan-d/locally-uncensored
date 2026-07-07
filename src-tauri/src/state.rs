@@ -21,10 +21,14 @@ pub struct DownloadProgress {
     pub error: Option<String>,
 }
 
-/// Handle to a running bundled `llama-server` (built-in engine, P1). One
-/// model per process, so `model_path` identifies what's loaded and `port` is
-/// the loopback port the OpenAI-compatible API is served on. Killed in
-/// `shutdown_subprocesses` like the other spawned children.
+/// Handle to a running bundled `llama-server`. One model per process, so
+/// `model_path` identifies what's loaded and `port` is the loopback port the
+/// OpenAI-compatible API is served on. Killed in `shutdown_subprocesses` like
+/// the other spawned children.
+///
+/// Used for BOTH the chat engine (`bundled_engine`) and — P5 — the separate
+/// `--embeddings` server (`bundled_embed`): same lifecycle shape, different
+/// port + model + serve mode. Keeping one struct avoids duplicating the handle.
 pub struct BundledEngine {
     pub child: Child,
     pub model_path: String,
@@ -144,6 +148,11 @@ pub struct AppState {
     /// managed lifecycle (start/stop/swap) lives in `commands::engine`; this
     /// is just the handle so shutdown can reap it.
     pub bundled_engine: Mutex<Option<BundledEngine>>,
+    /// Built-in EMBEDDINGS server (P5) — a second bundled `llama-server` run in
+    /// `--embeddings` mode on its own port, serving OpenAI `/v1/embeddings` for
+    /// Document-Chat / RAG so embeddings no longer require Ollama. `None` until
+    /// started via `start_bundled_embed`; reaped in `shutdown_subprocesses`.
+    pub bundled_embed: Mutex<Option<BundledEngine>>,
     pub comfy_path: Mutex<Option<String>>,
     pub comfy_port: Mutex<u16>,
     /// Configurable ComfyUI host. Default "localhost". Setting this to a
@@ -256,6 +265,7 @@ impl AppState {
             comfy_process: Mutex::new(None),
             ollama_process: Mutex::new(None),
             bundled_engine: Mutex::new(None),
+            bundled_embed: Mutex::new(None),
             comfy_path: Mutex::new(None),
             comfy_port: Mutex::new(initial_port),
             comfy_host: Mutex::new(initial_host),
@@ -338,6 +348,15 @@ impl AppState {
                 println!("[Engine] Built-in engine stopped (explicit shutdown)");
             }
             *engine = None;
+        }
+
+        // Built-in embeddings server (P5) — same plain-kill treatment.
+        if let Ok(mut embed) = self.bundled_embed.lock() {
+            if let Some(ref mut e) = *embed {
+                let _ = e.child.kill();
+                println!("[Engine] Built-in embeddings server stopped (explicit shutdown)");
+            }
+            *embed = None;
         }
 
         if let Ok(mut proc) = self.comfy_process.lock() {

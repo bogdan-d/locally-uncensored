@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Minus, Square, X as XIcon, ArrowRight, Download, Check, ChevronRight, Loader2, RefreshCw, ExternalLink, FolderOpen, Cpu } from 'lucide-react'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useProviderStore } from '../../stores/providerStore'
-import { ONBOARDING_MODELS } from '../../lib/constants'
+import { ONBOARDING_MODELS, ONBOARDING_EMBED_MODEL } from '../../lib/constants'
 import { PROVIDER_PRESETS } from '../../api/providers/types'
 import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-detector'
 import { detectProviderModelPath, startModelDownloadToPath } from '../../api/discover'
@@ -15,7 +15,7 @@ import { backendCall } from '../../api/backend'
 import { getSystemVRAM } from '../../api/comfyui'
 import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
-import { startBundledEngine } from '../../api/engine'
+import { startBundledEngine, startBundledEmbed, isManagedBuiltinActive } from '../../api/engine'
 import { BUILTIN_BACKEND_ID, classifyOnboardingBackend, resolveOnboardingBackend } from '../../lib/onboarding-backend'
 
 // Bug (h): the dedicated 'theme' onboarding step was removed because users
@@ -459,24 +459,25 @@ export function Onboarding() {
   const [embeddingsProgress, setEmbeddingsProgress] = useState<{ completed: number; total: number }>({ completed: 0, total: 0 })
   const [embeddingsAlreadyHave, setEmbeddingsAlreadyHave] = useState<boolean | null>(null)
 
-  // Probe whether an embedding model is already present on the box. Ollama
-  // lists pulled models; we look for anything with `embed`/`bge`/`nomic` in
-  // the name (the same heuristic used elsewhere for chat-capability filtering).
+  // Probe whether an embedding model is already present. For the built-in
+  // engine (P5) we scan the app models dir via list_bundled_models; otherwise
+  // Ollama lists pulled models. Either way we match anything with
+  // `embed`/`bge`/`nomic` in the name (same heuristic used elsewhere).
   useEffect(() => {
     if (step !== 'embeddings') return
     let cancelled = false
-    import('../../api/ollama').then(({ listModels }) =>
-      listModels()
-        .then(models => {
-          if (cancelled) return
-          const hasEmbedding = models.some(m => {
-            const lower = (m.name || '').toLowerCase()
-            return lower.includes('embed') || lower.includes('bge-') || lower.includes('nomic')
-          })
-          setEmbeddingsAlreadyHave(hasEmbedding)
-        })
-        .catch(() => { if (!cancelled) setEmbeddingsAlreadyHave(false) })
-    )
+    const isEmbed = (name: string) => {
+      const lower = (name || '').toLowerCase()
+      return lower.includes('embed') || lower.includes('bge-') || lower.includes('nomic')
+    }
+    const probe = isManagedBuiltinActive()
+      ? import('../../api/engine').then(({ listBundledModels }) =>
+          listBundledModels().then(models => models.some(m => isEmbed(m.name))))
+      : import('../../api/ollama').then(({ listModels }) =>
+          listModels().then(models => models.some(m => isEmbed(m.name))))
+    probe
+      .then(hasEmbedding => { if (!cancelled) setEmbeddingsAlreadyHave(hasEmbedding) })
+      .catch(() => { if (!cancelled) setEmbeddingsAlreadyHave(false) })
     return () => { cancelled = true }
   }, [step])
 
@@ -488,6 +489,40 @@ export function Onboarding() {
     setEmbeddingsPulling(true)
     setEmbeddingsError(null)
     setEmbeddingsProgress({ completed: 0, total: 0 })
+
+    // P5: built-in engine path — download the embedding GGUF flat into the app
+    // models dir and boot the embeddings server on it. No Ollama involved, so
+    // Document-Chat/RAG works on a fresh install with zero external provider.
+    if (isManagedBuiltinActive()) {
+      try {
+        const destDir = await detectProviderModelPath(BUILTIN_BACKEND_ID)
+        if (!destDir) throw new Error('Could not resolve the built-in models directory.')
+        const { downloadUrl, filename, sizeGB } = ONBOARDING_EMBED_MODEL
+        dlStore.getState().setMeta(filename, downloadUrl, 'gguf', destDir)
+        const expectedBytes = sizeGB ? Math.round(sizeGB * 1_073_741_824) : undefined
+        await startModelDownloadToPath(downloadUrl, destDir, filename, expectedBytes)
+        dlStore.getState().startPolling()
+        // Mirror the store's completed/total into the step's progress UI.
+        const unsub = useDownloadStore.subscribe(s => {
+          const d = s.downloads[filename]
+          if (d) setEmbeddingsProgress({ completed: d.progress || 0, total: d.total || 0 })
+        })
+        try {
+          await awaitDownloadComplete(filename)
+        } finally {
+          unsub()
+        }
+        await startBundledEmbed(`${destDir}/${filename}`)
+        setEmbeddingsPulled(true)
+        window.dispatchEvent(new CustomEvent('lu-models-refresh'))
+      } catch (e) {
+        setEmbeddingsError(`Embedding setup failed: ${e instanceof Error ? e.message : String(e)}`)
+      } finally {
+        setEmbeddingsPulling(false)
+      }
+      return
+    }
+
     try {
       // Make sure ollama is reachable before kicking off the pull.
       let ok = await checkOllama()
@@ -1662,7 +1697,7 @@ export function Onboarding() {
                       Standard embedding model from Nomic AI. Used purely on-device to chunk and retrieve your documents — never sent anywhere.
                     </p>
                     <p className={`text-[0.55rem] mt-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                      274 MB · runs on any CPU
+                      {isManagedBuiltinActive() ? '84 MB · bundled engine, runs on any CPU' : '274 MB · runs on any CPU'}
                     </p>
                   </div>
                 </div>
@@ -1693,7 +1728,7 @@ export function Onboarding() {
             <div className="flex items-center gap-2 pt-1">
               {embeddingsAlreadyHave !== true && !embeddingsPulled && !embeddingsPulling && (
                 <button onClick={handlePullEmbeddings} className={primaryBtn} style={{ flex: 1 }}>
-                  <Download size={14} /> Install nomic-embed-text (274 MB)
+                  <Download size={14} /> Install nomic-embed-text ({isManagedBuiltinActive() ? '84 MB' : '274 MB'})
                 </button>
               )}
               <button

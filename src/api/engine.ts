@@ -34,6 +34,14 @@ export interface EngineStatus {
   model_path: string | null
 }
 
+/** Loopback base URL of the managed embeddings server (P5). Mirrors the Rust
+ * `DEFAULT_EMBED_PORT` (8128). Document-Chat/RAG POSTs `/v1/embeddings` here
+ * when the built-in engine is active, instead of Ollama's `/api/embed`. */
+export const EMBED_PORT = 8128
+export function embedBaseUrl(): string {
+  return `http://127.0.0.1:${EMBED_PORT}/v1`
+}
+
 // name → absolute GGUF path, populated by listBundledModels(). Lets callers
 // activate a model by its picker id (which is what the model store carries)
 // without threading the path through AIModel, which has no path field.
@@ -67,6 +75,22 @@ export function bundledEngineStatus() {
 /** Swap the loaded model (stop → start on the same port). */
 export function swapBundledModel(modelPath: string, ctx?: number) {
   return backendCall('swap_bundled_model', { modelPath, ctx })
+}
+
+/** Start the built-in embeddings server (P5) with a specific embedding GGUF.
+ * Idempotent for the same model. Runs on EMBED_PORT, separate from chat. */
+export function startBundledEmbed(modelPath: string) {
+  return backendCall('start_bundled_embed', { modelPath })
+}
+
+/** Stop the managed embeddings server if one is running. */
+export function stopBundledEmbed() {
+  return backendCall('stop_bundled_embed')
+}
+
+/** Embeddings-server health + which model is loaded on which port. */
+export function bundledEmbedStatus() {
+  return backendCall<EngineStatus>('bundled_embed_status')
 }
 
 /** List downloaded GGUFs in the app models dir. Refreshes the name→path map. */

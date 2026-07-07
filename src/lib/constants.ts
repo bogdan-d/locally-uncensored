@@ -281,6 +281,16 @@ export interface OnboardingModel {
 
 const HF_OB = (repo: string, file: string) => `https://huggingface.co/${repo}/resolve/main/${file}`
 
+// P5: the embedding GGUF for the built-in embeddings server (Document-Chat/RAG
+// without Ollama). nomic-embed-text v1.5, Q4_K_M — ~84 MB, 768-dim, broadly
+// compatible with llama-server's `--embeddings` mode. Downloaded flat into the
+// same app models dir as chat models, then served on EMBED_PORT.
+export const ONBOARDING_EMBED_MODEL = {
+  downloadUrl: HF_OB('nomic-ai/nomic-embed-text-v1.5-GGUF', 'nomic-embed-text-v1.5.Q4_K_M.gguf'),
+  filename: 'nomic-embed-text-v1.5.Q4_K_M.gguf',
+  sizeGB: 0.084,
+}
+
 export const ONBOARDING_MODELS: OnboardingModel[] = [
   // P4 / LU-Aufgaben: ONBOARDING shows exactly ONE model — the tiny ~400 MB
   // Qwen 2.5 0.5B starter. The previous list of 22 entries (5–42 GB) was

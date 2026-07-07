@@ -179,6 +179,10 @@ fn main() {
             commands::engine::bundled_engine_status,
             commands::engine::swap_bundled_model,
             commands::engine::list_bundled_models,
+            // Built-in embeddings server (bundled llama-server --embeddings, P5)
+            commands::engine::start_bundled_embed,
+            commands::engine::stop_bundled_embed,
+            commands::engine::bundled_embed_status,
             // Provider API-key keychain (H5)
             commands::secret::secret_set,
             commands::secret::secret_get,

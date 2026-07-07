@@ -29,6 +29,12 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// preset base URL on the frontend (`http://127.0.0.1:8127/v1`).
 pub const DEFAULT_ENGINE_PORT: u16 = 8127;
 
+/// Default loopback port for the managed EMBEDDINGS server (P5). Separate
+/// process/port from the chat engine so Document-Chat/RAG can embed while a
+/// chat model stays loaded. Matches `embedBaseUrl()` on the frontend
+/// (`http://127.0.0.1:8128/v1`).
+pub const DEFAULT_EMBED_PORT: u16 = 8128;
+
 /// How long to wait for `/health` to flip to 200 after spawn. A cold GGUF
 /// load (mmap + Metal warm-up) on a big model can take a while on a slow disk;
 /// 60 s is comfortably above a normal 1-3 s load without hanging forever on a
@@ -72,6 +78,27 @@ pub(crate) fn build_server_args(model_path: &str, ctx: u32, port: u16) -> Vec<St
         port.to_string(),
         "--ctx-size".into(),
         ctx.to_string(),
+        "-ngl".into(),
+        "999".into(),
+    ]
+}
+
+/// Build the `llama-server` argv for the EMBEDDINGS server (P5). `--embeddings`
+/// switches llama-server into pooled-embedding mode so `/v1/embeddings`
+/// returns vectors instead of chat completions. `--pooling mean` matches how
+/// nomic/bge embedding GGUFs are meant to be pooled. `-ngl 999` offloads all
+/// layers (Metal on mac); embedding models are tiny so this is cheap.
+pub(crate) fn build_embed_args(model_path: &str, port: u16) -> Vec<String> {
+    vec![
+        "-m".into(),
+        model_path.into(),
+        "--host".into(),
+        "127.0.0.1".into(),
+        "--port".into(),
+        port.to_string(),
+        "--embeddings".into(),
+        "--pooling".into(),
+        "mean".into(),
         "-ngl".into(),
         "999".into(),
     ]
@@ -392,6 +419,131 @@ fn stop_engine_locked(state: &State<'_, AppState>) -> bool {
     }
 }
 
+// ── Embeddings server (P5) ────────────────────────────────────────────────────
+//
+// A second `llama-server` in `--embeddings` mode on its own port. Same
+// lifecycle shape as the chat engine (spawn → health-wait → stop), reusing
+// `resolve_engine_binary` / `wait_for_health` / `engine_healthy` (all
+// port-generic). Document-Chat / RAG POST to `/v1/embeddings` on this port
+// instead of Ollama's `/api/embed`, so the RAG path is Ollama-free.
+
+/// Start (or reuse) the managed embeddings server for `model_path`. Idempotent
+/// for the same model + healthy. A different embed model in flight is stopped
+/// first (single-process server).
+#[tauri::command]
+pub fn start_bundled_embed(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    model_path: String,
+    port: Option<u16>,
+) -> Result<serde_json::Value, String> {
+    let port = port.unwrap_or(DEFAULT_EMBED_PORT);
+
+    if !Path::new(&model_path).exists() {
+        return Err(format!("Embedding model file not found: {model_path}"));
+    }
+
+    // Already serving this exact model and healthy → no-op.
+    {
+        let guard = state.bundled_embed.lock().unwrap();
+        if let Some(embed) = guard.as_ref() {
+            if embed.model_path == model_path && engine_healthy(embed.port) {
+                return Ok(serde_json::json!({
+                    "status": "already_running",
+                    "port": embed.port,
+                    "model_path": embed.model_path,
+                }));
+            }
+        }
+    }
+
+    stop_embed_locked(&state);
+
+    let binary = resolve_engine_binary(&app).ok_or_else(|| {
+        format!(
+            "Bundled engine binary not found ({}). Run scripts/build-llama.sh to produce the sidecar.",
+            sidecar_binary_name()
+        )
+    })?;
+
+    println!("[Engine] Starting built-in embeddings server on port {port} — {model_path}");
+    let mut cmd = Command::new(&binary);
+    cmd.args(build_embed_args(&model_path, port))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Ok(sel) = state.gpu_selection.lock() {
+        crate::commands::gpu::apply_gpu_env(&mut cmd, &sel);
+    }
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn embeddings server: {e}"))?;
+
+    *state.bundled_embed.lock().unwrap() = Some(BundledEngine {
+        child,
+        model_path: model_path.clone(),
+        port,
+    });
+
+    if let Err(e) = wait_for_health(port) {
+        stop_embed_locked(&state);
+        return Err(e);
+    }
+
+    println!("[Engine] Built-in embeddings server healthy on port {port}");
+    Ok(serde_json::json!({
+        "status": "started",
+        "port": port,
+        "model_path": model_path,
+    }))
+}
+
+/// Stop the managed embeddings server, killing the child. Idempotent.
+#[tauri::command]
+pub fn stop_bundled_embed(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let was_running = stop_embed_locked(&state);
+    Ok(serde_json::json!({ "status": if was_running { "stopped" } else { "idle" } }))
+}
+
+/// Report whether the embeddings server is up, which model, on which port.
+#[tauri::command]
+pub fn bundled_embed_status(
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let guard = state.bundled_embed.lock().unwrap();
+    match guard.as_ref() {
+        Some(embed) => Ok(serde_json::json!({
+            "running": true,
+            "healthy": engine_healthy(embed.port),
+            "port": embed.port,
+            "model_path": embed.model_path,
+        })),
+        None => Ok(serde_json::json!({
+            "running": false,
+            "healthy": false,
+            "port": DEFAULT_EMBED_PORT,
+            "model_path": null,
+        })),
+    }
+}
+
+/// Kill the managed embeddings child if present. Returns whether one was
+/// running. Takes the state lock internally; callers must not already hold it.
+fn stop_embed_locked(state: &State<'_, AppState>) -> bool {
+    let mut guard = state.bundled_embed.lock().unwrap();
+    if let Some(mut embed) = guard.take() {
+        let _ = embed.child.kill();
+        let _ = embed.child.wait();
+        println!("[Engine] Built-in embeddings server stopped (port {})", embed.port);
+        true
+    } else {
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,6 +561,26 @@ mod tests {
                 "-ngl", "999",
             ]
         );
+    }
+
+    #[test]
+    fn embed_args_enable_embeddings_and_mean_pooling() {
+        let args = build_embed_args("/models/nomic-embed.gguf", 8128);
+        assert_eq!(
+            args,
+            vec![
+                "-m", "/models/nomic-embed.gguf",
+                "--host", "127.0.0.1",
+                "--port", "8128",
+                "--embeddings",
+                "--pooling", "mean",
+                "-ngl", "999",
+            ]
+        );
+        // The whole point of P5: the embed server must NOT carry --ctx-size
+        // (chat-only) and MUST carry --embeddings so /v1/embeddings works.
+        assert!(args.iter().any(|a| a == "--embeddings"));
+        assert!(!args.iter().any(|a| a == "--ctx-size"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import { v4 as uuid } from "uuid"
 import type { DocumentMeta, TextChunk, RAGContext, VectorSearchResult } from "../types/rag"
 import { ollamaUrl, localFetch } from "./backend"
+import { isManagedBuiltinActive, embedBaseUrl } from "./engine"
 
 export async function extractText(file: File): Promise<string> {
   const ext = file.name.split(".").pop()?.toLowerCase()
@@ -64,6 +65,54 @@ export async function generateEmbeddings(
   texts: string[],
   model = "nomic-embed-text"
 ): Promise<number[][]> {
+  // P5: when the app-managed built-in engine is the active backend, embed
+  // against the bundled `llama-server --embeddings` (OpenAI `/v1/embeddings`)
+  // so Document-Chat/RAG works with zero Ollama. Otherwise fall back to the
+  // Ollama `/api/embed` path (still supported as an "Advanced" backend).
+  if (isManagedBuiltinActive()) {
+    return embedViaBuiltin(texts, model)
+  }
+  return embedViaOllama(texts, model)
+}
+
+/** OpenAI `/v1/embeddings` against the bundled embeddings server (P5). */
+async function embedViaBuiltin(texts: string[], model: string): Promise<number[][]> {
+  let res: Response
+  try {
+    res = await localFetch(`${embedBaseUrl()}/embeddings`, {
+      method: "POST",
+      body: JSON.stringify({ model, input: texts }),
+    })
+  } catch (err) {
+    throw new Error(
+      `Cannot reach the built-in embeddings server. (${err instanceof Error ? err.message : String(err)})`
+    )
+  }
+
+  if (!res.ok) {
+    let detail = ""
+    try {
+      const body = await res.json()
+      detail = body?.error?.message || body?.error || ""
+    } catch { /* ignore parse errors */ }
+    throw new Error(
+      `Embedding failed (HTTP ${res.status}): ${detail || "the built-in embeddings server may still be loading"}`
+    )
+  }
+
+  const data = await res.json()
+  // OpenAI shape: { data: [{ embedding: number[], index }] }. Sort by index so
+  // the vectors line up with the input order even if the server reorders them.
+  if (!data?.data || !Array.isArray(data.data)) {
+    throw new Error("Unexpected response from the built-in /v1/embeddings endpoint")
+  }
+  return [...data.data]
+    .sort((a: any, b: any) => (a.index ?? 0) - (b.index ?? 0))
+    .map((d: any) => d.embedding as number[])
+}
+
+/** Ollama `/api/embed` — the legacy/Advanced path (unchanged). */
+async function embedViaOllama(texts: string[], model: string): Promise<number[][]> {
   let res: Response
   try {
     res = await localFetch(ollamaUrl("/embed"), {
