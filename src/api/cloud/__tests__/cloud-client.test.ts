@@ -85,14 +85,14 @@ describe('jobs wrappers', () => {
     fetchMock.mockResolvedValue(jsonRes({ id: 'j1', quota: { cost: 5, used: 10, limit: 800 } }, 202))
     const out = await submitCloudJob({
       kind: 'image',
-      model: 'sdxl-base-1.0',
+      model: 'flux-schnell',
       prompt: 'a lighthouse',
       params: { op: 'generate' },
     })
     expect(out.id).toBe('j1')
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe(`${CLOUD_BASE}/api/jobs`)
-    expect(JSON.parse(String(init.body)).model).toBe('sdxl-base-1.0')
+    expect(JSON.parse(String(init.body)).model).toBe('flux-schnell')
   })
 
   it('uploadInput sends multipart form-data with the role and returns the path', async () => {

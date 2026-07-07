@@ -1,11 +1,13 @@
-// Desktop port: types + intent mapping only. The hosted render queue (fetch
-// wrappers, upload/submit/poll/cancel) is a lu-labs.ai web feature and stays
-// out of the desktop build — CreateContext stubs the cloud axis to null.
+// Desktop port: shared render types + intent mapping. The HTTP client (upload/
+// submit/poll/cancel against lu-labs.ai) lives in api/cloud/jobs.ts.
 
 import type { CreateIntent } from '../../stores/createStore'
 
 export type RenderKind = 'image' | 'video'
-export type RenderOp = 'generate' | 'edit' | 'removebg' | 'animate'
+// 'upscale'/'eraser' are WaveSpeed utility endpoints (super-resolution / masked
+// object removal). Wired in the backend; the desktop Create UI surfaces them in
+// a follow-up port.
+export type RenderOp = 'generate' | 'edit' | 'removebg' | 'animate' | 'upscale' | 'eraser'
 
 export interface CloudQuota {
   tier: string
