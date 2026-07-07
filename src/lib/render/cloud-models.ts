@@ -10,7 +10,7 @@ export interface CloudModel {
   id: string
   label: string
   kind: RenderKind
-  file: string
+  file?: string
 }
 
 export const CLOUD_MODELS: CloudModel[] = [
@@ -22,6 +22,16 @@ export const CLOUD_MODELS: CloudModel[] = [
   { id: 'hidream', label: 'HiDream', kind: 'image', file: 'hidream_i1_dev.safetensors' },
   { id: 'wan-2.2-720p', label: 'Wan 2.2 720p', kind: 'video', file: 'wan2.2_a14b_fp8.safetensors' },
   { id: 'wan-2.2-fast', label: 'Wan 2.2 Fast', kind: 'video', file: 'wan2.2_5b_fp8.safetensors' },
+  // Premium hosted video menu (2026-07-07), cheap → pricey; wan stays first so
+  // the default video model keeps the lowest per-clip cost.
+  { id: 'seedance-lite', label: 'Seedance Lite', kind: 'video' },
+  { id: 'hailuo-2.3', label: 'Hailuo 2.3', kind: 'video' },
+  { id: 'seedance-pro', label: 'Seedance Pro', kind: 'video' },
+  { id: 'hailuo-2.3-pro', label: 'Hailuo 2.3 Pro (1080p)', kind: 'video' },
+  { id: 'kling-turbo', label: 'Kling Turbo (720p)', kind: 'video' },
+  { id: 'kling-turbo-pro', label: 'Kling Turbo Pro (1080p)', kind: 'video' },
+  { id: 'veo-3.1-fast', label: 'Veo 3.1 Fast (Audio)', kind: 'video' },
+  { id: 'veo-3.1', label: 'Veo 3.1 (Audio)', kind: 'video' },
 ]
 
 export function cloudModelsFor(kind: RenderKind): CloudModel[] {
