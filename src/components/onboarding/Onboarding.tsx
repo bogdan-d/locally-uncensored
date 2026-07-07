@@ -748,7 +748,7 @@ export function Onboarding() {
           >
             <h1 className="text-base font-semibold">Locally Uncensored</h1>
             <p className={`text-[0.75rem] leading-relaxed ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-              Private, local AI chat. No servers, no tracking, everything stays on your machine.
+              Private, local AI chat that works right away — no extra software to install. No servers, no tracking, everything stays on your machine.
             </p>
             <button
               onClick={() => {
