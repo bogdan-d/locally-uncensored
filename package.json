@@ -31,7 +31,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -62,6 +63,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.61.1",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/cli": "^2.10.1",
     "@types/node": "^24.12.0",
