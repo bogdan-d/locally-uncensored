@@ -27,6 +27,12 @@ export function BackendSelector({ open, backends, onClose }: Props) {
   // uncheck if they want it to re-appear on next launch.
   const [dontShowAgain, setDontShowAgain] = useState(true)
   const { setProviderConfig, setHideBackendSelector } = useProviderStore()
+  // 2.5.7: the `openai` slot holds the app-managed built-in engine by default.
+  // When it does, this modal offers *alternatives* — skipping keeps the
+  // built-in engine, and picking one switches away from it (clears `managed`).
+  const builtinActive = useProviderStore(
+    (s) => s.providers.openai.enabled && s.providers.openai.managed === true,
+  )
 
   const dismiss = () => {
     // Persist the user's choice on EVERY dismissal (Skip, Use selected, X).
@@ -53,11 +59,15 @@ export function BackendSelector({ open, backends, onClose }: Props) {
         isLocal: true,
       })
     } else {
+      // Switching to an external openai-compat backend clears the built-in
+      // engine's `managed` flag — otherwise the fixed-URL/model-list behavior
+      // would stay pinned while the URL now points at LM Studio/vLLM/etc.
       setProviderConfig('openai', {
         enabled: true,
         name: backend.name,
         baseUrl: backend.baseUrl,
         isLocal: true,
+        managed: false,
       })
     }
 
@@ -80,6 +90,14 @@ export function BackendSelector({ open, backends, onClose }: Props) {
             ? `${backends[0].name} is running on your system.`
             : 'Multiple backends running. Select your primary backend.'}
         </p>
+
+        {/* 2.5.7: reassure that these are optional alternatives — the built-in
+            engine already works out of the box and stays active if skipped. */}
+        {builtinActive && (
+          <p className="text-[0.65rem] text-gray-500 text-center leading-relaxed">
+            You're already set up with the built-in engine. Switching is optional.
+          </p>
+        )}
 
         <div className="space-y-1">
           {backends.map(backend => (
@@ -129,7 +147,7 @@ export function BackendSelector({ open, backends, onClose }: Props) {
             onClick={dismiss}
             className="px-4 py-1.5 rounded-lg text-[0.7rem] text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
           >
-            Skip
+            {builtinActive ? 'Keep built-in engine' : 'Skip'}
           </button>
           <button
             onClick={handleConfirm}

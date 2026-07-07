@@ -69,4 +69,14 @@ describe('AppShell multi-backend auto-enable', () => {
     expect(src).toMatch(/hideBackendSelector/)
     expect(src).toMatch(/if \(useProviderStore\.getState\(\)\.hideBackendSelector\) return/)
   })
+
+  // 2.5.7 — the `openai` slot now holds the app-managed built-in engine by
+  // default. Auto-enabling a detected external backend must NOT clobber it,
+  // otherwise `managed:true` ends up pointing at a foreign URL (LM Studio/vLLM)
+  // and the model list / fixed-URL assumptions break.
+  it('does not auto-clobber the managed built-in engine slot', () => {
+    // The auto-enable must be guarded on the openai slot NOT being managed.
+    expect(src).toMatch(/!\s*openaiSlot\.managed/)
+    expect(src).toMatch(/nonOllama\s*&&\s*!openaiSlot\.managed/)
+  })
 })

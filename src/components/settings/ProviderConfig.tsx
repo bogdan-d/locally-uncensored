@@ -191,6 +191,7 @@ export function ProviderSettings() {
                     'bg-gray-500'
                   }`} />
                   <span className="text-[0.65rem] text-gray-300 font-medium truncate">{preset?.name || config.name}</span>
+                  {config.managed && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-purple-500/15 text-purple-300 shrink-0">DEFAULT</span>}
                   {config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-green-500/10 text-green-400 shrink-0">LOCAL</span>}
                   {!config.isLocal && <span className="text-[0.5rem] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 shrink-0">CLOUD</span>}
                   {status === 'connected' && <Wifi size={8} className="text-green-400 shrink-0" />}

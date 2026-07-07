@@ -524,21 +524,28 @@ export function AppShell() {
     detectLocalBackends().then((backends) => {
       if (backends.length === 0) return
 
-      // Always auto-enable the first non-Ollama openai-compat backend we find.
-      // Ollama has its own provider slot and is handled separately.
-      // Without this, a user running e.g. Ollama + LM Studio together would
-      // see the BackendSelector modal; if they dismissed it, LM Studio stayed
-      // disabled and its models never appeared in the chat dropdown ("no models
-      // recognized" from the user's POV). Pre-enabling the first detected
-      // non-Ollama backend guarantees models show up, and the selector below
-      // stays available so the user can still pick a different one.
+      // Auto-adopt the first non-Ollama openai-compat backend we find — but
+      // NOT when the app-managed built-in engine owns the `openai` slot.
+      // 2.5.7: that slot now holds the bundled llama-server (managed:true) by
+      // default. Silently overwriting it here would leave `managed:true`
+      // pointing at a foreign URL (LM Studio / vLLM), breaking the model list
+      // (`list_bundled_models`) and the fixed-URL assumption. So we only
+      // auto-adopt an external backend when the user has already switched away
+      // from the built-in engine (slot not managed). When the built-in engine
+      // is the active default, detected externals stay opt-in via the selector
+      // modal below and Settings → Providers ("use another engine").
+      // (Pre-2.5.7 rationale — Discord #help-chat, djoks.exe 2026-04-21: without
+      //  auto-enable, dismissing the selector left LM Studio disabled and its
+      //  models never appeared. Still true for users who left the built-in slot.)
+      const openaiSlot = useProviderStore.getState().providers.openai
       const nonOllama = backends.find((b) => b.id !== 'ollama')
-      if (nonOllama) {
+      if (nonOllama && !openaiSlot.managed) {
         useProviderStore.getState().setProviderConfig('openai', {
           enabled: true,
           name: nonOllama.name,
           baseUrl: nonOllama.baseUrl,
           isLocal: true,
+          managed: false,
         })
       }
 
