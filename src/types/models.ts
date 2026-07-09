@@ -34,6 +34,9 @@ export interface CloudModel {
   supportsTools?: boolean
   supportsVision?: boolean
   thinkMode?: 'toggle' | 'always' | 'never'
+  /** Friendly picker label when the server provides one (LU Cloud /models
+   *  `name`) — pickers fall back to the raw id otherwise. */
+  displayName?: string
 }
 
 // Image model (e.g. Stable Diffusion, SDXL, Fooocus, ComfyUI)

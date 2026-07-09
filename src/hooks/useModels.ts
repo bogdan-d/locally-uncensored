@@ -96,6 +96,8 @@ export function useModels() {
               provider: pm.provider, providerName: pm.providerName,
               contextLength: pm.contextLength, supportsTools: pm.supportsTools, supportsVision: pm.supportsVision,
               thinkMode: pm.thinkMode,
+              // Friendly server label (LU Cloud) — pickers prefer it over the id.
+              displayName: pm.name !== pm.id ? pm.name : undefined,
             } satisfies CloudModel
           })
         })

@@ -62,20 +62,24 @@ export function AppShell() {
 
   // Never leave an out-of-mode model active: flipping the switch moves the
   // chat selection onto the first model of the new mode (cloud ↔ local).
+  // Depends on the model list too — the hosted catalog arrives ASYNC after
+  // the lu-cloud provider gets enabled, so the reselect must fire again the
+  // moment those models land.
+  const allModels = useModelStore((s) => s.models)
   useEffect(() => {
-    const { models, activeModel, setActiveModel } = useModelStore.getState()
+    const { activeModel, setActiveModel } = useModelStore.getState()
     const inMode = (name: string | null) => {
       if (!name) return false
-      const m = models.find((x) => x.name === name)
+      const m = allModels.find((x) => x.name === name)
       const isCloud = m?.provider === 'lu-cloud'
       return appMode === 'cloud' ? isCloud : !isCloud
     }
     if (inMode(activeModel)) return
-    const fallback = models.find((m) =>
+    const fallback = allModels.find((m) =>
       appMode === 'cloud' ? m.provider === 'lu-cloud' : m.provider !== 'lu-cloud',
     )
     if (fallback) setActiveModel(fallback.name)
-  }, [appMode])
+  }, [appMode, allModels])
 
   // Local-hardware views (Models/Benchmark) don't exist in cloud mode — the
   // header hides them, this guard covers a view that was already open.

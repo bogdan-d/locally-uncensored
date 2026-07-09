@@ -547,8 +547,11 @@ export function ModelSelector() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const activeDisplayName = activeModel ? displayModelName(activeModel).split(':')[0] : 'Select Model'
   const activeModelObj = models.find((m) => m.name === activeModel)
+  const activeDisplayName = activeModel
+    ? (activeModelObj && 'displayName' in activeModelObj && activeModelObj.displayName) ||
+      displayModelName(activeModel).split(':')[0]
+    : 'Select Model'
   const activeType = activeModelObj?.type || 'text'
   // Chat dropdown shows TEXT models only — image/video live in the
   // Create view's own picker. Everything here is grouped by the model
@@ -635,7 +638,8 @@ export function ModelSelector() {
                   )}
 
                   {groupModels.map((model: AIModel) => {
-                    const modelDisplayName = displayModelName(model.name)
+                    const modelDisplayName =
+                      ('displayName' in model && model.displayName) || displayModelName(model.name)
                     const modelProvider = ('provider' in model && model.provider) || 'ollama'
                     const providerBadge = getProviderBadge(model)
                     const isActive = model.name === activeModel

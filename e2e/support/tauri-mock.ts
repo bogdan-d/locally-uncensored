@@ -181,7 +181,28 @@ export function tauriMockInit(opts: TauriMockOptions) {
         return Promise.reject('error sending request: connection refused (e2e)')
       }
 
+      // ── LU Cloud keychain session (secret_* → in-memory map) ─────
+      // Real keychain semantics: set stores, get returns the stored value
+      // (or null), delete removes. Lets the Supabase session survive within
+      // a page session and keeps the PKCE verifier separate from it.
+      case 'secret_set': {
+        ;(w.__E2E_SECRETS__ = w.__E2E_SECRETS__ || {})[args?.account] = args?.value
+        return Promise.resolve(null)
+      }
+      case 'secret_get':
+        return Promise.resolve((w.__E2E_SECRETS__ || {})[args?.account] ?? null)
+      case 'secret_delete': {
+        if (w.__E2E_SECRETS__) delete w.__E2E_SECRETS__[args?.account]
+        return Promise.resolve(null)
+      }
+
       default:
+        // Record system-browser opens so specs can assert redirect targets
+        // (pricing CTA, closed-beta link) without leaving the page.
+        if (cmd === 'plugin:shell|open') {
+          ;(w.__E2E_OPENED_URLS__ = w.__E2E_OPENED_URLS__ || []).push(args?.path)
+          return Promise.resolve(null)
+        }
         // Tauri plugin channels (event listen/unlisten, window, etc.) and any
         // unmodeled command: resolve benignly so nothing throws on boot.
         if (cmd.startsWith('plugin:')) return Promise.resolve(0)

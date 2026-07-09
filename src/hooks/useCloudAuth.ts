@@ -63,6 +63,10 @@ function syncChatProvider(): void {
   const current = useProviderStore.getState().providers['lu-cloud']
   if (current && current.enabled !== enabled) {
     useProviderStore.getState().setProviderConfig('lu-cloud', { enabled })
+    // setProviderConfig alone doesn't refetch anyone's model list — kick the
+    // shared refresh event so the hosted catalog appears in the chat picker
+    // the moment the account signs in (and vanishes on sign-out).
+    window.dispatchEvent(new CustomEvent('lu-models-refresh'))
   }
 }
 

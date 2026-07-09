@@ -11,7 +11,7 @@ export interface CloudSession {
   user: { id: string; email?: string } | null
   licenseActive: boolean
   quota: CloudQuota | null
-  /** true ⇔ signed in + active license + a tier with a media-credit budget. */
+  /** true ⇔ signed in + active license + launch gate + a credit budget. */
   cloudAvailable: boolean
   refreshQuota: () => Promise<void>
 }
@@ -19,6 +19,7 @@ export interface CloudSession {
 export function useCloudSession(): CloudSession {
   const user = useCloudAuthStore((s) => s.user)
   const licenseActive = useCloudAuthStore((s) => s.licenseActive)
+  const access = useCloudAuthStore((s) => s.access)
   const quota = useCloudAuthStore((s) => s.quota)
 
   const refreshQuota = useCallback(async () => {
@@ -34,7 +35,7 @@ export function useCloudSession(): CloudSession {
     user,
     licenseActive,
     quota,
-    cloudAvailable: deriveCloudAvailable({ user, licenseActive, quota }),
+    cloudAvailable: deriveCloudAvailable({ user, licenseActive, access, quota }),
     refreshQuota,
   }
 }
