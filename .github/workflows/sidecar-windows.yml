@@ -1,0 +1,74 @@
+name: Windows sidecar build + boot smoke
+
+# Proves the bundled llama.cpp sidecar builds and BOOTS on Windows without
+# waiting for a full release: runs when the build script (or this workflow)
+# changes, weekly against runner-image drift, and on demand. The GGML Vulkan
+# build keeps its CPU backend, so /health comes up on the GPU-less runner.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'scripts/build-llama.sh'
+      - '.github/workflows/sidecar-windows.yml'
+  pull_request:
+    paths:
+      - 'scripts/build-llama.sh'
+      - '.github/workflows/sidecar-windows.yml'
+  schedule:
+    - cron: '17 4 * * 1' # Mondays 04:17 UTC
+  workflow_dispatch:
+
+env:
+  VULKAN_SDK_VERSION: '1.4.313.2'
+
+jobs:
+  sidecar-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Sidecar build cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .llama-build
+          key: llama-b6231-x86_64-pc-windows-msvc-v1
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          curl.exe -o "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" -L `
+            "https://sdk.lunarg.com/sdk/download/${env:VULKAN_SDK_VERSION}/windows/VulkanSDK-${env:VULKAN_SDK_VERSION}-Installer.exe"
+          & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
+          Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_SDK_VERSION}"
+
+      - name: Build llama-server (x86_64-pc-windows-msvc, static Vulkan)
+        shell: bash
+        run: bash scripts/build-llama.sh x86_64-pc-windows-msvc
+
+      - name: Boot smoke — /health on an ephemeral port
+        shell: pwsh
+        run: |
+          $bin = "src-tauri\bin\llama-server-x86_64-pc-windows-msvc.exe"
+          if (-not (Test-Path $bin)) { throw "sidecar binary missing" }
+          & $bin --version
+          $proc = Start-Process -FilePath $bin -ArgumentList "--host","127.0.0.1","--port","8129","--models",".llama-build" -PassThru -NoNewWindow
+          $ok = $false
+          foreach ($i in 1..40) {
+            Start-Sleep -Milliseconds 400
+            try {
+              Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8129/health" -TimeoutSec 2 | Out-Null
+              $ok = $true; break
+            } catch { }
+          }
+          Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+          if (-not $ok) { throw "llama-server /health never came up" }
+          Write-Host "OK - sidecar boots and answers /health"
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: llama-server-x86_64-pc-windows-msvc
+          path: src-tauri/bin/llama-server-x86_64-pc-windows-msvc.exe
+          retention-days: 14
