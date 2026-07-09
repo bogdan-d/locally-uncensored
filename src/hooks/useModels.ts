@@ -1,10 +1,11 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { listModels, pullModel as pullModelApi, pullModelTauri, deleteModel as deleteModelApi } from '../api/ollama'
 import { isTauri } from '../api/backend'
 import { getCheckpoints as getComfyCheckpoints, getDiffusionModels as getComfyDiffusionModels, checkComfyConnection, filterPartialFiles } from '../api/comfyui'
 import { parseNDJSONStream } from '../api/stream'
 import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
+import { useSettingsStore } from '../stores/settingsStore'
 import { getEnabledProviders, prefixModelName, getProviderIdFromModel } from '../api/providers'
 import { listBundledModels, bundledToAIModels, activateBuiltinModel, isManagedBuiltinActive } from '../api/engine'
 import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, CloudModel } from '../types/models'
@@ -26,10 +27,19 @@ function isEmbeddingModel(name: string): boolean {
 
 export function useModels() {
   const {
-    models, activeModel, activePulls, categoryFilter,
+    models: allModels, activeModel, activePulls, categoryFilter,
     setModels, setActiveModel, startPull, updatePullProgress,
     pausePull, completePull, dismissPull, setCategoryFilter,
   } = useModelStore()
+
+  // Global Local/Cloud switch: one choke point for every picker — cloud mode
+  // surfaces only the hosted catalog, local mode hides it. The store keeps
+  // the full list (no refetch on flip); this is a view, not a mutation.
+  const appMode = useSettingsStore((s) => s.settings.appMode)
+  const models = useMemo(
+    () => allModels.filter((m) => (appMode === 'cloud' ? m.provider === 'lu-cloud' : m.provider !== 'lu-cloud')),
+    [allModels, appMode],
+  )
 
   const isPulling = Object.keys(activePulls).length > 0
 

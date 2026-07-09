@@ -9,7 +9,7 @@ import { ModelSelector } from '../models/ModelSelector'
 import { MemoryDebugToggle } from '../chat/MemoryDebugPanel'
 import { UpdateBadge } from './UpdateBadge'
 import { DownloadBadge } from './DownloadBadge'
-import { CloudWaitlistBadge } from './CloudWaitlistBadge'
+import { ModeSwitch } from '../cloud/ModeSwitch'
 import { loadModel } from '../../api/ollama'
 import { getProviderIdFromModel } from '../../api/providers'
 import { ModelLoadError } from '../../lib/ollama-errors'
@@ -190,10 +190,10 @@ export function Header() {
               inverted per theme. Matches the web companion. */}
           <img src="/LU-monogram-bw.png" alt="" width={33} height={33} className="dark:invert-0 invert opacity-80" />
         </button>
-        {/* Cloud "Hosted LU Workflows" waitlist teaser — subtle opt-in badge
-            in the brand area (David 2026-06-06). Sends nothing unless the user
-            explicitly joins; hidden for good only via "Don't show me again". */}
-        <CloudWaitlistBadge />
+        {/* Global Local/Cloud switch (2.5.7) — replaced the waitlist teaser
+            the moment the cloud tier became real. Gated: flipping to Cloud
+            without a usable account opens the CloudGateModal instead. */}
+        <ModeSwitch />
       </div>
 
       {/* Center: model picker, geometrically centered between the logo (left)
@@ -283,8 +283,10 @@ export function Header() {
             Compare
           </button>
 
-          {textNav('benchmark', 'Benchmark')}
-          {textNav('models', 'Models')}
+          {/* Local-hardware surfaces — meaningless against hosted GPUs, so
+              cloud mode hides them (the AppShell guard also redirects). */}
+          {settings.appMode !== 'cloud' && textNav('benchmark', 'Benchmark')}
+          {settings.appMode !== 'cloud' && textNav('models', 'Models')}
           {textNav('settings', 'Settings')}
         </div>
 
@@ -323,8 +325,8 @@ export function Header() {
                   Compare
                 </button>
 
-                {dropdownNav('benchmark', 'Benchmark')}
-                {dropdownNav('models', 'Models')}
+                {settings.appMode !== 'cloud' && dropdownNav('benchmark', 'Benchmark')}
+                {settings.appMode !== 'cloud' && dropdownNav('models', 'Models')}
                 {dropdownNav('settings', 'Settings')}
 
               </div>

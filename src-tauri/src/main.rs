@@ -89,7 +89,11 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(app_state)
+        .manage(commands::oauth::OauthPending::default())
         .invoke_handler(tauri::generate_handler![
+            // LU Cloud OAuth loopback (Google/GitHub via system browser)
+            commands::oauth::oauth_start,
+            commands::oauth::oauth_wait,
             // Process management
             commands::process::start_ollama,
             commands::process::start_comfyui,

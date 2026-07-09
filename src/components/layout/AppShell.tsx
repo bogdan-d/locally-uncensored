@@ -24,6 +24,9 @@ import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-det
 import { backendCall, isTauri } from '../../api/backend'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useCloudAuth } from '../../hooks/useCloudAuth'
+import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
+import { useCreateStore } from '../../stores/createStore'
+import { CloudGateModal } from '../cloud/CloudGateModal'
 import { ShortcutsModal } from './ShortcutsModal'
 import { Titlebar } from './Titlebar'
 
@@ -43,6 +46,45 @@ export function AppShell() {
   // LU Cloud account boot: keychain session restore + /api/me probe; keeps
   // the cloud Create axis and the lu-cloud chat provider in sync.
   useCloudAuth()
+
+  // ── Global Local/Cloud mode (2.5.7) — appMode drives everything ──
+  const appMode = settings.appMode
+  const cloudAvailable = useCloudAuthStore(deriveCloudAvailable)
+
+  // Create renders where the mode says: the global switch owns the axis the
+  // Composer's per-surface toggle used to.
+  useEffect(() => {
+    const target = appMode === 'cloud' && cloudAvailable ? 'cloud' : 'local'
+    if (useCreateStore.getState().backend !== target) {
+      useCreateStore.getState().setBackend(target)
+    }
+  }, [appMode, cloudAvailable])
+
+  // Never leave an out-of-mode model active: flipping the switch moves the
+  // chat selection onto the first model of the new mode (cloud ↔ local).
+  useEffect(() => {
+    const { models, activeModel, setActiveModel } = useModelStore.getState()
+    const inMode = (name: string | null) => {
+      if (!name) return false
+      const m = models.find((x) => x.name === name)
+      const isCloud = m?.provider === 'lu-cloud'
+      return appMode === 'cloud' ? isCloud : !isCloud
+    }
+    if (inMode(activeModel)) return
+    const fallback = models.find((m) =>
+      appMode === 'cloud' ? m.provider === 'lu-cloud' : m.provider !== 'lu-cloud',
+    )
+    if (fallback) setActiveModel(fallback.name)
+  }, [appMode])
+
+  // Local-hardware views (Models/Benchmark) don't exist in cloud mode — the
+  // header hides them, this guard covers a view that was already open.
+  useEffect(() => {
+    const ui = useUIStore.getState()
+    if (appMode === 'cloud' && (ui.currentView === 'models' || ui.currentView === 'benchmark')) {
+      ui.setView('chat')
+    }
+  }, [appMode])
 
   // ── Store backup/restore: survive NSIS updates that wipe WebView2 data ──
   const STORE_KEYS = [
@@ -614,6 +656,8 @@ export function AppShell() {
         backends={detectedBackends}
         onClose={() => setShowSelector(false)}
       />
+      {/* Cloud gate: login → plan → beta wall, opened by the header switch. */}
+      <CloudGateModal />
       <ShortcutsModal />
     </div>
   )

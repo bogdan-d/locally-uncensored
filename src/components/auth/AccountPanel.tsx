@@ -28,6 +28,57 @@ function Meter({ label, used, limit }: { label: string; used: number; limit: num
   )
 }
 
+// Same identities as lu-labs.ai/login — email+password inline, Google/GitHub
+// via the system browser (PKCE loopback in useCloudAuth.loginOAuth).
+function OAuthButtons({ onError }: { onError: (msg: string | null) => void }) {
+  const { loginOAuth } = useCloudAuth()
+  const [waiting, setWaiting] = useState<'google' | 'github' | null>(null)
+
+  const start = async (provider: 'google' | 'github') => {
+    if (waiting) return
+    setWaiting(provider)
+    onError(null)
+    try {
+      await loginOAuth(provider)
+    } catch (err) {
+      onError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setWaiting(null)
+    }
+  }
+
+  const btn =
+    'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded text-[0.7rem] font-medium border border-gray-200 dark:border-white/10 bg-gray-100 dark:bg-white/5 text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors disabled:opacity-40'
+
+  return (
+    <div className="flex items-center gap-2">
+      <button type="button" disabled={waiting !== null} onClick={() => void start('google')} className={btn}>
+        {waiting === 'google' ? (
+          <Loader2 size={11} className="animate-spin" />
+        ) : (
+          <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden>
+            <path fill="#4285F4" d="M23.5 12.3c0-.9-.1-1.5-.3-2.2H12v4.1h6.5c-.1 1.1-.8 2.7-2.4 3.8l3.7 2.9c2.3-2.1 3.7-5.2 3.7-8.6z" />
+            <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.8-2.9c-1 .7-2.4 1.2-4.2 1.2-3.2 0-6-2.1-6.9-5.1H1.2v3C3.2 21.3 7.3 24 12 24z" />
+            <path fill="#FBBC05" d="M5.1 14.3c-.2-.7-.4-1.5-.4-2.3s.1-1.6.4-2.3v-3H1.2C.4 8.3 0 10.1 0 12s.4 3.7 1.2 5.3l3.9-3z" />
+            <path fill="#EA4335" d="M12 4.7c1.8 0 3 .8 3.7 1.4L19 3C17 1.1 14.7 0 12 0 7.3 0 3.2 2.7 1.2 6.7l3.9 3C6 6.8 8.8 4.7 12 4.7z" />
+          </svg>
+        )}
+        Google
+      </button>
+      <button type="button" disabled={waiting !== null} onClick={() => void start('github')} className={btn}>
+        {waiting === 'github' ? (
+          <Loader2 size={11} className="animate-spin" />
+        ) : (
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+          </svg>
+        )}
+        GitHub
+      </button>
+    </div>
+  )
+}
+
 export function AccountPanel() {
   const { status, login, signup, logout } = useCloudAuth()
   const user = useCloudAuthStore((s) => s.user)
@@ -104,6 +155,12 @@ export function AccountPanel() {
             {mode === 'signin' ? 'No account yet? Sign up' : 'Have an account? Sign in'}
           </button>
         </div>
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-px bg-gray-200 dark:bg-white/10" />
+          <span className="text-[0.6rem] text-gray-400 dark:text-gray-600">or continue with</span>
+          <div className="flex-1 h-px bg-gray-200 dark:bg-white/10" />
+        </div>
+        <OAuthButtons onError={setError} />
       </form>
     )
   }

@@ -8,6 +8,7 @@ pub mod filesystem;
 pub mod gpu;
 pub mod health;
 pub mod install;
+pub mod oauth;
 pub mod process;
 pub mod proxy;
 pub mod remote;

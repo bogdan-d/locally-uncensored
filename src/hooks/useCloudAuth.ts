@@ -5,11 +5,12 @@
 // any manual provider setup.
 
 import { useCallback, useEffect, useRef } from 'react'
-import { supabaseCloud } from '../api/cloud/supabase'
+import { supabaseCloud, loginWithProvider, type OAuthProvider } from '../api/cloud/supabase'
 import { getMe, getQuota } from '../api/cloud/jobs'
 import { useCloudAuthStore, deriveCloudAvailable } from '../stores/cloudAuthStore'
 import { refreshCatalog } from '../stores/cloudCatalogStore'
 import { useProviderStore } from '../stores/providerStore'
+import { useSettingsStore } from '../stores/settingsStore'
 import type { CloudQuota } from '../lib/render/cloud-jobs'
 
 const REFRESH_MS = 5 * 60_000
@@ -35,11 +36,22 @@ async function probeAccount(): Promise<void> {
     }
     store.setSignedIn({ id: me.user.id, email: me.user.email }, { licenseActive, tier, access, quota })
     syncChatProvider()
+    syncAppMode()
   } catch {
     // 401 = no/expired session; network = cloud unreachable. Either way the
     // cloud axis is off for now — local features are unaffected.
     store.setSignedOut()
     syncChatProvider()
+    syncAppMode()
+  }
+}
+
+// Never strand the app in cloud mode without a usable cloud: sign-out,
+// license loss or the beta gate flips the global switch back to Local.
+function syncAppMode(): void {
+  const settings = useSettingsStore.getState()
+  if (settings.settings.appMode === 'cloud' && !deriveCloudAvailable(useCloudAuthStore.getState())) {
+    settings.updateSettings({ appMode: 'local' })
   }
 }
 
@@ -82,15 +94,24 @@ export function useCloudAuth() {
     await probeAccount()
   }, [])
 
+  // Google/GitHub via system browser + PKCE loopback (same identities as
+  // lu-labs.ai). The browser round-trip can take a while — callers show a
+  // "waiting for browser" state until this resolves.
+  const loginOAuth = useCallback(async (provider: OAuthProvider): Promise<void> => {
+    await loginWithProvider(provider)
+    await probeAccount()
+  }, [])
+
   const logout = useCallback(async (): Promise<void> => {
     await supabaseCloud().auth.signOut().catch(() => {})
     useCloudAuthStore.getState().setSignedOut()
     syncChatProvider()
+    syncAppMode()
   }, [])
 
   const refresh = useCallback(async (): Promise<void> => {
     await probeAccount()
   }, [])
 
-  return { status, user, login, signup, logout, refresh }
+  return { status, user, login, signup, loginOAuth, logout, refresh }
 }

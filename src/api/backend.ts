@@ -659,6 +659,21 @@ export async function secretDelete(account: string): Promise<void> {
   await invoke('secret_delete', { account })
 }
 
+// OAuth loopback (LU Cloud Google/GitHub login): bind a 127.0.0.1 port from
+// the fixed ladder, then await the browser round-trip. Rust side single-shots
+// the accept; the returned string is the raw callback query (code=… / error=…).
+export async function oauthStart(): Promise<number> {
+  if (!isTauri()) throw new Error('OAuth loopback unavailable (web build)')
+  const invoke = await getInvoke()
+  return (await invoke('oauth_start')) as number
+}
+
+export async function oauthWait(port: number, timeoutSecs: number): Promise<string> {
+  if (!isTauri()) throw new Error('OAuth loopback unavailable (web build)')
+  const invoke = await getInvoke()
+  return (await invoke('oauth_wait', { port, timeoutSecs })) as string
+}
+
 /** Fetch an external URL as text — works in both Tauri and dev mode */
 export async function fetchExternal(url: string): Promise<string> {
   if (isTauri()) {

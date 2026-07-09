@@ -31,8 +31,7 @@ export function Composer({ onOpenAdvanced }: Props) {
   const source = useCreateStore((s) => s.source)
   const isGenerating = useCreateStore((s) => s.isGenerating)
   const backend = useCreateStore((s) => s.backend)
-  const setBackend = useCreateStore((s) => s.setBackend)
-  const { generate, cancel, cloudAvailable, quota } = useCreateExp()
+  const { generate, cancel, quota } = useCreateExp()
 
   // The Create button turns into Cancel in place — a double-click's second
   // press would instantly cancel the run it just started. Ignore cancel
@@ -112,19 +111,8 @@ export function Composer({ onOpenAdvanced }: Props) {
             )}
             {meta.needsPrompt && <PromptHistory onPick={setPrompt} />}
             <div className="flex-1" />
-            {cloudAvailable && (
-              <Tooltip content="Render on your own machine or on LU's confidential cloud GPUs.">
-                <div>
-                  <Segmented
-                    size="sm"
-                    layoutId="backend-axis"
-                    value={backend}
-                    onChange={(v) => setBackend(v as 'local' | 'cloud')}
-                    options={[{ value: 'local', label: 'Local' }, { value: 'cloud', label: 'Cloud' }]}
-                  />
-                </div>
-              </Tooltip>
-            )}
+            {/* The backend axis moved to the global header switch (2.5.7) —
+                the Composer just reflects it via the CreditsMeter. */}
             {backend === 'cloud' && <CreditsMeter />}
             {meta.id !== 'removebg' && (
               <>

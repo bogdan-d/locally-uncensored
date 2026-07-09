@@ -4,6 +4,8 @@ export type SearchProvider = 'auto' | 'brave' | 'tavily'
 
 export type CavemanMode = 'off' | 'lite' | 'full' | 'ultra'
 
+export type AppMode = 'local' | 'cloud'
+
 export interface Settings {
   apiEndpoint: string
   temperature: number
@@ -12,6 +14,15 @@ export interface Settings {
   maxTokens: number
   theme: 'light' | 'dark'
   onboardingDone: boolean
+  /**
+   * Global Local/Cloud switch (2.5.7). 'local' = today's app (own hardware,
+   * every local provider). 'cloud' = the LU Cloud tier: chat/create/voice run
+   * on lu-labs.ai with the signed-in account, local-hardware surfaces hide.
+   * The header switch flips it; the CloudGateModal guards the cloud side
+   * (login → subscription → closed-beta gate). Persisted: reopen in the mode
+   * you left. Auto-falls back to 'local' when the account signs out.
+   */
+  appMode: AppMode
   /** Master switch for personas. When off, new chats get no persona system
    *  prompt (raw model). Default true. Ported from the uselu web companion. */
   personasEnabled: boolean
