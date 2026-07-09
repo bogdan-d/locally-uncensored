@@ -1,9 +1,12 @@
 import { backendCall, isTauri } from "./backend";
+import { cloudFetch, jsonOrError, CloudJobError } from "./cloud/client";
 
 /**
- * Voice API — 100% local
- * STT: Local Whisper (faster-whisper or openai-whisper) via /local-api/transcribe
- * TTS: Browser SpeechSynthesis (runs locally in the browser, no cloud)
+ * Voice API.
+ * Local mode: STT = local Whisper (faster-whisper) via /local-api/transcribe,
+ * TTS = Piper / external engine / browser SpeechSynthesis.
+ * Cloud mode (appMode 'cloud'): STT = Whisper large-v3-turbo, TTS = MiniMax
+ * Speech-02 — both via the metered lu-labs.ai endpoints (useVoice picks).
  */
 
 let whisperChecked = false
@@ -209,6 +212,41 @@ export async function transcribeAudio(audioBlob: Blob): Promise<string> {
   const data = await res.json();
   if (data.error) throw new Error(data.error);
   return data.transcript || "";
+}
+
+// --- LU Cloud voice (appMode 'cloud') ---
+
+/** Cloud STT: POST the recorded clip to /api/voice/transcribe (Whisper
+ *  large-v3-turbo, flat-metered per request — so useVoice disables the
+ *  interim-streaming cadence in cloud mode and only sends the final take). */
+export async function transcribeAudioCloud(audioBlob: Blob): Promise<string> {
+  const res = await cloudFetch("/api/voice/transcribe", {
+    method: "POST",
+    headers: { "content-type": audioBlob.type || "audio/wav" },
+    body: audioBlob,
+  });
+  const data = await jsonOrError<{ text?: string }>(res);
+  return data.text || "";
+}
+
+/** Cloud TTS: /api/voice/tts streams back MP3 (MiniMax Speech-02). Returns an
+ *  object URL for playNeuralAudio; the handful of clips per session makes
+ *  revocation bookkeeping not worth it. */
+export async function synthesizeCloud(text: string, voice?: string): Promise<string> {
+  const res = await cloudFetch("/api/voice/tts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text, ...(voice ? { voice } : {}) }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}) as { error?: string });
+    throw new CloudJobError(
+      typeof body.error === "string" ? body.error : `cloud TTS failed (${res.status})`,
+      res.status,
+    );
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 // --- Local neural TTS (Piper) ---

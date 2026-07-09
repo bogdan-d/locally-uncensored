@@ -4,9 +4,8 @@
 import type { CreateIntent } from '../../stores/createStore'
 
 export type RenderKind = 'image' | 'video'
-// 'upscale'/'eraser' are WaveSpeed utility endpoints (super-resolution / masked
-// object removal). Wired in the backend; the desktop Create UI surfaces them in
-// a follow-up port.
+// 'upscale'/'eraser' are WaveSpeed utility endpoints (super-resolution /
+// masked object removal) — cloud-only intents in the Create UI since 2.5.7.
 export type RenderOp = 'generate' | 'edit' | 'removebg' | 'animate' | 'upscale' | 'eraser'
 
 // One shared compute-credit wallet — text + media draw from the same budget
@@ -27,6 +26,10 @@ export function intentToJob(intent: CreateIntent): { kind: RenderKind; op: Rende
       return { kind: 'image', op: 'edit' }
     case 'removebg':
       return { kind: 'image', op: 'removebg' }
+    case 'upscale':
+      return { kind: 'image', op: 'upscale' }
+    case 'eraser':
+      return { kind: 'image', op: 'eraser' }
     case 'video':
       return { kind: 'video', op: 'generate' }
     case 'animate':

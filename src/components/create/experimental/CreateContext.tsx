@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, type React
 import { useCreate } from '../../../hooks/useCreate'
 import { useCloudCreate } from '../../../hooks/useCloudCreate'
 import { useCloudSession } from '../../../hooks/useCloudSession'
-import { useCreateStore } from '../../../stores/createStore'
+import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { getLoraModels, getVAEModels } from '../../../api/comfyui'
 import { getAllNodeInfo } from '../../../api/comfyui-nodes'
@@ -18,6 +18,8 @@ import type { CloudQuota } from '../../../lib/render/cloud-jobs'
 interface CreateExpValue {
   generate: () => void | Promise<void>
   cancel: () => void | Promise<void>
+  /** Video super-resolution on a finished cloud render (Lightbox "Enhance"). */
+  enhanceVideo: (item: GalleryItem, targetResolution?: '720p' | '1080p' | '2k' | '4k') => Promise<void>
   /** ComfyUI /object_info sampler + scheduler names (fallback lists until loaded). */
   samplerList: string[]
   schedulerList: string[]
@@ -117,6 +119,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   const value: CreateExpValue = {
     generate: backend === 'cloud' ? cloud.generate : generate,
     cancel: backend === 'cloud' ? cloud.cancel : cancel,
+    enhanceVideo: cloud.enhanceVideo,
     samplerList, schedulerList, loraList, vaeList,
     connected, modelsLoaded, modelLoadError, installCapability,
     cloudAvailable, quota, refreshQuota,

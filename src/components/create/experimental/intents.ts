@@ -1,4 +1,4 @@
-import { Image as ImageIcon, Wand2, Scissors, Video, Film } from 'lucide-react'
+import { Image as ImageIcon, Wand2, Scissors, Video, Film, Maximize2, Eraser } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { CreateIntent } from '../../../stores/createStore'
 
@@ -14,6 +14,8 @@ export interface IntentMeta {
   isVideo: boolean
   /** Capability id (custom-node bundle) this intent depends on, if any. */
   capability?: 'rmbg'
+  /** Single-purpose hosted endpoints — only offered on the cloud backend. */
+  cloudOnly?: true
   examples: string[]
 }
 
@@ -39,6 +41,20 @@ export const INTENTS: IntentMeta[] = [
     placeholder: '',
     needsSource: true, needsPrompt: false, allowsMask: false, isVideo: false,
     capability: 'rmbg',
+    examples: [],
+  },
+  {
+    id: 'upscale', label: 'Upscale', short: 'Upscale', icon: Maximize2,
+    placeholder: '',
+    needsSource: true, needsPrompt: false, allowsMask: false, isVideo: false,
+    cloudOnly: true,
+    examples: [],
+  },
+  {
+    id: 'eraser', label: 'Erase Object', short: 'Erase', icon: Eraser,
+    placeholder: '',
+    needsSource: true, needsPrompt: false, allowsMask: true, isVideo: false,
+    cloudOnly: true,
     examples: [],
   },
   {

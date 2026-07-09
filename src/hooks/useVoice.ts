@@ -1,10 +1,13 @@
 import { useCallback, useRef } from "react";
 import { useVoiceStore } from "../stores/voiceStore";
+import { useSettingsStore } from "../stores/settingsStore";
+import { useCloudAuthStore, deriveCloudAvailable } from "../stores/cloudAuthStore";
 import {
   recheckWhisperAvailable,
   recheckTtsAvailable,
   synthesizeNeural,
   synthesizeExternal,
+  synthesizeCloud,
   playNeuralAudio,
   stopNeuralAudio,
   isSpeechSynthesisSupported,
@@ -14,6 +17,7 @@ import {
   getVoicesAsync,
   createAudioRecorder,
   transcribeAudio,
+  transcribeAudioCloud,
   type AudioRecorder,
 } from "../api/voice";
 import { log } from "../lib/logger";
@@ -27,14 +31,20 @@ export function useVoice() {
   const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const interimBusyRef = useRef(false);
 
+  // Cloud mode routes voice through the metered lu-labs.ai endpoints — no
+  // local Whisper/Piper install needed, both buttons just work.
+  const appMode = useSettingsStore((s) => s.settings.appMode);
+  const cloudUsable = useCloudAuthStore(deriveCloudAvailable);
+  const cloudVoice = appMode === "cloud" && cloudUsable;
+
   // Reactive: the source of truth is the store flag set by the startup probe
   // (App.tsx) and the in-app install (Settings). Reading a module-level boolean
   // here was the bug — it never re-rendered when Whisper came up.
-  const sttSupported = store.sttAvailable;
+  const sttSupported = cloudVoice || store.sttAvailable;
   const ttsSupported = isSpeechSynthesisSupported();
 
   // Reactive neural-TTS availability (Piper), same model as sttAvailable.
-  const ttsAvailable = store.ttsAvailable;
+  const ttsAvailable = cloudVoice || store.ttsAvailable;
 
   // External HTTP TTS engine configured + selected (#58). Lets the read-aloud
   // button light up even on a machine without Piper or browser voices.
@@ -73,7 +83,10 @@ export function useVoice() {
         store.setRecording(true);
         store.setTranscript("");
 
-        if (onInterim) {
+        // Cloud STT meters a FLAT rate per request — an interim tick every
+        // 1.4 s would bill a full transcription each time. Cloud dictation
+        // transcribes the final take only.
+        if (onInterim && !cloudVoice) {
           streamTimerRef.current = setInterval(async () => {
             const rec = recorderRef.current;
             if (!rec?.isRecording() || interimBusyRef.current) return;
@@ -101,7 +114,7 @@ export function useVoice() {
         recorderRef.current = null;
       }
     },
-    [store],
+    [store, cloudVoice],
   );
 
   const stopRecording = useCallback(async (): Promise<string> => {
@@ -120,7 +133,7 @@ export function useVoice() {
       // Final full-take transcription — more accurate than the interim chunks.
       store.setTranscribing(true);
       try {
-        const transcript = await transcribeAudio(blob);
+        const transcript = cloudVoice ? await transcribeAudioCloud(blob) : await transcribeAudio(blob);
         store.setTranscript(transcript);
         return transcript;
       } catch (err) {
@@ -136,7 +149,7 @@ export function useVoice() {
       recorderRef.current = null;
       return "";
     }
-  }, [store]);
+  }, [store, cloudVoice]);
 
   // Speak `text`. Prefers local neural TTS (Piper) when installed; otherwise
   // falls back to the browser's SpeechSynthesis voices. `streaming` only
@@ -146,13 +159,24 @@ export function useVoice() {
     async (text: string, streaming: boolean) => {
       if (!store.ttsEnabled) return;
       // An external HTTP engine (#58) needs a configured URL; Piper needs to be
-      // installed; the browser path needs SpeechSynthesis. Bail only if none of
-      // the three can speak.
+      // installed; the browser path needs SpeechSynthesis; cloud mode brings
+      // its own hosted engine. Bail only if none of them can speak.
       const externalReady = store.ttsMode === "external" && !!store.externalTtsUrl.trim();
-      if (!externalReady && !store.ttsAvailable && !ttsSupported) return;
+      if (!cloudVoice && !externalReady && !store.ttsAvailable && !ttsSupported) return;
 
       store.setSpeaking(true);
       try {
+        // Cloud mode: hosted MiniMax TTS first; a failure (offline, 429)
+        // falls through to whatever local engine exists.
+        if (cloudVoice) {
+          try {
+            const url = await synthesizeCloud(text, store.cloudTtsVoice || undefined);
+            await playNeuralAudio(url);
+            return;
+          } catch (err) {
+            log.error("Cloud TTS failed, falling back to local engines", { err });
+          }
+        }
         // External HTTP TTS engine takes precedence when selected + configured.
         if (externalReady) {
           try {
@@ -188,7 +212,7 @@ export function useVoice() {
         store.setSpeaking(false);
       }
     },
-    [store, ttsSupported]
+    [store, ttsSupported, cloudVoice]
   );
 
   const speakText = useCallback((text: string) => speakInternal(text, false), [speakInternal]);

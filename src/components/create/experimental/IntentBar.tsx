@@ -12,6 +12,11 @@ const EASE = 'ease-[cubic-bezier(0.22,1,0.36,1)]'
 export function IntentBar() {
   const intent = useCreateStore((s) => s.intent())
   const setIntent = useCreateStore((s) => s.setIntent)
+  const backend = useCreateStore((s) => s.backend)
+  // Utility intents (upscale/eraser) are hosted-only endpoints — hide them on
+  // the local backend. setIntent's base already clears a stale utilityOp when
+  // the mode flips back and the user picks any normal intent.
+  const intents = INTENTS.filter((m) => !m.cloudOnly || backend === 'cloud')
 
   return (
     <div
@@ -22,7 +27,7 @@ export function IntentBar() {
       // (which runs at scale 0.7): 0.7 × 1.09 ≈ 0.763.
       style={{ transform: 'scale(0.763)', transformOrigin: 'center' }}
     >
-      {INTENTS.map((meta) => {
+      {intents.map((meta) => {
         const selected = intent === meta.id
         const Icon = meta.icon
         return (

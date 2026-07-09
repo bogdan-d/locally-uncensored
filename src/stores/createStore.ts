@@ -20,7 +20,12 @@ export type CreateBackend = 'local' | 'cloud'
  * mode / image sub-mode / video sub-mode / removebg. The `mode` + sub-mode
  * enums stay the load-bearing state; `intent` is a derived view over them.
  */
-export type CreateIntent = 'image' | 'edit' | 'removebg' | 'video' | 'animate'
+export type CreateIntent = 'image' | 'edit' | 'removebg' | 'video' | 'animate' | 'upscale' | 'eraser'
+
+/** Cloud-only single-purpose WaveSpeed endpoints (2.5.7): super-resolution
+ *  and masked object removal. Local backends have no lane for them, so the
+ *  IntentBar only offers these while the cloud backend is active. */
+export type UtilityOp = 'upscale' | 'eraser'
 
 /**
  * A source or mask image loaded into the Stage input slot. `filename` is the
@@ -30,14 +35,17 @@ export type CreateIntent = 'image' | 'edit' | 'removebg' | 'video' | 'animate'
  */
 export interface ImageRef { filename: string; url: string; width: number; height: number }
 
-/** Flatten mode / sub-mode / removebg into the single intent the UI drives. */
+/** Flatten mode / sub-mode / removebg / utilityOp into the single intent the
+ *  UI drives. */
 export function deriveIntent(s: {
   removebg: boolean
+  utilityOp: UtilityOp | null
   mode: 'image' | 'video'
   imageSubMode: 'text2img' | 'img2img'
   videoSubMode: 't2v' | 'i2v'
 }): CreateIntent {
   if (s.removebg) return 'removebg'
+  if (s.utilityOp) return s.utilityOp
   if (s.mode === 'video') return s.videoSubMode === 'i2v' ? 'animate' : 'video'
   return s.imageSubMode === 'img2img' ? 'edit' : 'image'
 }
@@ -146,6 +154,10 @@ interface CreateState {
   // ── redesign additions: flat-intent model + unified inputs + extra params ──
   videoSubMode: 't2v' | 'i2v'
   removebg: boolean
+  /** Cloud-only utility intents (upscale/eraser); null = normal generate axis. */
+  utilityOp: UtilityOp | null
+  /** Upscale target for the cloud super-resolution endpoint. */
+  targetResolution: '2k' | '4k' | '8k'
   showNegative: boolean
   selectedLoras: { name: string; strength: number }[]
   selectedVae: string
@@ -215,6 +227,7 @@ interface CreateState {
   setSelectedVae: (name: string) => void
   setClipSkip: (n: number) => void
   setGrowMaskBy: (n: number) => void
+  setTargetResolution: (r: '2k' | '4k' | '8k') => void
   setSource: (img: ImageRef | null) => void
   setMask: (img: ImageRef | null) => void
   setBackend: (backend: CreateBackend) => void
@@ -277,6 +290,8 @@ export const useCreateStore = create<CreateState>()(
       // ── redesign additions ──
       videoSubMode: 't2v' as 't2v' | 'i2v',
       removebg: false,
+      utilityOp: null as UtilityOp | null,
+      targetResolution: '4k' as '2k' | '4k' | '8k',
       showNegative: false,
       selectedLoras: [] as { name: string; strength: number }[],
       selectedVae: 'auto',
@@ -382,11 +397,15 @@ export const useCreateStore = create<CreateState>()(
         // mirror setMode's reset so image resolution never leaks into video.
         // A stale error from the previous intent never carries over.
         const dropAll = { source: null, mask: null, sourceSetAt: 0 }
-        const base = { removebg: false, error: null }
+        const base = { removebg: false, utilityOp: null, error: null }
         switch (intent) {
           case 'image':    return { ...base, mode: 'image' as const, imageSubMode: 'text2img' as const, ...dropAll }
           case 'edit':     return { ...base, mode: 'image' as const, imageSubMode: 'img2img' as const }
-          case 'removebg': return { removebg: true, error: null, mode: 'image' as const, imageSubMode: 'img2img' as const, mask: null }
+          case 'removebg': return { ...base, removebg: true, mode: 'image' as const, imageSubMode: 'img2img' as const, mask: null }
+          // Cloud-only utility endpoints: upscale keeps the source (no mask,
+          // no prompt); eraser keeps source + mask (paint what to remove).
+          case 'upscale':  return { ...base, utilityOp: 'upscale' as const, mode: 'image' as const, imageSubMode: 'img2img' as const, mask: null }
+          case 'eraser':   return { ...base, utilityOp: 'eraser' as const, mode: 'image' as const, imageSubMode: 'img2img' as const }
           case 'video': {
             const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
             return { ...base, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
@@ -408,9 +427,15 @@ export const useCreateStore = create<CreateState>()(
       setSelectedVae: (name) => set({ selectedVae: name || 'auto' }),
       setClipSkip: (n) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(n))) }),
       setGrowMaskBy: (n) => set({ growMaskBy: Math.max(0, Math.min(64, Math.floor(n))) }),
+      setTargetResolution: (targetResolution) => set({ targetResolution }),
       setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null }) }),
       setMask: (mask) => set({ mask }),
-      setBackend: (backend) => set({ backend }),
+      // Flipping to local clears a cloud-only utility intent (upscale/eraser
+      // have no local lane) so the surface never strands on a dead op.
+      setBackend: (backend) =>
+        set((s) =>
+          backend === 'local' && s.utilityOp ? { backend, utilityOp: null, mask: null, error: null } : { backend },
+        ),
       setCloudImageModel: (cloudImageModel) => set({ cloudImageModel }),
       setCloudVideoModel: (cloudVideoModel) => set({ cloudVideoModel }),
       setCaps: (caps) => set({ caps }),

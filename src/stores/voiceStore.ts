@@ -32,6 +32,8 @@ interface VoiceState {
   externalTtsUrl: string;
   /** Voice name passed to the external engine (e.g. "af_bella" / "alloy"). */
   externalTtsVoice: string;
+  /** MiniMax voice for the cloud TTS endpoint (appMode 'cloud'). */
+  cloudTtsVoice: string;
 
   // Actions
   setRecording: (recording: boolean) => void;
@@ -51,6 +53,7 @@ interface VoiceState {
       ttsMode: "piper" | "external";
       externalTtsUrl: string;
       externalTtsVoice: string;
+      cloudTtsVoice: string;
     }>
   ) => void;
   resetTransient: () => void;
@@ -86,6 +89,7 @@ export const useVoiceStore = create<VoiceState>()(
       ttsMode: "piper",
       externalTtsUrl: "",
       externalTtsVoice: "",
+      cloudTtsVoice: "Wise_Woman",
 
       // Actions
       setRecording: (recording) => set({ isRecording: recording }),
@@ -117,6 +121,7 @@ export const useVoiceStore = create<VoiceState>()(
           ttsMode: "piper",
           externalTtsUrl: "",
           externalTtsVoice: "",
+          cloudTtsVoice: "Wise_Woman",
         }),
     }),
     {
@@ -134,6 +139,7 @@ export const useVoiceStore = create<VoiceState>()(
         // stays Piper (hussam-batshon: "after saving it still shows Piper").
         ttsMode: state.ttsMode,
         externalTtsUrl: state.externalTtsUrl,
+        cloudTtsVoice: state.cloudTtsVoice,
         externalTtsVoice: state.externalTtsVoice,
       }),
     }

@@ -31,6 +31,8 @@ export function Composer({ onOpenAdvanced }: Props) {
   const source = useCreateStore((s) => s.source)
   const isGenerating = useCreateStore((s) => s.isGenerating)
   const backend = useCreateStore((s) => s.backend)
+  const targetResolution = useCreateStore((s) => s.targetResolution)
+  const setTargetResolution = useCreateStore((s) => s.setTargetResolution)
   const { generate, cancel, quota } = useCreateExp()
 
   // The Create button turns into Cancel in place — a double-click's second
@@ -47,6 +49,9 @@ export function Composer({ onOpenAdvanced }: Props) {
   }, [cancel])
 
   const needPrompt = meta.needsPrompt
+  // Single-purpose endpoints (cutout/upscale/eraser): no prompt, no
+  // generation knobs, no model choice — just the input (+ mask/resolution).
+  const isUtility = meta.id === 'removebg' || meta.id === 'upscale' || meta.id === 'eraser'
   const creditsOk =
     backend !== 'cloud' ||
     (quota != null && quota.remaining.credits >= quota.costs[intentToJob(intent).kind])
@@ -58,7 +63,7 @@ export function Composer({ onOpenAdvanced }: Props) {
   return (
     <div className="shrink-0 px-4 pb-4 pt-2">
       <div className="mx-auto w-full max-w-[760px] space-y-2.5">
-        {meta.id !== 'removebg' && <QuickControls />}
+        {!isUtility && <QuickControls />}
 
         <div className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors">
           {meta.needsPrompt && (
@@ -114,7 +119,20 @@ export function Composer({ onOpenAdvanced }: Props) {
             {/* The backend axis moved to the global header switch (2.5.7) —
                 the Composer just reflects it via the CreditsMeter. */}
             {backend === 'cloud' && <CreditsMeter />}
-            {meta.id !== 'removebg' && (
+            {meta.id === 'upscale' && (
+              <Tooltip content="Target resolution for the super-resolution pass.">
+                <div>
+                  <Segmented
+                    size="sm"
+                    layoutId="upscale-res"
+                    value={targetResolution}
+                    onChange={(v) => setTargetResolution(v as '2k' | '4k' | '8k')}
+                    options={[{ value: '2k', label: '2K' }, { value: '4k', label: '4K' }, { value: '8k', label: '8K' }]}
+                  />
+                </div>
+              </Tooltip>
+            )}
+            {!isUtility && (
               <>
                 <ModelChip />
                 <Tooltip content="All advanced settings — sampler, seed, LoRA, VAE and more.">
