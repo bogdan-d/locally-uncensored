@@ -81,6 +81,10 @@ export interface ProviderModel {
   contextLength?: number
   supportsTools?: boolean
   supportsVision?: boolean
+  /** Think-button capability (LU Cloud /models `think` field): 'toggle' shows
+   *  the switch, 'always' reasons regardless, 'never' hides it. Absent =
+   *  fall back to the local name-heuristic. */
+  thinkMode?: 'toggle' | 'always' | 'never'
 }
 
 // ── Chat Messages (unified format) ────────────────────────────

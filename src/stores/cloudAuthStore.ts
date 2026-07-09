@@ -11,15 +11,23 @@ export interface CloudUser {
   email?: string
 }
 
-interface CloudAuthState {
+export interface CloudAccount {
+  licenseActive: boolean
+  /** Canonical tier slug from /api/me, null while signed out/unknown. */
+  tier: string | null
+  /** Launch gate (Max-only closed beta). Licensed-but-gated users get the
+   *  closed-beta wall instead of the cloud. */
+  access: boolean
+  quota: CloudQuota | null
+}
+
+interface CloudAuthState extends CloudAccount {
   /** 'probing' until the keychain session restore + first /api/me resolve. */
   status: 'probing' | 'signed-out' | 'signed-in'
   user: CloudUser | null
-  licenseActive: boolean
-  quota: CloudQuota | null
 
   setSignedOut: () => void
-  setSignedIn: (user: CloudUser, licenseActive: boolean, quota: CloudQuota | null) => void
+  setSignedIn: (user: CloudUser, account: CloudAccount) => void
   setQuota: (quota: CloudQuota | null) => void
 }
 
@@ -27,21 +35,24 @@ export const useCloudAuthStore = create<CloudAuthState>()((set) => ({
   status: 'probing',
   user: null,
   licenseActive: false,
+  tier: null,
+  access: true,
   quota: null,
 
   setSignedOut: () =>
-    set({ status: 'signed-out', user: null, licenseActive: false, quota: null }),
-  setSignedIn: (user, licenseActive, quota) =>
-    set({ status: 'signed-in', user, licenseActive, quota }),
+    set({ status: 'signed-out', user: null, licenseActive: false, tier: null, access: true, quota: null }),
+  setSignedIn: (user, account) => set({ status: 'signed-in', user, ...account }),
   setQuota: (quota) => set({ quota }),
 }))
 
-/** The whole cloud axis in one predicate: signed in, actively licensed, and
- *  on a tier whose monthly media budget is > 0 (self-host tiers report 0). */
+/** The whole cloud axis in one predicate: signed in, actively licensed,
+ *  through the launch gate, and on a tier whose monthly credit budget is > 0
+ *  (self-host tiers report 0). */
 export function deriveCloudAvailable(state: {
   user: CloudUser | null
   licenseActive: boolean
+  access: boolean
   quota: CloudQuota | null
 }): boolean {
-  return Boolean(state.user && state.licenseActive && (state.quota?.limits.credits ?? 0) > 0)
+  return Boolean(state.user && state.licenseActive && state.access && (state.quota?.limits.credits ?? 0) > 0)
 }

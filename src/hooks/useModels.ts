@@ -85,6 +85,7 @@ export function useModels() {
               name: prefixedName, model: pm.id, size: 0, type: 'text' as const,
               provider: pm.provider, providerName: pm.providerName,
               contextLength: pm.contextLength, supportsTools: pm.supportsTools, supportsVision: pm.supportsVision,
+              thinkMode: pm.thinkMode,
             } satisfies CloudModel
           })
         })

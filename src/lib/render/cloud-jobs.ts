@@ -9,13 +9,15 @@ export type RenderKind = 'image' | 'video'
 // a follow-up port.
 export type RenderOp = 'generate' | 'edit' | 'removebg' | 'animate' | 'upscale' | 'eraser'
 
+// One shared compute-credit wallet — text + media draw from the same budget
+// (server shape: uselu /api/jobs/quota).
 export interface CloudQuota {
   tier: string
   period: string
-  limits: { tokens: number; credits: number }
+  limits: { credits: number }
   costs: { image: number; video: number }
-  used: { tokens_used: number; credits_used: number }
-  remaining: { tokens: number; credits: number }
+  used: { credits_used: number }
+  remaining: { credits: number }
 }
 
 /** Which queue kind + workflow op a Create intent renders as. */

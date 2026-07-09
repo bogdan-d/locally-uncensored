@@ -21,7 +21,7 @@ import {
   CloudJobError,
   type CloudJobParams,
 } from '../api/cloud/jobs'
-import { defaultCloudModel } from '../lib/render/cloud-models'
+import { defaultCloudModel, cloudMediaLive } from '../stores/cloudCatalogStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
@@ -59,6 +59,12 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind).id
 
     s.setError(null)
+    if (!cloudMediaLive()) {
+      // Server MEDIA_LIVE switch is off — the GPU fleet isn't up, a submit
+      // would only 503. Mirror the server's honest "coming soon".
+      s.setError('Cloud rendering is coming soon — the GPU fleet is not live yet.')
+      return
+    }
     if (op === 'generate' && s.prompt.trim().length === 0) {
       s.setError('Please enter a prompt.')
       return

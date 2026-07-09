@@ -61,6 +61,13 @@ interface OpenAIModelEntry {
   object: string
   created?: number
   owned_by?: string
+  // Catalogue metadata some OpenAI-compat servers attach (LU Cloud does):
+  // display name, real context window, vision modality, think capability.
+  // Absent everywhere else — the mapping below falls back to heuristics.
+  name?: string
+  context_length?: number
+  input_modalities?: string[]
+  think?: 'toggle' | 'always' | 'never'
 }
 
 // ── Known context lengths for popular models ───────────────────
@@ -395,11 +402,13 @@ export class OpenAIProvider implements ProviderClient {
 
     return models.map(m => ({
       id: m.id,
-      name: m.id,
+      name: m.name ?? m.id,
       provider: 'openai' as const,
       providerName: this.config.name,
-      contextLength: KNOWN_CONTEXT[m.id] ?? guessContextFromName(m.id),
+      contextLength: m.context_length ?? KNOWN_CONTEXT[m.id] ?? guessContextFromName(m.id),
       supportsTools: true,
+      supportsVision: m.input_modalities?.includes('image') || undefined,
+      thinkMode: m.think,
     }))
   }
 

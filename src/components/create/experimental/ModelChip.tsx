@@ -1,11 +1,51 @@
 import { useCreateStore } from '../../../stores/createStore'
+import { useCloudCatalogStore, defaultCloudModel } from '../../../stores/cloudCatalogStore'
 import { Select, type SelectOption } from '../ui/Select'
 import { TYPE_BADGE } from './badges'
 
-// Badge-aware model picker (replaces the raw <select>). Desktop build: only
-// the locally installed checkpoints — the web app's hosted-catalog branch
-// (backend === 'cloud') does not exist here.
+const CLOUD_BADGE = { label: 'Cloud', color: 'bg-violet-500/15 text-violet-300' }
+
+// Badge-aware model picker (replaces the raw <select>). Local backend lists
+// the installed checkpoints; the cloud backend lists the hosted catalog
+// (server-driven via cloudCatalogStore) and writes the cloud model slugs.
 export function ModelChip() {
+  const backend = useCreateStore((s) => s.backend)
+  return backend === 'cloud' ? <CloudModelChip /> : <LocalModelChip />
+}
+
+function CloudModelChip() {
+  const mode = useCreateStore((s) => s.mode)
+  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
+  const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  const setCloudImageModel = useCreateStore((s) => s.setCloudImageModel)
+  const setCloudVideoModel = useCreateStore((s) => s.setCloudVideoModel)
+  const models = useCloudCatalogStore((s) => s.models)
+
+  const isVideo = mode === 'video'
+  const kind = isVideo ? 'video' : 'image'
+  const list = models.filter((m) => m.kind === kind)
+  const value = (isVideo ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind)?.id || ''
+
+  const options: SelectOption[] = list.map((m) => ({
+    value: m.id,
+    label: m.label,
+    badge: CLOUD_BADGE,
+  }))
+
+  return (
+    <Select
+      size="sm"
+      searchable
+      align="right"
+      className="min-w-[150px] max-w-[230px]"
+      options={options}
+      value={value}
+      onChange={(v) => (isVideo ? setCloudVideoModel(v) : setCloudImageModel(v))}
+    />
+  )
+}
+
+function LocalModelChip() {
   const mode = useCreateStore((s) => s.mode)
   const imageModel = useCreateStore((s) => s.imageModel)
   const videoModel = useCreateStore((s) => s.videoModel)

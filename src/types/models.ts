@@ -33,6 +33,7 @@ export interface CloudModel {
   contextLength?: number
   supportsTools?: boolean
   supportsVision?: boolean
+  thinkMode?: 'toggle' | 'always' | 'never'
 }
 
 // Image model (e.g. Stable Diffusion, SDXL, Fooocus, ComfyUI)

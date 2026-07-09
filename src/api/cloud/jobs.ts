@@ -48,7 +48,14 @@ export interface CloudJob {
 
 export interface CloudMe {
   user: { id: string; email?: string } | null
-  license: { status: string }
+  license: {
+    status: string
+    /** Canonical tier slug (hosted | hosted-pro | hosted-max | self-host). */
+    tier?: string
+    /** Launch gate (Max-only closed beta): false = licensed but not yet
+     *  allowed in. Absent on older servers = allowed. */
+    access?: boolean
+  }
 }
 
 /** Stage a source image or mask; returns the render-inputs storage path. */

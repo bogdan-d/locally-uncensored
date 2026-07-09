@@ -127,18 +127,13 @@ export function AccountPanel() {
 
       {licenseActive && quota ? (
         <div className="space-y-2">
+          {/* One shared compute-credit wallet — chat, images, video and voice
+              all draw from the same monthly budget. */}
           <Meter
-            label="Media credits (this month)"
+            label="Cloud credits (this month)"
             used={Number(quota.used.credits_used)}
             limit={quota.limits.credits}
           />
-          {quota.limits.tokens > 0 && (
-            <Meter
-              label="Chat tokens (this month)"
-              used={Number(quota.used.tokens_used)}
-              limit={quota.limits.tokens}
-            />
-          )}
         </div>
       ) : (
         <p className="text-[0.7rem] text-gray-600 dark:text-gray-400">

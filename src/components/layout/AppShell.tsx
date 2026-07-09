@@ -52,7 +52,7 @@ export function AppShell() {
     'locally-uncensored-agent-mode', 'locally-uncensored-memory',
     'locally-uncensored-agent-workflows', 'locally-uncensored-agent',
     'locally-uncensored-voice', 'lu-benchmark-store', 'lu-update-checker-v2',
-    'rag-store', 'workflow-store',
+    'rag-store', 'workflow-store', 'lu-cloud-catalog',
     // v2.5.0 launch teasers — back these up so an auto-updater who clicked
     // "Don't show me again" / dismissed the image-tool noti keeps that choice
     // across the NSIS update (which wipes WebView2 localStorage).

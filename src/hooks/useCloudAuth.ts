@@ -7,7 +7,8 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { supabaseCloud } from '../api/cloud/supabase'
 import { getMe, getQuota } from '../api/cloud/jobs'
-import { useCloudAuthStore } from '../stores/cloudAuthStore'
+import { useCloudAuthStore, deriveCloudAvailable } from '../stores/cloudAuthStore'
+import { refreshCatalog } from '../stores/cloudCatalogStore'
 import { useProviderStore } from '../stores/providerStore'
 import type { CloudQuota } from '../lib/render/cloud-jobs'
 
@@ -19,28 +20,34 @@ async function probeAccount(): Promise<void> {
     const me = await getMe()
     if (!me.user) {
       store.setSignedOut()
-      syncChatProvider(null)
+      syncChatProvider()
       return
     }
     const licenseActive = me.license?.status === 'active'
+    // Launch gate (Max-only closed beta): absent on older servers = allowed.
+    const access = me.license?.access !== false
+    const tier = me.license?.tier ?? null
     let quota: CloudQuota | null = null
-    if (licenseActive) {
+    if (licenseActive && access) {
+      // Gated accounts would just 403 here — skip the round-trip.
       quota = await getQuota().catch(() => null)
+      void refreshCatalog()
     }
-    store.setSignedIn({ id: me.user.id, email: me.user.email }, licenseActive, quota)
-    syncChatProvider(quota)
+    store.setSignedIn({ id: me.user.id, email: me.user.email }, { licenseActive, tier, access, quota })
+    syncChatProvider()
   } catch {
     // 401 = no/expired session; network = cloud unreachable. Either way the
     // cloud axis is off for now — local features are unaffected.
     store.setSignedOut()
-    syncChatProvider(null)
+    syncChatProvider()
   }
 }
 
 // Chat side of the account: the lu-cloud provider is enabled exactly when the
-// tier has a token budget. Uses the store action so the registry cache clears.
-function syncChatProvider(quota: CloudQuota | null): void {
-  const enabled = (quota?.limits.tokens ?? 0) > 0
+// whole cloud axis is (signed in + licensed + gate + credit budget). Uses the
+// store action so the registry cache clears.
+function syncChatProvider(): void {
+  const enabled = deriveCloudAvailable(useCloudAuthStore.getState())
   const current = useProviderStore.getState().providers['lu-cloud']
   if (current && current.enabled !== enabled) {
     useProviderStore.getState().setProviderConfig('lu-cloud', { enabled })
@@ -78,7 +85,7 @@ export function useCloudAuth() {
   const logout = useCallback(async (): Promise<void> => {
     await supabaseCloud().auth.signOut().catch(() => {})
     useCloudAuthStore.getState().setSignedOut()
-    syncChatProvider(null)
+    syncChatProvider()
   }, [])
 
   const refresh = useCallback(async (): Promise<void> => {

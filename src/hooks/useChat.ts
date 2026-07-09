@@ -257,7 +257,14 @@ export function useChat() {
       // the tags silently and keepThinking=false below drops the native
       // thinking field, so the user sees a clean answer without a
       // planning preamble.
-      const canThink = isThinkingCompatible(activeModel)
+      // Server-declared think capability (LU Cloud models carry thinkMode from
+      // /models): 'always'/'never' models get no reasoning_effort at all — the
+      // upstream reasons (or not) regardless, and forcing 'minimal' on an
+      // always-thinker can 4xx. 'toggle' and unknown fall through to the
+      // name-heuristic + settings switch.
+      const activeMeta = useModelStore.getState().models.find((m) => m.name === activeModel)
+      const thinkMode = activeMeta && 'thinkMode' in activeMeta ? activeMeta.thinkMode : undefined
+      const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
       const plainTextPlanner = isPlainTextPlanner(activeModel)
       const useThinking: boolean | undefined = canThink
         ? (settings.thinkingEnabled === false && plainTextPlanner
