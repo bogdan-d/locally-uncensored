@@ -86,7 +86,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.event.release.tag_name || github.event.inputs.tag || 'v1.3.0' }}
-          releaseName: 'Locally Uncensored ${{ github.event.release.tag_name || github.event.inputs.tag }}'
+          releaseName: 'LU ${{ github.event.release.tag_name || github.event.inputs.tag }}'
           releaseBody: |
             ## Download
 

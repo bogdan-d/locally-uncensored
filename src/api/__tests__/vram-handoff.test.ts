@@ -264,7 +264,7 @@ describe('comfyErrorHint', () => {
   it('FramePack HyVideoModel error → points at the custom-node, not LU', () => {
     const h = comfyErrorHint('FramePackSampler', 'AttributeError', "'HyVideoModel' object has no attribute 'diffusion_model'")
     expect(h).toMatch(/FramePackWrapper/)
-    expect(h).toMatch(/not in Locally Uncensored/i)
+    expect(h).toMatch(/not in LU/i)
     expect(h).toMatch(/SVD|Wan 2\.2/)
   })
 
@@ -276,7 +276,7 @@ describe('comfyErrorHint', () => {
   it('Windows pagefile too small (os error 1455) → virtual-memory advice, not an LU bug (#61)', () => {
     const h = comfyErrorHint('CLIPLoader', undefined, 'The paging file is too small for this operation to complete. (os error 1455)')
     expect(h).toMatch(/virtual memory|page file/i)
-    expect(h).toMatch(/not a Locally Uncensored bug/i)
+    expect(h).toMatch(/not an LU bug/i)
     // matches on the bare os-error code too, regardless of node
     expect(comfyErrorHint(undefined, undefined, 'os error 1455')).toMatch(/virtual memory/i)
   })

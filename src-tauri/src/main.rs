@@ -72,7 +72,7 @@ fn main() {
     init_tracing();
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
-        "Locally Uncensored starting"
+        "LU starting"
     );
 
     let app_state = AppState::new();
@@ -297,7 +297,7 @@ fn main() {
 
             TrayIconBuilder::new()
                 .icon(tray_icon)
-                .tooltip("Locally Uncensored")
+                .tooltip("LU")
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     match event.id().as_ref() {

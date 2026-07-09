@@ -465,8 +465,8 @@ describe('OpenAIProvider', () => {
       )
       await provider.listModels()
       const headers = fetchSpy.mock.calls[0][1]?.headers as Record<string, string>
-      expect(headers['HTTP-Referer']).toBe('https://locallyuncensored.com')
-      expect(headers['X-Title']).toBe('Locally Uncensored')
+      expect(headers['HTTP-Referer']).toBe('https://lu-labs.ai')
+      expect(headers['X-Title']).toBe('LU')
       vi.restoreAllMocks()
     })
 

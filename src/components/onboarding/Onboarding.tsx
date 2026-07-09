@@ -746,7 +746,7 @@ export function Onboarding() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
           >
-            <h1 className="text-base font-semibold">Locally Uncensored</h1>
+            <h1 className="text-base font-semibold">LU <span className="font-normal opacity-60">by LU Labs</span></h1>
             <p className={`text-[0.75rem] leading-relaxed ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
               Private, local AI chat that works right away — no extra software to install. No servers, no tracking, everything stays on your machine.
             </p>
@@ -790,7 +790,7 @@ export function Onboarding() {
                     Advanced disclosure below (kept, just no longer required). */}
                 <h2 className="text-base font-semibold">Ready to chat</h2>
                 <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Locally Uncensored runs its own engine on your machine — nothing to install. Pick a starter model next.
+                  LU runs its own engine on your machine — nothing to install. Pick a starter model next.
                 </p>
 
                 <button

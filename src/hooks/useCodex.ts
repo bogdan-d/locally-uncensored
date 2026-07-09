@@ -56,7 +56,7 @@ function diagLog(_tag: string, _data: unknown): void {
 // framing for a read-only reviewer and would fight the executor gate. The
 // list-stripping below (REVIEW_MODE_FORBIDDEN_TOOLS) still enforces
 // read-only programmatically even if the model tries a write tool anyway.
-const CODEX_REVIEW_SYSTEM_PROMPT = `You are the Coding Agent in REVIEW MODE — a read-only code reviewer inside Locally Uncensored. You DO NOT modify any files, run any commands, or change any state. Your job is to read code with file_read / file_list / file_search / git_diff / git_log and return INLINE COMMENTS only.
+const CODEX_REVIEW_SYSTEM_PROMPT = `You are the Coding Agent in REVIEW MODE — a read-only code reviewer inside LU. You DO NOT modify any files, run any commands, or change any state. Your job is to read code with file_read / file_list / file_search / git_diff / git_log and return INLINE COMMENTS only.
 
 REVIEW MODE CONTRACT (binding):
 - You MAY call: file_read, file_list, file_search, git_status, git_log, git_diff, system_info, process_list, get_current_time, web_fetch, web_search.
@@ -64,7 +64,7 @@ REVIEW MODE CONTRACT (binding):
 - Output format: a markdown report with sections "## Summary", "## Findings (priority order)", "## Suggested follow-ups". For each finding cite the file + line range (path:line or path:start-end).
 - Be direct. No flattery, no boilerplate. If the code is fine, say so in one sentence and stop.`
 
-const CODEX_SYSTEM_PROMPT = `You are the Coding Agent, an autonomous coding agent inside Locally Uncensored. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.
+const CODEX_SYSTEM_PROMPT = `You are the Coding Agent, an autonomous coding agent inside LU. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.
 
 AUTONOMY CONTRACT (read carefully):
 - You are expected to COMPLETE multi-step tasks without the user prompting between steps.
@@ -98,7 +98,7 @@ Rules:
 // workflow prose costs more than it buys. Keep only the essentials and stay
 // faithful to the native tool-call format. Selected at the injection point
 // below when settings.smallModelMode is on (review mode still wins).
-const CODEX_SYSTEM_PROMPT_LEAN = `You are a coding agent in Locally Uncensored. Use tools to do the work — never guess file contents.
+const CODEX_SYSTEM_PROMPT_LEAN = `You are a coding agent in LU. Use tools to do the work — never guess file contents.
 
 Rules:
 - Read a file before you edit it.

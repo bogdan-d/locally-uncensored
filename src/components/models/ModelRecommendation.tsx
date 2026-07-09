@@ -145,7 +145,7 @@ export function ModelRecommendation() {
               <Cpu size={20} className="text-blue-400" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Welcome to Locally Uncensored</h2>
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Welcome to LU</h2>
               <p className="text-sm text-gray-500">
                 {systemInfo.gpu ? `${systemInfo.gpu} (${systemInfo.vram} GB VRAM)` : 'No model installed — here are some recommendations:'}
               </p>

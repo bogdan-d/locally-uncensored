@@ -391,7 +391,7 @@ async fn handle_status() -> Json<serde_json::Value> {
 async fn handle_status_full(AxumState(state): AxumState<RemoteState>) -> Json<serde_json::Value> {
     let devices = state.connected_devices.lock().await;
     Json(serde_json::json!({
-        "app": "Locally Uncensored",
+        "app": "LU",
         "version": env!("CARGO_PKG_VERSION"),
         "connected_devices": devices.len(),
         "auth_required": true,

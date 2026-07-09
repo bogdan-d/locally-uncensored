@@ -1,5 +1,5 @@
 /**
- * Backend abstraction layer for Locally Uncensored.
+ * Backend abstraction layer for LU.
  *
  * - DEV MODE (npm run dev): Routes to Vite middleware via fetch("/local-api/...")
  * - PRODUCTION (Tauri .exe): Routes to Rust backend via invoke()

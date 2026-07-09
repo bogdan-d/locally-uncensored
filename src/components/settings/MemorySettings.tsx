@@ -115,7 +115,7 @@ export function MemorySettings() {
       setImportMsg(
         count > 0
           ? `Imported ${count} ${count === 1 ? 'memory' : 'memories'}.`
-          : 'No memories found in that file. Use a Locally Uncensored .md or .json export (JSON needs an "entries" or "memories" array).',
+          : 'No memories found in that file. Use an LU .md or .json export (JSON needs an "entries" or "memories" array).',
       )
     }
     reader.onerror = () => setImportMsg('Could not read that file.')

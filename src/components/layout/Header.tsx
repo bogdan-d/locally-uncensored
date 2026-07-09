@@ -184,7 +184,7 @@ export function Header() {
             setView('chat')
           }}
           className="flex items-center shrink-0 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition"
-          aria-label="Locally Uncensored"
+          aria-label="LU"
         >
           {/* Top-panel brand mark: the black/white monogram only (no wordmark),
               inverted per theme. Matches the web companion. */}

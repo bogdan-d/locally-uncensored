@@ -1301,7 +1301,7 @@ export function comfyErrorHint(nodeType: string | undefined, _excType: string | 
   // bug — independent of LU's workflow (which now loads without OOM).
   if ((nodeType === 'FramePackSampler' || /framepack/i.test(nodeType ?? '')) &&
       m.includes('hyvideomodel') && m.includes('diffusion_model')) {
-    return 'This is a bug in the installed ComfyUI-FramePackWrapper custom node (its model loader and sampler are out of sync), not in Locally Uncensored. Update the node from ComfyUI Manager (search "FramePack"), or pick a different image-to-video model (SVD works on 12 GB; Wan 2.2 5B is the recommended higher-quality option).'
+    return 'This is a bug in the installed ComfyUI-FramePackWrapper custom node (its model loader and sampler are out of sync), not in LU. Update the node from ComfyUI Manager (search "FramePack"), or pick a different image-to-video model (SVD works on 12 GB; Wan 2.2 5B is the recommended higher-quality option).'
   }
   if (m.includes('out of memory') || m.includes('outofmemory') || _excType === 'torch.OutOfMemoryError') {
     return 'Ran out of GPU memory. Try a shorter clip / lower resolution, set VRAM hand-off to "always" in Settings so the chat model is evicted first, or pick a lighter model.'
@@ -1311,7 +1311,7 @@ export function comfyErrorHint(nodeType: string | undefined, _excType: string | 
   // encoder / CLIPLoader) because the OS ran out of RAM + pagefile. This is a
   // Windows virtual-memory setting, not an LU bug — point the user at the fix.
   if (m.includes('paging file') || m.includes('os error 1455')) {
-    return 'Windows ran out of virtual memory while loading the model (its paging file is too small). This is a Windows setting, not a Locally Uncensored bug. Let Windows manage the page file, or raise it: Settings → System → About → Advanced system settings → Performance → Settings → Advanced → Virtual memory → Change, set a larger custom size, then reboot. Closing other heavy apps or picking a smaller model also helps.'
+    return 'Windows ran out of virtual memory while loading the model (its paging file is too small). This is a Windows setting, not an LU bug. Let Windows manage the page file, or raise it: Settings → System → About → Advanced system settings → Performance → Settings → Advanced → Virtual memory → Change, set a larger custom size, then reboot. Closing other heavy apps or picking a smaller model also helps.'
   }
   return ''
 }

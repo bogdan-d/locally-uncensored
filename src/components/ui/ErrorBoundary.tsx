@@ -59,7 +59,7 @@ export class ErrorBoundary extends Component<Props, State> {
         return (
           <div style={overlay}>
             <AlertCircle size={28} color="#f87171" />
-            <div style={{ fontSize: 18, fontWeight: 600 }}>Locally Uncensored hit a problem</div>
+            <div style={{ fontSize: 18, fontWeight: 600 }}>LU hit a problem</div>
             <div style={{
               fontSize: 12, color: '#9ca3af', maxWidth: 560, maxHeight: 160, overflow: 'auto',
               whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'left',

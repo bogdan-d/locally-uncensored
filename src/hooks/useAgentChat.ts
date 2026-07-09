@@ -1485,7 +1485,7 @@ export function extractMediaPrompt(text: string): string {
 }
 
 function buildAgentSystemPrompt(basePrompt: string): string {
-  const agentInstructions = `You are an autonomous AI agent inside Locally Uncensored with full access to this computer. You execute tasks end-to-end by using tools — you do NOT just describe what to do.
+  const agentInstructions = `You are an autonomous AI agent inside LU with full access to this computer. You execute tasks end-to-end by using tools — you do NOT just describe what to do.
 
 Available tools:
 - Filesystem: file_read, file_write, file_list, file_search
@@ -1533,7 +1533,7 @@ Other rules:
 // have a limited instruction-following budget. Keep only what a small model
 // needs to ACT — same tool names + native call format as the full prompt.
 function buildAgentSystemPromptLean(basePrompt: string): string {
-  const lean = `You are an autonomous agent in Locally Uncensored with tools on this computer. Do tasks by CALLING tools — do not just describe them.
+  const lean = `You are an autonomous agent in LU with tools on this computer. Do tasks by CALLING tools — do not just describe them.
 
 Tools: file_read, file_write, file_list, file_search, web_search, web_fetch, shell_execute, code_execute, system_info, get_current_time, image_generate, video_generate.
 
@@ -1555,7 +1555,7 @@ Rules:
  * chat into an agent. Kept short so it doesn't crowd a small model's context.
  */
 function buildChatToolsSystemPrompt(basePrompt: string): string {
-  const p = `You are a helpful chat assistant in Locally Uncensored, having a normal conversation. You also have a few tools for things you cannot do from memory — use one ONLY when the user's request actually needs it, otherwise just reply normally:
+  const p = `You are a helpful chat assistant in LU, having a normal conversation. You also have a few tools for things you cannot do from memory — use one ONLY when the user's request actually needs it, otherwise just reply normally:
 - web_search — look up current/real-world facts (returns short snippets)
 - web_fetch — read a specific web page or URL (after a search, or when the user gives a link)
 - file_write — save text to a file when the user asks you to write/create/save a file

@@ -159,8 +159,8 @@ export class OpenAIProvider implements ProviderClient {
     }
     // OpenRouter requires these headers
     if (this.config.baseUrl.includes('openrouter.ai')) {
-      h['HTTP-Referer'] = 'https://locallyuncensored.com'
-      h['X-Title'] = 'Locally Uncensored'
+      h['HTTP-Referer'] = 'https://lu-labs.ai'
+      h['X-Title'] = 'LU'
     }
     return h
   }
@@ -607,7 +607,7 @@ export class OpenAIProvider implements ProviderClient {
         "switch to the \"Runtimes\" tab → download \"llama.cpp (CPU)\" " +
         "(plus a GPU runtime if you have one).\n\n" +
         "Once the runtime is downloaded, come back here and resend your message — " +
-        "no need to restart Locally Uncensored."
+        "no need to restart LU."
     }
 
     return new ProviderError(message, 'openai', code, res.status)

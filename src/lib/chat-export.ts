@@ -197,7 +197,7 @@ export function parseImportedChats(json: string): Conversation[] {
   } else if (data && typeof data === 'object' && Array.isArray((data as { messages?: unknown[] }).messages)) {
     raw = [data] // a single per-chat export
   } else {
-    throw new Error('No conversations found in that file. Use a Locally Uncensored chat export (.json).')
+    throw new Error('No conversations found in that file. Use an LU chat export (.json).')
   }
   const valid = raw.filter(
     (c): c is Conversation =>

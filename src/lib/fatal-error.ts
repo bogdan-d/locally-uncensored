@@ -77,7 +77,7 @@ export function mountFatalError(rootEl: HTMLElement, err: unknown): void {
     '<div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;' +
     'justify-content:center;gap:14px;background:#171717;color:#e5e5e5;' +
     'font-family:system-ui,-apple-system,sans-serif;padding:24px;text-align:center">' +
-    '<div style="font-size:18px;font-weight:600">Locally Uncensored couldn’t start</div>' +
+    '<div style="font-size:18px;font-weight:600">LU couldn’t start</div>' +
     '<div style="font-size:12px;color:#9ca3af;max-width:560px;max-height:160px;overflow:auto;' +
     'white-space:pre-wrap;word-break:break-word;text-align:left;background:rgba(0,0,0,0.3);' +
     'padding:10px;border-radius:8px">' + escapeHtml(message) + '</div>' +

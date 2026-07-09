@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
-  "productName": "Locally Uncensored",
+  "productName": "LU",
   "version": "2.5.7",
   "identifier": "com.purpledoubled.locally-uncensored",
   "build": {
@@ -13,7 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Locally Uncensored",
+        "title": "LU",
         "width": 1280,
         "height": 800,
         "resizable": true,
@@ -42,12 +42,17 @@
     "publisher": "PurpleDoubleD",
     "copyright": "Copyright (c) 2026 PurpleDoubleD. Licensed under AGPL-3.0.",
     "category": "DeveloperTool",
-    "shortDescription": "Private, local AI chat, image, and video generation",
-    "longDescription": "Locally Uncensored is an open-source desktop app that runs AI chat, image generation, and video generation entirely on your own machine. Ships with a built-in inference engine — zero setup, no external software required — so chat and document RAG work the moment you open the app. Also auto-detects 12 optional local backends (Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang, TGI). Includes a coding agent (Codex), an agent mode with 14 tools and MCP support, A/B model comparison, local benchmarking, document chat with RAG, voice chat, and remote access from your phone over LAN or Cloudflare Tunnel. No telemetry, no analytics, no data leaves your device.",
-    "homepage": "https://locallyuncensored.com",
+    "shortDescription": "LU by LU Labs — private, local AI chat, image, and video generation",
+    "longDescription": "LU (by LU Labs) is an open-source desktop app that runs AI chat, image generation, and video generation entirely on your own machine. Ships with a built-in inference engine — zero setup, no external software required — so chat and document RAG work the moment you open the app. Also auto-detects 12 optional local backends (Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang, TGI). Includes a coding agent (Codex), an agent mode with 14 tools and MCP support, A/B model comparison, local benchmarking, document chat with RAG, voice chat, and remote access from your phone over LAN or Cloudflare Tunnel. No telemetry, no analytics, no data leaves your device.",
+    "homepage": "https://lu-labs.ai",
     "license": "AGPL-3.0",
-    "resources": ["resources/whisper_server.py", "../dist"],
-    "externalBin": ["bin/llama-server"],
+    "resources": [
+      "resources/whisper_server.py",
+      "../dist"
+    ],
+    "externalBin": [
+      "bin/llama-server"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
