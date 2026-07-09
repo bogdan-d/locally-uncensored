@@ -35,7 +35,15 @@ No cloud. No data collection. No API keys. Auto-detects 12 local backends. Your 
 
 ---
 
-## v2.5.5 — Current Release
+## v2.5.6 — Current Release
+
+A bug-fix sweep on top of v2.5.5, driven by GitHub and Discord reports. Your chats, memories, and gallery carry over automatically, and auto-update prompts on next launch.
+
+**Fixed:** Cloud providers (OpenRouter, OpenAI, Groq, Together, DeepSeek, Mistral, Anthropic) were blocked by the content-security policy — the provider **Test** button and chat both failed — and now work again (#71). Downloaded image/video models no longer look like they vanished when ComfyUI is off: **Models → Installed** shows a clear "start ComfyUI" hint instead of an empty list, and a just-downloaded model shows up without a manual refresh (#3). A video generated on the **Create** page that didn't appear in the gallery on the web build now renders. Attaching a PDF or document in chat is no longer silently dropped — the composer points you to the Documents panel (#69). The model picker polls lighter — it dedupes and pauses while the window is in the background (#70) — and the download progress bar keeps updating from any page instead of freezing until you open Models.
+
+---
+
+## v2.5.5
 
 A security and polish patch on top of v2.5.4. Your chats, memories, and gallery carry over automatically, and auto-update prompts on next launch.
 
