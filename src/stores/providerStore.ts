@@ -10,6 +10,7 @@ import { persist } from 'zustand/middleware'
 import type { ProviderId, ProviderConfig } from '../api/providers/types'
 import { clearProviderCache } from '../api/providers/registry'
 import { secretGet, secretSet, secretDelete } from '../api/backend'
+import { CLOUD_BASE } from '../api/cloud/config'
 
 // ── API Key storage ────────────────────────────────────────────
 // Two-tier (H5):
@@ -81,6 +82,17 @@ const DEFAULT_PROVIDERS: Record<ProviderId, ProviderConfig> = {
     name: 'Anthropic',
     enabled: false,
     baseUrl: 'https://api.anthropic.com',
+    apiKey: '',
+    isLocal: false,
+  },
+  // LU Cloud chat (lu-labs.ai inference proxy). apiKey stays empty forever —
+  // auth is the user's Supabase session token, injected per request by
+  // LuCloudProvider. useCloudAuth flips `enabled` with the account state.
+  'lu-cloud': {
+    id: 'lu-cloud',
+    name: 'LU Cloud',
+    enabled: false,
+    baseUrl: `${CLOUD_BASE}/api/inference/v1`,
     apiKey: '',
     isLocal: false,
   },
@@ -216,6 +228,17 @@ export const useProviderStore = create<ProviderState>()(
     {
       name: 'lu-providers',
       version: 1,
+      // Blobs persisted before the lu-cloud provider existed lack its entry —
+      // backfill every missing provider from defaults so getProvider() can't
+      // hit an undefined config after an update.
+      merge: (persisted: unknown, current: ProviderState): ProviderState => {
+        const p = (persisted ?? {}) as Partial<ProviderState>
+        return {
+          ...current,
+          ...p,
+          providers: { ...DEFAULT_PROVIDERS, ...(p.providers ?? {}) },
+        }
+      },
       // Don't persist transient state, only configs + user's "don't show again" preference.
       // When the OS keychain is active (H5), strip apiKey so the secret never
       // touches localStorage; otherwise keep the obfuscated key as before.

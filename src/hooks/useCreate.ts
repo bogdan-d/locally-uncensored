@@ -19,21 +19,19 @@ import {
   type ComfyUIOutput,
   type VideoBackend,
 } from '../api/comfyui'
+import { comfyErrorHint } from '../api/vram-handoff'
 import {
   comfyWS, CLIENT_ID,
   LOADER_NODES, CLIP_LOADER_NODES, VAE_LOADER_NODES, SAMPLER_NODES, DECODE_NODES,
   type ComfyWSEvent,
 } from '../api/comfyui-ws'
-import { buildDynamicWorkflow, WorkflowUnavailableError, checkVideoOutputCapability } from '../api/dynamic-workflow'
+import { buildDynamicWorkflow } from '../api/dynamic-workflow'
 import { getAllNodeInfo } from '../api/comfyui-nodes'
-import { installCustomNodes } from '../api/discover'
-import { backendCall } from '../api/backend'
+import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 import { useCreateStore } from '../stores/createStore'
-import { useSettingsStore } from '../stores/settingsStore'
 import { useWorkflowStore } from '../stores/workflowStore'
 import { injectParameters } from '../api/workflows'
 import { preflightCheck } from '../api/preflight'
-import { log } from '../lib/logger'
 
 export function useCreate() {
   const [connected, setConnected] = useState<boolean | null>(null)
@@ -86,6 +84,7 @@ export function useCreate() {
 
   const fetchModels = useCallback(async () => {
     setModelLoadError(null)
+
     try {
       // Check connection first — if ComfyUI is down, don't waste time on model queries
       const comfyOk = await checkComfyConnection()
@@ -99,7 +98,7 @@ export function useCreate() {
       // and its internal cache hasn't updated yet.
       await refreshComfyModels()
 
-      const [imgModels, vidModels, samplers, schedulers, vBackend, _nodeInfo] = await Promise.all([
+      const [comfyImgModels, vidModels, samplers, schedulers, vBackend, _nodeInfo] = await Promise.all([
         getImageModels(),
         getVideoModels(),
         getSamplers(),
@@ -107,6 +106,7 @@ export function useCreate() {
         detectVideoBackend(),
         getAllNodeInfo().catch(() => null),
       ])
+      const imgModels = comfyImgModels
       setImageModels(imgModels)
       setVideoModelsList(vidModels)
       setSamplerList(samplers)
@@ -127,7 +127,7 @@ export function useCreate() {
         zeroModelRetries.current++
         if (zeroModelRetries.current <= 12) {
           // Still retrying — ComfyUI might not be done scanning yet
-          log.info(`[useCreate] 0 models found, retry ${zeroModelRetries.current}/12...`)
+          console.log(`[useCreate] 0 models found, retry ${zeroModelRetries.current}/12...`)
           setModelLoadError('ComfyUI is loading models... This can take a moment after startup.')
           // Don't set modelsLoaded — auto-retry will keep running
         } else {
@@ -136,11 +136,11 @@ export function useCreate() {
           // generate against a model that no longer exists.
           const state = useCreateStore.getState()
           if (state.imageModel) {
-            log.warn(`[useCreate] Clearing stale persisted imageModel "${state.imageModel}" (0 models installed).`)
+            console.warn(`[useCreate] Clearing stale persisted imageModel "${state.imageModel}" (0 models installed).`)
             state.setImageModel('', 'unknown')
           }
           if (state.videoModel) {
-            log.warn(`[useCreate] Clearing stale persisted videoModel "${state.videoModel}" (0 models installed).`)
+            console.warn(`[useCreate] Clearing stale persisted videoModel "${state.videoModel}" (0 models installed).`)
             state.setVideoModel('')
           }
           setModelsLoaded(true)
@@ -161,17 +161,17 @@ export function useCreate() {
         }
       } else if (state.imageModel) {
         // Image models absent but videos found — clear stale image model
-        log.warn(`[useCreate] No image models installed, clearing stale imageModel "${state.imageModel}".`)
+        console.warn(`[useCreate] No image models installed, clearing stale imageModel "${state.imageModel}".`)
         state.setImageModel('', 'unknown')
       }
       if (vidModels.length > 0) {
         if (!state.videoModel || !vidModels.find(m => m.name === state.videoModel)) {
-          if (state.videoModel) log.warn(`[useCreate] Persisted videoModel "${state.videoModel}" not found, resetting to ${vidModels[0].name}`)
+          if (state.videoModel) console.warn(`[useCreate] Persisted videoModel "${state.videoModel}" not found, resetting to ${vidModels[0].name}`)
           state.setVideoModel(vidModels[0].name)
         }
       } else if (state.videoModel) {
         // Video models absent but images found — clear stale video model
-        log.warn(`[useCreate] No video models installed, clearing stale videoModel "${state.videoModel}".`)
+        console.warn(`[useCreate] No video models installed, clearing stale videoModel "${state.videoModel}".`)
         state.setVideoModel('')
       }
       // Always re-sync model type for currently selected model (fixes stale type after restart)
@@ -179,19 +179,19 @@ export function useCreate() {
         const current = imgModels.find(m => m.name === state.imageModel)
         if (current) {
           if (current.type !== state.imageModelType) {
-            log.info(`[useCreate] Fixing model type: ${state.imageModelType} -> ${current.type}`)
+            console.log(`[useCreate] Fixing model type: ${state.imageModelType} -> ${current.type}`)
             state.setImageModel(state.imageModel, current.type)
           }
         } else {
           // Persisted model no longer exists in ComfyUI — reset to first available
-          log.warn(`[useCreate] Persisted imageModel "${state.imageModel}" not found in ComfyUI, resetting to ${imgModels[0].name}`)
+          console.warn(`[useCreate] Persisted imageModel "${state.imageModel}" not found in ComfyUI, resetting to ${imgModels[0].name}`)
           state.setImageModel(imgModels[0].name, imgModels[0].type)
         }
       }
       // Run preflight check after models are loaded
       setTimeout(() => runPreflight(), 100)
     } catch (err) {
-      log.error('[useCreate] Failed to fetch models', { err })
+      console.error('[useCreate] Failed to fetch models:', err)
       setModelLoadError(`Failed to load models: ${err instanceof Error ? err.message : 'ComfyUI API error'}`)
     }
   }, [runPreflight])
@@ -206,7 +206,7 @@ export function useCreate() {
     let cancelled = false
     const timeouts: ReturnType<typeof setTimeout>[] = []
     const handler = () => {
-      log.info('[useCreate] Model download completed, refreshing model list...')
+      console.log('[useCreate] Model download completed, refreshing model list...')
       fetchModels()
       // Belt-and-braces: re-fetch at +2s and +6s in case ComfyUI's scan is slow.
       // fetchModels() is idempotent and cheap (object_info hits cache server-side),
@@ -229,46 +229,63 @@ export function useCreate() {
     const retryInterval = setInterval(async () => {
       const ok = await checkComfyConnection()
       if (ok) {
-        log.info('[useCreate] Retrying model fetch...')
+        console.log('[useCreate] Retrying model fetch...')
         fetchModels()
       }
     }, 3000)
     return () => clearInterval(retryInterval)
   }, [modelLoadError, modelsLoaded, fetchModels])
 
-  const generate = useCallback(async () => {
+  const generateInner = useCallback(async () => {
     const state = useCreateStore.getState()
+    // AI-CSAM gate — applies before any backend is touched.
+    {
+      const verdict = checkPromptSafety(`${state.prompt} ${state.negativePrompt}`)
+      if (verdict.blocked) {
+        state.setError(SAFETY_BLOCK_MESSAGE)
+        return
+      }
+    }
     const {
       mode, prompt, negativePrompt, imageModel, videoModel,
       sampler, scheduler, steps, cfgScale, width, height, seed, batchSize, frames, fps, denoise, i2iImage, i2vImage,
-      // F2 + F3 (cinemazverev / vanja-san GH#4) — extended params surfaced
-      // in ParamPanel. selectedLoras === [] / clipSkip === 0 / vae === 'auto'
-      // are the "do nothing extra" defaults; the workflow builder skips
-      // adding nodes for those values.
-      selectedLoras, selectedVae, clipSkip,
+      source, mask, growMaskBy, removebg, selectedLoras, selectedVae, clipSkip,
       setIsGenerating, setProgress, setCurrentPromptId, setError, addToGallery, addToPromptHistory,
     } = state
 
     const isI2I = mode === 'image' && state.imageSubMode === 'img2img'
+    // Which redesign intent produced this run (gallery tag).
+    const intent = state.intent()
+    // The redesigned Create page drives its unified Stage input via `source`/`mask`
+    // ImageRefs. On the local path their `.filename` IS the ComfyUI /upload/image
+    // name, so they map straight onto the existing i2iImage/i2vImage handles.
+    const effInputImage = source?.filename ?? i2iImage
+    const effI2vImage = source?.filename ?? i2vImage
+    const maskFilename = mask?.filename
+    const isRemoveBg = mode === 'image' && removebg
+
+    // Desktop port: the MLX video/image pipelines (Apple Silicon) are not
+    // part of this build — ComfyUI is the only local backend.
 
     setError(null)
     const activeModel = mode === 'image' ? imageModel : videoModel
     // Always re-classify from model name to avoid stale type
     const imageModelType = classifyModel(activeModel)
 
-    if (!prompt.trim()) {
+    // Background removal is prompt-free and model-independent (RMBG node).
+    if (!isRemoveBg && !prompt.trim()) {
       setError('Please enter a prompt.')
       return
     }
-    if (isI2I && !i2iImage) {
-      setError('Please upload a source image for Image-to-Image.')
+    if (isRemoveBg && !effInputImage) {
+      setError('Please add an image to remove its background.')
       return
     }
-    if (mode === 'video' && state.videoSubMode === 'i2v' && !i2vImage) {
-      setError('Please upload an input image for Image-to-Video.')
+    if (isI2I && !isRemoveBg && !effInputImage) {
+      setError('Please add a source image first.')
       return
     }
-    if (!activeModel) {
+    if (!isRemoveBg && !activeModel) {
       setError(mode === 'image'
         ? 'No image model selected. Add checkpoints or FLUX models to ComfyUI.'
         : 'No video model selected. Install Wan 2.1 or AnimateDiff models.')
@@ -288,12 +305,11 @@ export function useCreate() {
     try {
       const baseParams = {
         prompt, negativePrompt, model: activeModel, sampler, scheduler, steps, cfgScale, width, height, seed, batchSize,
-        ...(isI2I && i2iImage ? { inputImage: i2iImage, denoise } : {}),
-        // F2/F3 — only thread the param when the user actually picked one.
-        // Empty / 'auto' / 0 means "skip this node".
-        ...(selectedLoras.length > 0
-          ? { lora: selectedLoras.map((l) => l.name), loraStrength: selectedLoras.map((l) => l.strength) }
-          : {}),
+        ...(isRemoveBg && effInputImage ? { removebg: true, inputImage: effInputImage } : {}),
+        ...(isI2I && !isRemoveBg && effInputImage ? { inputImage: effInputImage, denoise } : {}),
+        ...(!isRemoveBg && maskFilename ? { maskImage: maskFilename, growMaskBy } : {}),
+        // Advanced image adjustments (builder ignores these for video).
+        ...(selectedLoras.length ? { loras: selectedLoras } : {}),
         ...(selectedVae && selectedVae !== 'auto' ? { vae: selectedVae } : {}),
         ...(clipSkip > 0 ? { clipSkip } : {}),
       }
@@ -309,45 +325,37 @@ export function useCreate() {
         const hasUnet = wfNodes.includes('UNETLoader')
         const hasCheckpoint = wfNodes.includes('CheckpointLoaderSimple')
         if (needsUnet && !hasUnet && hasCheckpoint) {
-          log.warn('[useCreate] Custom workflow incompatible: model needs UNETLoader but workflow has CheckpointLoaderSimple. Using auto.')
+          console.warn('[useCreate] Custom workflow incompatible: model needs UNETLoader but workflow has CheckpointLoaderSimple. Using auto.')
           customWf = null
         } else if (!needsUnet && hasUnet && !hasCheckpoint) {
-          log.warn('[useCreate] Custom workflow incompatible: model needs CheckpointLoaderSimple but workflow has UNETLoader. Using auto.')
+          console.warn('[useCreate] Custom workflow incompatible: model needs CheckpointLoaderSimple but workflow has UNETLoader. Using auto.')
           customWf = null
         }
       }
-      log.info('[useCreate] Custom workflow check', { activeModel, imageModelType, found: customWf?.name ?? 'NONE (auto)' })
+      console.log('[useCreate] Custom workflow check:', { activeModel, imageModelType, found: customWf?.name ?? 'NONE (auto)' })
 
       if (customWf) {
         builderUsed = 'custom'
         setProgress(5, `Using workflow: ${customWf.name}...`)
-        const params = mode === 'video' ? { ...baseParams, frames, fps, ...(i2vImage ? { inputImage: i2vImage } : {}) } : baseParams
+        const params = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}) } : baseParams
         workflow = await injectParameters(customWf.workflow, customWf.parameterMap, params, imageModelType)
       } else {
         // Dynamic workflow builder — auto-detects nodes and builds the right pipeline
         setProgress(5, 'Building workflow...')
         try {
-          const genParams = mode === 'video' ? { ...baseParams, frames, fps, ...(i2vImage ? { inputImage: i2vImage } : {}) } : baseParams
+          const genParams = mode === 'video' ? { ...baseParams, frames, fps, ...(effI2vImage ? { inputImage: effI2vImage } : {}) } : baseParams
           workflow = await buildDynamicWorkflow(genParams, imageModelType)
           builderUsed = 'dynamic'
         } catch (dynErr) {
-          // Bug #6: when the dynamic builder reports the active ComfyUI is
-          // missing wrapper nodes (CogVideoX 1.5 / FramePack / LTX etc.),
-          // there's no point falling back to the legacy builder — it
-          // hits the same UNETLoader trap and surfaces "could not detect
-          // model type" instead. Tell the user exactly what to install.
-          if (dynErr instanceof WorkflowUnavailableError) {
-            const hint = dynErr.installHint
-            const guidance = hint
-              ? ` Install via ComfyUI Manager → Install Custom Nodes → search "${hint.pack}" (${hint.url}).`
-              : ''
-            setError(`${dynErr.message}${guidance}`)
-            setIsGenerating(false)
-            return
+          // A WorkflowUnavailableError carries an actionable message ("download
+          // <encoder> from the Model Manager") — surface it directly instead of
+          // falling back to a legacy builder that would fail the same way with
+          // a cryptic ComfyUI rejection.
+          if (dynErr instanceof Error && dynErr.name === 'WorkflowUnavailableError') {
+            throw dynErr
           }
-          // Other dynamic-builder failures: legacy is a reasonable fallback
-          // (mostly happens for classic SDXL/SD15 image paths).
-          log.warn('[useCreate] Dynamic builder failed, using legacy', { err: dynErr })
+          // Fallback to legacy builders if dynamic fails
+          console.warn('[useCreate] Dynamic builder failed, using legacy:', dynErr)
           builderUsed = 'legacy'
           setProgress(5, 'Using legacy builder...')
           if (mode === 'video') {
@@ -355,67 +363,6 @@ export function useCreate() {
           } else {
             workflow = await buildTxt2ImgWorkflow(baseParams, imageModelType)
           }
-        }
-        // Bug A (v2.4.5 — miguelkodoatie Discord 2026-05-14, Turbulent_Tomato7559
-        // Reddit 2026-05-10): when ComfyUI lacks VHS_VideoCombine the video
-        // workflow falls back to SaveAnimatedWEBP and produces an animated
-        // .webp instead of an .mp4. v2.4.4 added a warning banner; v2.4.5
-        // turns it into a blocking modal with a one-click install, so users
-        // get actual videos instead of trying to figure out why "video gen"
-        // gave them an image.
-        if (mode === 'video' && builderUsed === 'dynamic') {
-          try {
-            const caps = await checkVideoOutputCapability()
-            if (caps.webpOnly) {
-              const choice = await new Promise<'install' | 'webp' | 'cancel'>((resolve) => {
-                useCreateStore.getState().setVhsInstallPrompt(resolve)
-              })
-              useCreateStore.getState().setVhsInstallPrompt(null)
-
-              if (choice === 'cancel') {
-                setIsGenerating(false)
-                setProgress(0, '')
-                return
-              }
-              if (choice === 'install') {
-                setProgress(8, 'Installing VHS_VideoCombine (git clone + pip)...')
-                try {
-                  await installCustomNodes(['videohelpersuite'])
-                  setProgress(9, 'Restarting ComfyUI to register the new node...')
-                  try {
-                    await backendCall('stop_comfyui')
-                  } catch { /* may already be stopped */ }
-                  await new Promise(r => setTimeout(r, 2000))
-                  await backendCall('start_comfyui')
-                  // Wait for ComfyUI to come back; poll /object_info up to 30s
-                  let backUp = false
-                  for (let i = 0; i < 15; i++) {
-                    await new Promise(r => setTimeout(r, 2000))
-                    try {
-                      const ok = await checkComfyConnection()
-                      if (ok) { backUp = true; break }
-                    } catch { /* not yet */ }
-                  }
-                  if (!backUp) {
-                    setError('VHS_VideoCombine installed but ComfyUI did not come back online within 30s. Please restart ComfyUI manually and re-generate.')
-                    setIsGenerating(false)
-                    return
-                  }
-                  // Re-build the workflow now that the new node is available
-                  const genParams = { ...baseParams, frames, fps, ...(i2vImage ? { inputImage: i2vImage } : {}) }
-                  workflow = await buildDynamicWorkflow(genParams, imageModelType)
-                  setProgress(10, 'VHS installed — generating MP4...')
-                } catch (instErr) {
-                  setError(`Failed to install VHS_VideoCombine: ${instErr instanceof Error ? instErr.message : String(instErr)}. You can install it manually in ComfyUI Manager.`)
-                  setIsGenerating(false)
-                  return
-                }
-              } else {
-                // 'webp' — user opted to continue with the animated .webp
-                setProgress(8, 'Continuing with animated .webp output (no VHS_VideoCombine)')
-              }
-            }
-          } catch { /* non-fatal */ }
         }
       }
 
@@ -439,27 +386,20 @@ export function useCreate() {
         }
       }
 
-      // Try WebSocket-driven progress, fall back to polling.
-      // Bug P (v2.4.7, ake0n_official Discord 2026-05-19): CPU-only users
-      // on Intel UHD ran into the 20-min cap at sampling 9/25 on a single
-      // 1024px Juggernaut-XL gen. Move the cap into Settings so slow
-      // hardware can finish a gen instead of timing out mid-sampler.
-      // Defaults stay 20min image / 60min video to match pre-2.4.7 behavior.
-      const settings = useSettingsStore.getState().settings
-      const imgMin = Math.max(1, settings.imageGenTimeoutMinutes || 20)
-      const vidMin = Math.max(1, settings.videoGenTimeoutMinutes || 60)
-      const maxTime = mode === 'video' ? vidMin * 60 * 1000 : imgMin * 60 * 1000
+      // Try WebSocket-driven progress, fall back to polling
+      const maxTime = mode === 'video' ? 60 * 60 * 1000 : 20 * 60 * 1000
       let useWS = false
       try {
         await comfyWS.connect(3000)
         useWS = true
       } catch {
-        log.warn('[useCreate] WebSocket unavailable, using polling fallback')
+        console.warn('[useCreate] WebSocket unavailable, using polling fallback')
       }
 
       if (useWS) {
         // ── WebSocket-driven progress ──
         await new Promise<void>((resolve, reject) => {
+          const startTime = Date.now()
           const store = useCreateStore.getState()
           store.setProgressPhase('queued')
           setProgress(10, 'Queued...')
@@ -482,18 +422,24 @@ export function useCreate() {
               const statusStr = history.status?.status_str
               if (statusStr === 'success') {
                 completionHandled = true
-                log.info('[useCreate] Completion detected via polling (WS event missed)')
+                console.log('[useCreate] Completion detected via polling (WS event missed)')
                 cleanup()
                 useCreateStore.getState().setProgressPhase('complete')
                 setProgress(95, 'Fetching results...')
+                const messages: [string, any][] = history.status?.messages ?? []
+                const startMsg = messages.find(([t]: [string, any]) => t === 'execution_start')
+                const endMsg = messages.find(([t]: [string, any]) => t === 'execution_success')
+                const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
+                  ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
                 setProgress(100, 'Complete!')
+                useCreateStore.getState().setLastGenTime(comfyTime ? `${comfyTime}s` : null)
                 const outputs = history.outputs ?? {}
                 let found = false
                 for (const nodeId of Object.keys(outputs)) {
-                  // Bug R (v2.4.7) — extract files from any keyed array,
-                  // not just images/gifs/videos. Custom save nodes use
-                  // other keys (audio, result, files, …); previously LU
-                  // dropped those outputs even though they existed on disk.
+                  // Extract files from ANY keyed array, not just images/gifs/
+                  // videos — custom save nodes post under other keys (audio,
+                  // result, files, …); previously those outputs were dropped
+                  // even though they existed on disk.
                   const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
                   for (const file of files) {
                     found = true
@@ -504,7 +450,7 @@ export function useCreate() {
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: seed === -1 ? 0 : seed,
                       steps, cfgScale, sampler, scheduler, width, height, batchSize,
-                      createdAt: Date.now(), builderUsed,
+                      createdAt: Date.now(), builderUsed, intent,
                     })
                   }
                 }
@@ -514,8 +460,10 @@ export function useCreate() {
                 completionHandled = true
                 cleanup()
                 const msgs = history.status?.messages ?? []
-                const errMsg = msgs.find(([t]: [string, any]) => t === 'execution_error')
-                reject(new Error(errMsg?.[1]?.exception_message || 'ComfyUI execution error'))
+                const errEntry = msgs.find(([t]: [string, any]) => t === 'execution_error')?.[1]
+                const raw = errEntry?.exception_message || 'ComfyUI execution error'
+                const hint = comfyErrorHint(errEntry?.node_type, errEntry?.exception_type, String(raw))
+                reject(new Error(hint ? `${raw}\n\n${hint}` : raw))
               }
             } catch { /* polling failure is non-fatal */ }
           }, 10000)
@@ -533,6 +481,7 @@ export function useCreate() {
             // Only handle events for our prompt
             if ('prompt_id' in event.data && event.data.prompt_id !== promptId) return
 
+            const elapsed = Math.round((Date.now() - startTime) / 1000)
             const st = useCreateStore.getState()
 
             switch (event.type) {
@@ -545,19 +494,19 @@ export function useCreate() {
                 const classType = nodeClassMap.get(nodeId) || ''
                 if (LOADER_NODES.has(classType)) {
                   st.setProgressPhase('loading-model')
-                  setProgress(15, 'Loading model...')
+                  setProgress(15, `Loading model... ${elapsed}s`)
                 } else if (CLIP_LOADER_NODES.has(classType)) {
                   st.setProgressPhase('loading-clip')
-                  setProgress(25, 'Loading text encoder...')
+                  setProgress(25, `Loading text encoder... ${elapsed}s`)
                 } else if (VAE_LOADER_NODES.has(classType)) {
                   st.setProgressPhase('loading-vae')
-                  setProgress(30, 'Loading VAE...')
+                  setProgress(30, `Loading VAE... ${elapsed}s`)
                 } else if (SAMPLER_NODES.has(classType)) {
                   st.setProgressPhase('sampling')
-                  setProgress(35, 'Sampling...')
+                  setProgress(35, `Sampling... ${elapsed}s`)
                 } else if (DECODE_NODES.has(classType)) {
                   st.setProgressPhase('decoding')
-                  setProgress(90, 'Decoding...')
+                  setProgress(90, `Decoding... ${elapsed}s`)
                 }
                 break
               }
@@ -565,7 +514,7 @@ export function useCreate() {
                 const { value, max } = event.data
                 const stepPct = 35 + (value / max) * 55 // 35% to 90%
                 st.setProgressPhase('sampling')
-                setProgress(Math.round(stepPct), `Sampling step ${value}/${max}`)
+                setProgress(Math.round(stepPct), `Sampling step ${value}/${max}... ${elapsed}s`)
                 break
               }
               case 'execution_complete': {
@@ -577,11 +526,17 @@ export function useCreate() {
                 // Fetch history to get output files
                 getHistory(promptId).then(history => {
                   if (!history) { setError('No history found after completion.'); resolve(); return }
+                  const messages: [string, any][] = history.status?.messages ?? []
+                  const startMsg = messages.find(([t]) => t === 'execution_start')
+                  const endMsg = messages.find(([t]) => t === 'execution_success')
+                  const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
+                    ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
                   setProgress(100, 'Complete!')
+                  useCreateStore.getState().setLastGenTime(comfyTime ? `${comfyTime}s` : null)
                   const outputs = history.outputs ?? {}
                   let found = false
                   for (const nodeId of Object.keys(outputs)) {
-                    // Bug R (v2.4.7) — see comment at the WS branch above.
+                    // Same generic extraction as the heartbeat branch above.
                     const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
                     for (const file of files) {
                       found = true
@@ -605,7 +560,8 @@ export function useCreate() {
                 cleanup()
                 const msg = event.data.exception_message || 'Unknown ComfyUI error'
                 const nodeType = event.data.node_type ? ` (${event.data.node_type})` : ''
-                reject(new Error(msg.trim() + nodeType))
+                const hint = comfyErrorHint(event.data.node_type, (event.data as any).exception_type, msg)
+                reject(new Error(msg.trim() + nodeType + (hint ? `\n\n${hint}` : '')))
                 break
               }
             }
@@ -653,24 +609,31 @@ export function useCreate() {
               }
             }
 
+            const elapsedSec = Math.round(elapsed / 1000)
             const expectedSteps = mode === 'video' ? steps * frames * 0.5 : steps * 2
             const pct = Math.min(10 + (attempts / expectedSteps * 85), 95)
 
             try {
               const history = await getHistory(promptId)
-              setProgress(pct, 'Generating...')
+              setProgress(pct, `Generating... ${elapsedSec}s elapsed`)
               if (!history) return
 
               if (history.status?.completed) {
                 if (pollRef.current) clearInterval(pollRef.current)
+                const messages: [string, any][] = history.status?.messages ?? []
+                const startMsg = messages.find(([t]) => t === 'execution_start')
+                const endMsg = messages.find(([t]) => t === 'execution_success')
+                const comfyTime = startMsg?.[1]?.timestamp && endMsg?.[1]?.timestamp
+                  ? ((endMsg[1].timestamp - startMsg[1].timestamp) / 1000).toFixed(1) : null
                 setProgress(100, 'Complete!')
+                useCreateStore.getState().setLastGenTime(comfyTime ? `${comfyTime}s` : null)
                 const outputs = history.outputs ?? {}
                 let found = false
                 for (const nodeId of Object.keys(outputs)) {
-                  // Bug R (v2.4.7) — extract files from any keyed array,
-                  // not just images/gifs/videos. Custom save nodes use
-                  // other keys (audio, result, files, …); previously LU
-                  // dropped those outputs even though they existed on disk.
+                  // Extract files from ANY keyed array, not just images/gifs/
+                  // videos — custom save nodes post under other keys (audio,
+                  // result, files, …); previously those outputs were dropped
+                  // even though they existed on disk.
                   const files: ComfyUIOutput[] = extractComfyOutputFiles(outputs[nodeId])
                   for (const file of files) {
                     found = true
@@ -681,7 +644,7 @@ export function useCreate() {
                       modelType: mode === 'image' ? imageModelType : (videoModelsList.find(m => m.name === activeModel)?.type ?? 'wan'),
                       seed: seed === -1 ? 0 : seed,
                       steps, cfgScale, sampler, scheduler, width, height, batchSize,
-                      createdAt: Date.now(), builderUsed,
+                      createdAt: Date.now(), builderUsed, intent,
                     })
                   }
                 }
@@ -696,10 +659,11 @@ export function useCreate() {
                   || messages[messages.length - 1]?.[1]?.message
                   || 'Unknown ComfyUI error'
                 const nodeType = errorEntry?.[1]?.node_type ? ` (${errorEntry[1].node_type})` : ''
-                reject(new Error(errMsg.trim() + nodeType))
+                const hint = comfyErrorHint(errorEntry?.[1]?.node_type, errorEntry?.[1]?.exception_type, String(errMsg))
+                reject(new Error(errMsg.trim() + nodeType + (hint ? `\n\n${hint}` : '')))
               }
             } catch (err) {
-              log.warn('[useCreate] Poll error', { err })
+              console.warn('[useCreate] Poll error:', err)
             }
           }, 1000)
         })
@@ -710,7 +674,7 @@ export function useCreate() {
       } else {
         const msg = err instanceof Error ? err.message : String(err)
         useCreateStore.getState().setError(`Generation failed: ${msg}`)
-        log.error('[useCreate] Generation error', { err })
+        console.error('[useCreate] Generation error:', err)
       }
     } finally {
       useCreateStore.getState().setIsGenerating(false)
@@ -721,9 +685,23 @@ export function useCreate() {
     }
   }, [videoBackend])
 
+  // Double-click idempotence: isGenerating only flips after the first await,
+  // so a second click racing the first must be blocked SYNCHRONOUSLY — two
+  // fast clicks were live-reproduced queueing two ComfyUI jobs.
+  const generateInFlight = useRef(false)
+  const generate = useCallback(async () => {
+    if (generateInFlight.current) return
+    generateInFlight.current = true
+    try {
+      await generateInner()
+    } finally {
+      generateInFlight.current = false
+    }
+  }, [generateInner])
+
   const cancel = useCallback(async () => {
     abortRef.current?.abort()
-    await cancelGeneration()
+    try { await cancelGeneration() } catch {}
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
     useCreateStore.getState().setIsGenerating(false)
     useCreateStore.getState().setProgress(0)

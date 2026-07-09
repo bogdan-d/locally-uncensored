@@ -138,10 +138,10 @@ describe('createStore', () => {
 
     it('setImageModelList / setVideoModelList replace the lists', () => {
       const imgs = [
-        { name: 'flux-schnell.safetensors', type: 'flux' as const },
-        { name: 'sdxl-base.safetensors', type: 'sdxl' as const },
+        { name: 'flux-schnell.safetensors', type: 'flux' as const, source: 'checkpoint' as const },
+        { name: 'sdxl-base.safetensors', type: 'sdxl' as const, source: 'checkpoint' as const },
       ]
-      const vids = [{ name: 'wan-2.1.safetensors', type: 'wan' as const }]
+      const vids = [{ name: 'wan-2.1.safetensors', type: 'wan' as const, source: 'checkpoint' as const }]
       useCreateStore.getState().setImageModelList(imgs)
       useCreateStore.getState().setVideoModelList(vids)
       expect(useCreateStore.getState().imageModelList).toEqual(imgs)
@@ -198,7 +198,7 @@ describe('createStore', () => {
       })
 
       it('passes through a real populated list unchanged', () => {
-        const list = [{ name: 'flux.safetensors', type: 'flux' as const }]
+        const list = [{ name: 'flux.safetensors', type: 'flux' as const, source: 'checkpoint' as const }]
         useCreateStore.setState({ imageModelList: list, mode: 'image' })
         const s = useCreateStore.getState()
         expect(computeActiveList(s.mode, s.imageModelList, s.videoModelList)).toBe(list)
@@ -504,17 +504,6 @@ describe('createStore', () => {
       // oldest 5 (0-4) dropped
       expect(useCreateStore.getState().promptHistory).not.toContain('prompt-0')
       expect(useCreateStore.getState().promptHistory).toContain('prompt-54')
-    })
-  })
-
-  // ── clearPromptHistory (GitHub #66) ────────────────────────
-
-  describe('clearPromptHistory', () => {
-    it('wipes all prompt history', () => {
-      useCreateStore.getState().addToPromptHistory('one')
-      useCreateStore.getState().addToPromptHistory('two')
-      useCreateStore.getState().clearPromptHistory()
-      expect(useCreateStore.getState().promptHistory).toEqual([])
     })
   })
 

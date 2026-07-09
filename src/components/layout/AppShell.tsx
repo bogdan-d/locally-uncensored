@@ -6,7 +6,7 @@ import { Sidebar } from './Sidebar'
 import { ChatView } from '../chat/ChatView'
 import { ModelManager } from '../models/ModelManager'
 import { SettingsPage } from '../settings/SettingsPage'
-import { CreateView } from '../create/CreateView'
+import { CreateExperimental } from '../create/experimental/CreateExperimental'
 import { BenchmarkView } from '../models/BenchmarkView'
 import { Onboarding } from '../onboarding/Onboarding'
 import { BackendSelector } from '../onboarding/BackendSelector'
@@ -23,6 +23,7 @@ import { extractMemoriesFromPair } from '../../hooks/useMemory'
 import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-detector'
 import { backendCall, isTauri } from '../../api/backend'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
+import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { ShortcutsModal } from './ShortcutsModal'
 import { Titlebar } from './Titlebar'
 
@@ -39,6 +40,9 @@ export function AppShell() {
   const [showSelector, setShowSelector] = useState(false)
 
   useKeyboardShortcuts()
+  // LU Cloud account boot: keychain session restore + /api/me probe; keeps
+  // the cloud Create axis and the lu-cloud chat provider in sync.
+  useCloudAuth()
 
   // ── Store backup/restore: survive NSIS updates that wipe WebView2 data ──
   const STORE_KEYS = [
@@ -599,7 +603,7 @@ export function AppShell() {
             {currentView === 'models' && <ErrorBoundary><ModelManager /></ErrorBoundary>}
             {currentView === 'benchmark' && <ErrorBoundary><BenchmarkView /></ErrorBoundary>}
             {currentView === 'settings' && <ErrorBoundary><SettingsPage /></ErrorBoundary>}
-            {currentView === 'create' && <ErrorBoundary><CreateView /></ErrorBoundary>}
+            {currentView === 'create' && <ErrorBoundary><CreateExperimental /></ErrorBoundary>}
           </main>
         </div>
       </div>

@@ -7,6 +7,7 @@ import { usePermissionStore } from '../../stores/permissionStore'
 import { useUIStore } from '../../stores/uiStore'
 import { SliderControl } from './SliderControl'
 import { PersonaPanel } from '../personas/PersonaPanel'
+import { AccountPanel } from '../auth/AccountPanel'
 import { useVoiceStore } from '../../stores/voiceStore'
 import { checkWhisperAvailable, checkTtsAvailable, downloadPiperVoice, listInstalledPiperVoices } from '../../api/voice'
 
@@ -948,6 +949,9 @@ export function SettingsPage() {
 
         {/* ── General tab ──────────────────────────────── */}
         {tab === 'general' && (<>
+          <Section title="LU Cloud Account" defaultOpen>
+            <AccountPanel />
+          </Section>
           <Section title="Appearance">
             <div className="flex items-center justify-between">
               <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Theme</span>

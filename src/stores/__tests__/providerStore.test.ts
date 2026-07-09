@@ -35,6 +35,14 @@ const DEFAULT_PROVIDERS = {
     apiKey: '',
     isLocal: false,
   },
+  'lu-cloud': {
+    id: 'lu-cloud' as const,
+    name: 'LU Cloud',
+    enabled: false,
+    baseUrl: 'https://lu-labs.ai/api/inference/v1',
+    apiKey: '',
+    isLocal: false,
+  },
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -50,9 +58,10 @@ describe('providerStore', () => {
   // ── Initial state ──────────────────────────────────────────
 
   describe('initial state', () => {
-    it('has three default providers', () => {
+    it('has four default providers', () => {
       const providers = useProviderStore.getState().providers
-      expect(Object.keys(providers)).toHaveLength(3)
+      expect(Object.keys(providers)).toHaveLength(4)
+      expect(providers['lu-cloud']).toBeDefined()
       expect(providers.ollama).toBeDefined()
       expect(providers.openai).toBeDefined()
       expect(providers.anthropic).toBeDefined()
