@@ -24,7 +24,13 @@ export function Stage({ displayed, onOpenMaskEditor, onFullscreen }: Props) {
   const sourceSetAt = useCreateStore((s) => s.sourceSetAt)
   const setPrompt = useCreateStore((s) => s.setPrompt)
   const caps = useCreateStore((s) => s.caps)
-  const capReady = meta.capability ? caps[meta.capability] : true
+  const backend = useCreateStore((s) => s.backend)
+  // On the cloud backend the utility ops (background removal, …) run on
+  // WaveSpeed's hosted endpoints — there's no local ComfyUI node to install,
+  // so the capability is always ready. Only the local backend gates on the
+  // node probe (which never runs without a local ComfyUI and would strand
+  // cloud users on a dead "Open Model Manager" card).
+  const capReady = !meta.capability || backend === 'cloud' || !!caps[meta.capability]
 
   // A result counts for the current source only if it was generated after the
   // source was loaded — otherwise an older gallery item would hijack the stage.
@@ -182,7 +188,9 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
       </div>
       <p className="t-body text-gray-600 mt-3 text-center max-w-sm">
         {meta.id === 'removebg' ? 'Hit Create to cut out the subject and export a transparent PNG.'
-          : meta.allowsMask ? 'Paint a mask over what should change, write the edit prompt below, then Create. Or skip the mask for a full image-to-image pass.'
+          : meta.id === 'upscale' ? 'Hit Create to upscale the image.'
+          : meta.id === 'eraser' ? 'Paint a mask over the object to remove, then hit Create.'
+          : meta.allowsMask ? 'Paint a mask over what should change, write the edit prompt below, then Create.'
           : 'Describe the motion below, then Create.'}
       </p>
     </div>

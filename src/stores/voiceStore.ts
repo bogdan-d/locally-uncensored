@@ -15,6 +15,10 @@ interface VoiceState {
   // Whether local neural TTS (Piper) is installed + a voice model is present.
   // Same transient/probe model as sttAvailable.
   ttsAvailable: boolean;
+  /** Last dictation/transcription failure (human-readable, e.g. the cloud
+   *  route's 429 "monthly credit budget exhausted") — shown by VoiceButton
+   *  instead of silently dropping the take. Transient. */
+  sttError: string | null;
 
   // Persisted settings
   sttEnabled: boolean;
@@ -42,6 +46,7 @@ interface VoiceState {
   setTranscript: (transcript: string) => void;
   setSttAvailable: (available: boolean) => void;
   setTtsAvailable: (available: boolean) => void;
+  setSttError: (error: string | null) => void;
   setPiperVoice: (voice: string) => void;
   updateVoiceSettings: (
     settings: Partial<{
@@ -73,6 +78,7 @@ export const useVoiceStore = create<VoiceState>()(
       transcript: "",
       sttAvailable: false,
       ttsAvailable: false,
+      sttError: null,
 
       // Persisted settings — voice OFF by default (David 2026-06-07:
       // "tts und stt standardmäßig AUS und nicht immer automatisch vorlesen").
@@ -98,6 +104,7 @@ export const useVoiceStore = create<VoiceState>()(
       setTranscript: (transcript) => set({ transcript }),
       setSttAvailable: (available) => set({ sttAvailable: available }),
       setTtsAvailable: (available) => set({ ttsAvailable: available }),
+      setSttError: (error) => set({ sttError: error }),
       setPiperVoice: (voice) => set({ piperVoice: voice }),
 
       updateVoiceSettings: (settings) => set((state) => ({ ...state, ...settings })),
@@ -108,6 +115,7 @@ export const useVoiceStore = create<VoiceState>()(
           isTranscribing: false,
           isSpeaking: false,
           transcript: "",
+          sttError: null,
         }),
 
       resetVoiceDefaults: () =>

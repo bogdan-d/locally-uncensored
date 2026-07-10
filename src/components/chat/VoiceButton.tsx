@@ -12,7 +12,7 @@ interface Props {
 }
 
 export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabled }: Props) {
-  const { isRecording, isTranscribing, sttSupported, startRecording, stopRecording, recheckStt } = useVoice()
+  const { isRecording, isTranscribing, sttSupported, sttError, clearSttError, startRecording, stopRecording, recheckStt } = useVoice()
 
   useEffect(() => {
     // The startup probe (App.tsx) can run before the persistent Whisper server
@@ -21,6 +21,14 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
     if (!sttSupported) void recheckStt()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Dictation failures (cloud 401/403/413/429/5xx, dead mic) surface as a
+  // transient bubble over the mic instead of the take silently vanishing.
+  useEffect(() => {
+    if (!sttError) return
+    const t = setTimeout(() => clearSttError(), 6000)
+    return () => clearTimeout(t)
+  }, [sttError, clearSttError])
 
   const handleClick = async () => {
     if (disabled || isTranscribing) return
@@ -33,7 +41,11 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
       }
     } else {
       onRecordingChange?.(true)
-      await startRecording((interim) => onInterim?.(interim))
+      const ok = await startRecording((interim) => onInterim?.(interim))
+      // Roll back the composer's "Recording…" state when the mic never
+      // started (permission denied / no input device) — otherwise Enter-to-
+      // send stays blocked with no recovery path.
+      if (!ok) onRecordingChange?.(false)
     }
   }
 
@@ -68,26 +80,36 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
   }
 
   return (
-    <motion.button
-      onClick={handleClick}
-      disabled={disabled}
-      className={`p-1.5 rounded-lg transition-all shrink-0 relative ${
-        isRecording
-          ? "bg-red-100 dark:bg-red-500/20 border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400"
-          : "hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
-      } disabled:opacity-30 disabled:cursor-not-allowed`}
-      data-voice-button
-      whileTap={{ scale: 0.9 }}
-      aria-label={isRecording ? "Stop recording" : "Start voice input"}
-    >
-      {isRecording && (
-        <motion.span
-          className="absolute inset-0 rounded-lg border-2 border-red-500 dark:border-red-400"
-          animate={{ scale: [1, 1.15, 1], opacity: [1, 0.4, 1] }}
-          transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
-        />
+    <div className="relative shrink-0">
+      <motion.button
+        onClick={handleClick}
+        disabled={disabled}
+        className={`p-1.5 rounded-lg transition-all shrink-0 relative ${
+          isRecording
+            ? "bg-red-100 dark:bg-red-500/20 border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400"
+            : "hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+        } disabled:opacity-30 disabled:cursor-not-allowed`}
+        data-voice-button
+        whileTap={{ scale: 0.9 }}
+        aria-label={isRecording ? "Stop recording" : "Start voice input"}
+      >
+        {isRecording && (
+          <motion.span
+            className="absolute inset-0 rounded-lg border-2 border-red-500 dark:border-red-400"
+            animate={{ scale: [1, 1.15, 1], opacity: [1, 0.4, 1] }}
+            transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
+          />
+        )}
+        <Mic size={14} />
+      </motion.button>
+      {sttError && (
+        <div
+          role="alert"
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 w-max max-w-[240px] bg-red-600/95 dark:bg-red-500/90 text-white text-[0.6rem] leading-snug rounded text-center pointer-events-none z-10"
+        >
+          {sttError}
+        </div>
       )}
-      <Mic size={14} />
-    </motion.button>
+    </div>
   )
 }

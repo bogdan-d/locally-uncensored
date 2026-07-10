@@ -32,6 +32,10 @@ interface OpenAIStreamChunk {
   choices?: [{
     delta?: {
       content?: string
+      // Native reasoning channel — DeepInfra (LU Cloud) reasoning models
+      // stream thinking as `reasoning_content`, some as `reasoning`.
+      reasoning_content?: string
+      reasoning?: string
       tool_calls?: {
         index: number
         id?: string
@@ -46,6 +50,8 @@ interface OpenAIResponse {
   choices?: [{
     message?: {
       content?: string
+      reasoning_content?: string
+      reasoning?: string
       tool_calls?: {
         id: string
         type: 'function'
@@ -198,8 +204,10 @@ export class OpenAIProvider implements ProviderClient {
       signal: options?.signal,
     } as any)
 
-    // Retry without reasoning_effort if the model/endpoint rejects it.
-    if (!res.ok && res.status === 400 && ('reasoning_effort' in body || 'stream_options' in body)) {
+    // Retry without reasoning_effort if the model/endpoint rejects it. The LU
+    // Cloud proxy deliberately passes upstream 400 AND 422 (DeepInfra's
+    // bad-parameter status) through so this path can engage.
+    if (!res.ok && (res.status === 400 || res.status === 422) && ('reasoning_effort' in body || 'stream_options' in body)) {
       delete body.reasoning_effort
       delete body.stream_options
       res = await fetcher(`${this.baseUrl}/chat/completions`, {
@@ -268,6 +276,14 @@ export class OpenAIProvider implements ProviderClient {
 
       const content = choice.delta?.content || ''
 
+      // Yield native reasoning as `thinking` so the panel fills live —
+      // without this the entire reasoning phase of a cloud reasoner is
+      // silently dropped and the chat sits in dead air (uselu fc55c91).
+      const reasoning = choice.delta?.reasoning_content ?? choice.delta?.reasoning ?? ''
+      if (reasoning) {
+        yield { content: '', thinking: reasoning, done: false }
+      }
+
       // Accumulate streamed tool calls
       if (choice.delta?.tool_calls) {
         for (const tc of choice.delta.tool_calls) {
@@ -304,7 +320,7 @@ export class OpenAIProvider implements ProviderClient {
     messages: ChatMessage[],
     tools: ToolDefinition[],
     options?: ChatOptions,
-  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number }> {
+  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string }> {
     const body: Record<string, any> = {
       model,
       messages: messages.map(m => this.toOpenAIMessage(m)),
@@ -332,7 +348,7 @@ export class OpenAIProvider implements ProviderClient {
       signal: options?.signal,
     } as any)
 
-    if (!res.ok && res.status === 400 && ('reasoning_effort' in body || 'stream_options' in body)) {
+    if (!res.ok && (res.status === 400 || res.status === 422) && ('reasoning_effort' in body || 'stream_options' in body)) {
       delete body.reasoning_effort
       delete body.stream_options
       res = await fetcher(`${this.baseUrl}/chat/completions`, {
@@ -365,6 +381,7 @@ export class OpenAIProvider implements ProviderClient {
       toolCalls,
       promptEvalCount: usage?.prompt_tokens,
       evalCount: usage?.completion_tokens,
+      thinking: choice?.message?.reasoning_content || choice?.message?.reasoning || undefined,
     }
   }
 
@@ -559,6 +576,7 @@ export class OpenAIProvider implements ProviderClient {
   private async parseError(res: Response): Promise<ProviderError> {
     let message = `${this.config.name}: Request failed`
     let code: string = 'network'
+    let hasServerMessage = false
 
     try {
       const data = await res.json() as { error?: unknown; message?: string }
@@ -570,22 +588,31 @@ export class OpenAIProvider implements ProviderClient {
       // the opaque "Request failed". Handle all three shapes.
       if (typeof err === 'string' && err.trim()) {
         message = err
+        hasServerMessage = true
       } else if (err && typeof err === 'object') {
         const eo = err as { message?: string; code?: string }
-        if (eo.message) message = eo.message
+        if (eo.message) {
+          message = eo.message
+          hasServerMessage = true
+        }
         if (eo.code) code = eo.code
       } else if (typeof data.message === 'string' && data.message.trim()) {
         message = data.message
+        hasServerMessage = true
       }
     } catch { /* non-JSON body → keep default */ }
 
-    // Map HTTP status to error code
+    // Map HTTP status to error code. The canned texts are FALLBACKS for
+    // opaque bodies only — a server that sends an honest message (LU Cloud:
+    // "monthly credit budget exhausted", "LU Cloud is in closed beta (Max
+    // plan only)", …) must surface it verbatim, not a wrong API-key /
+    // wait-a-moment hint the user can't act on.
     if (res.status === 401 || res.status === 403) {
       code = 'auth'
-      message = `Invalid API key for ${this.config.name}. Check Settings > Providers.`
+      if (!hasServerMessage) message = `Invalid API key for ${this.config.name}. Check Settings > Providers.`
     } else if (res.status === 429) {
       code = 'rate_limit'
-      message = `Rate limited by ${this.config.name}. Wait a moment and try again.`
+      if (!hasServerMessage) message = `Rate limited by ${this.config.name}. Wait a moment and try again.`
     } else if (res.status === 404) {
       code = 'not_found'
     }

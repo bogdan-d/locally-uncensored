@@ -7,7 +7,11 @@ import { useModelStore } from '../stores/modelStore'
 import { useProviderStore } from '../stores/providerStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { getEnabledProviders, prefixModelName, getProviderIdFromModel } from '../api/providers'
-import { listBundledModels, bundledToAIModels, activateBuiltinModel, isManagedBuiltinActive } from '../api/engine'
+import {
+  listBundledModels, bundledToAIModels, activateBuiltinModel, isManagedBuiltinActive,
+  bundledEngineStatus, bundledEmbedStatus, startBundledEmbed,
+} from '../api/engine'
+import type { BundledModel } from '../api/engine'
 import type { PullProgress, AIModel, ModelCategory, ImageModel, VideoModel, CloudModel } from '../types/models'
 
 const VIDEO_PATTERNS = [/wan/, /svd/, /animatediff/, /animate/, /video/, /cogvideo/, /ltx/i, /framepack/, /mochi/, /cosmos/, /hunyuan/, /pyramidflow/, /allegro/]
@@ -23,6 +27,35 @@ function isVideoModel(name: string): boolean {
 function isEmbeddingModel(name: string): boolean {
   const lower = name.toLowerCase()
   return EMBEDDING_PATTERNS.some((p) => p.test(lower))
+}
+
+// Boot-resume for the managed built-in engine (2.5.7): the llama-server
+// children are reaped on app quit and nothing on the Rust side respawns them,
+// so after a relaunch the persisted active model points at a dead
+// 127.0.0.1:8127 (and RAG at a dead 8128) until the user re-picks the model.
+// Runs at most once per app session (fetchModels fires repeatedly), and only
+// starts a server that reports running:false.
+let builtinResumeAttempted = false
+
+async function resumeBuiltinEngines(bundled: BundledModel[]) {
+  try {
+    const status = await bundledEngineStatus()
+    const { activeModel } = useModelStore.getState()
+    if (
+      !status.running && activeModel &&
+      getProviderIdFromModel(activeModel) === 'openai' &&
+      bundled.some((m) => prefixModelName('openai', m.name) === activeModel)
+    ) {
+      await activateBuiltinModel(activeModel)
+    }
+  } catch { /* engine unavailable — non-critical */ }
+  try {
+    const embed = bundled.find((m) => isEmbeddingModel(m.name))
+    if (embed) {
+      const embedStatus = await bundledEmbedStatus()
+      if (!embedStatus.running) await startBundledEmbed(embed.path)
+    }
+  } catch { /* embeddings server unavailable — non-critical */ }
 }
 
 export function useModels() {
@@ -112,8 +145,13 @@ export function useModels() {
       // backend or non-Tauri dev context just yields no built-in models.
       if (managedBuiltin) {
         try {
-          const bundled = bundledToAIModels(await listBundledModels())
+          const bundledRaw = await listBundledModels()
+          const bundled = bundledToAIModels(bundledRaw)
           allModels.push(...bundled.filter(m => !isEmbeddingModel(m.name)))
+          if (!builtinResumeAttempted) {
+            builtinResumeAttempted = true
+            void resumeBuiltinEngines(bundledRaw)
+          }
         } catch { /* engine command unavailable — non-critical */ }
       }
       const ollamaEnabled = useProviderStore.getState().providers.ollama.enabled

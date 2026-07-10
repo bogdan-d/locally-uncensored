@@ -5,12 +5,12 @@
 // gallery) mirrors the local path so every downstream component works
 // unchanged. useCreate itself is untouched: the seam lives in CreateExpProvider.
 //
-// Desktop delta vs uselu: image results are downloaded into a self-contained
-// dataUrl gallery item (signed URLs expire — the local copy never rots and
-// works offline). Videos would blow localStorage as base64, so they keep
-// remoteUrl + jobId and re-sign lazily via refreshResultUrl().
+// Desktop delta vs uselu: results keep remoteUrl + jobId in the persisted
+// gallery — multi-MB base64 dataUrls would blow the localStorage quota and
+// kill all create-store persistence. Signed URLs expire ~1 h after the last
+// read, so playback surfaces re-sign lazily via refreshResultUrl().
 
-import { useCallback, useRef } from 'react'
+import { useCallback } from 'react'
 import { useCreateStore, type GalleryItem } from '../stores/createStore'
 import { intentToJob } from '../lib/render/cloud-jobs'
 import {
@@ -22,7 +22,12 @@ import {
   CloudJobError,
   type CloudJobParams,
 } from '../api/cloud/jobs'
-import { defaultCloudModel, cloudMediaLive } from '../stores/cloudCatalogStore'
+import {
+  defaultCloudModel,
+  defaultEditModel,
+  isEditCapable,
+  cloudMediaLive,
+} from '../stores/cloudCatalogStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 
 async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
@@ -30,25 +35,15 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
   return res.blob()
 }
 
-async function fetchAsDataUrl(url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url)
-    if (!res.ok) return null
-    const blob = await res.blob()
-    return await new Promise<string | null>((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null)
-      reader.onerror = () => resolve(null)
-      reader.readAsDataURL(blob)
-    })
-  } catch {
-    return null
-  }
-}
+// The in-flight job handle lives at module scope, matching the lifetime of the
+// generate() closure (which keeps polling across view switches). Instance refs
+// died with the Create view's remount, leaving the Cancel button a no-op
+// mid-render. At most one cloud job runs per app (the store-level isGenerating
+// gate), so a singleton is correct.
+let activeJobId: string | null = null
+let activeAbort: AbortController | null = null
 
 export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
-  const activeJob = useRef<string | null>(null)
-  const abort = useRef<AbortController | null>(null)
   const { onQuotaChange } = opts
 
   const generate = useCallback(async () => {
@@ -56,8 +51,12 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     if (s.isGenerating) return
     const intent = s.intent()
     const { kind, op } = intentToJob(intent)
-    const model =
+    const picked =
       (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind).id
+    // Edit needs an i2i-capable model; the picker may still hold a t2i-only
+    // one the user chose for a generate — fall back so the submit never 400s.
+    const model =
+      op === 'edit' && !isEditCapable(picked) ? (defaultEditModel()?.id ?? picked) : picked
 
     s.setError(null)
     if (!cloudMediaLive()) {
@@ -84,6 +83,11 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     s.setIsGenerating(true)
     s.setProgressPhase('queued')
     s.setProgress(5, 'Uploading inputs…')
+    // Arm the aborter BEFORE the upload/submit awaits so a Cancel click during
+    // "Uploading inputs…" (seconds for large sources/masks) actually stops the
+    // run before any credits are claimed — not only once polling has started.
+    const ac = new AbortController()
+    activeAbort = ac
 
     try {
       // Utility endpoints (removebg/upscale/eraser) take no generation knobs —
@@ -129,10 +133,13 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         params.mask_path = await uploadInput(await dataUrlToBlob(s.mask.url), 'mask')
       }
 
+      // Bail before the (credit-claiming) submit if the user cancelled while
+      // we were uploading inputs.
+      if (ac.signal.aborted) return
+
       s.setProgress(10, 'Submitting to the render queue…')
       const { id } = await submitCloudJob({ kind, model, prompt: s.prompt, params })
-      activeJob.current = id
-      abort.current = new AbortController()
+      activeJobId = id
       onQuotaChange?.()
       if (s.prompt.trim()) s.addToPromptHistory(s.prompt.trim())
 
@@ -142,7 +149,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // deadline than images.
       const job = await pollJob(id, {
         timeoutMs: kind === 'video' ? 45 * 60_000 : 15 * 60_000,
-        signal: abort.current.signal,
+        signal: ac.signal,
         onTick: (j) => {
           const st = useCreateStore.getState()
           const elapsed = Math.round((Date.now() - startedAt) / 1000)
@@ -160,8 +167,6 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (job.status === 'succeeded' && job.result_url) {
         st.setProgressPhase('complete')
         st.setProgress(100, 'Complete!')
-        // Images: pull the bytes now — the local copy never expires.
-        const dataUrl = kind === 'image' ? await fetchAsDataUrl(job.result_url) : null
         st.addToGallery({
           id: job.id,
           type: kind,
@@ -180,7 +185,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
           height: s.height,
           batchSize: 1,
           createdAt: Date.now(),
-          ...(dataUrl ? { dataUrl } : { remoteUrl: job.result_url }),
+          remoteUrl: job.result_url,
           attestation: job.attestation,
           jobId: job.id,
           intent,
@@ -198,14 +203,16 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       } else if (err instanceof CloudJobError && err.status === 401) {
         st.setError('Sign in to your LU Cloud account to render in the cloud.')
       } else if (err instanceof CloudJobError && err.message === 'render timed out') {
-        st.setError('Still rendering — this is taking longer than expected. It will appear in your history when it completes.')
+        // The desktop app has no jobs-history view — point at the account
+        // page instead of promising an in-app surface that doesn't exist.
+        st.setError('Still rendering — this is taking longer than expected. When it completes you can view it in your account at lu-labs.ai.')
       } else if (!(err instanceof CloudJobError && err.message === 'polling aborted')) {
         st.setError(err instanceof Error ? err.message : String(err))
       }
       onQuotaChange?.()
     } finally {
-      activeJob.current = null
-      abort.current = null
+      activeJobId = null
+      activeAbort = null
       const st = useCreateStore.getState()
       st.setIsGenerating(false)
       st.setProgress(0)
@@ -213,8 +220,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   }, [onQuotaChange])
 
   const cancel = useCallback(async () => {
-    const id = activeJob.current
-    abort.current?.abort() // stop polling immediately either way
+    const id = activeJobId
+    activeAbort?.abort() // stop polling immediately either way
     if (!id) return
     try {
       await cancelJob(id)
@@ -236,10 +243,16 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       s.setIsGenerating(true)
       s.setProgressPhase('queued')
       s.setProgress(5, 'Fetching the source clip…')
+      // Same pre-await arming as generate(): a Cancel during the re-sign
+      // window must stop the run before the credit-claiming submit.
+      const ac = new AbortController()
+      activeAbort = ac
       try {
         // Fresh signed URL — the stored one expires ~1 h after the last read.
         const sourceJob = await getJob(item.jobId)
         if (!sourceJob.result_url) throw new Error('The source clip has expired — re-render it first.')
+
+        if (ac.signal.aborted) return
 
         s.setProgress(10, 'Submitting to the render queue…')
         const { id } = await submitCloudJob({
@@ -248,14 +261,13 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
           prompt: '',
           params: { op: 'upscale', source_url: sourceJob.result_url, target_resolution: targetResolution },
         })
-        activeJob.current = id
-        abort.current = new AbortController()
+        activeJobId = id
         onQuotaChange?.()
 
         const startedAt = Date.now()
         const job = await pollJob(id, {
           timeoutMs: 45 * 60_000,
-          signal: abort.current.signal,
+          signal: ac.signal,
           onTick: (j) => {
             const st = useCreateStore.getState()
             const elapsed = Math.round((Date.now() - startedAt) / 1000)
@@ -295,8 +307,8 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
         }
         onQuotaChange?.()
       } finally {
-        activeJob.current = null
-        abort.current = null
+        activeJobId = null
+        activeAbort = null
         const st = useCreateStore.getState()
         st.setIsGenerating(false)
         st.setProgress(0)

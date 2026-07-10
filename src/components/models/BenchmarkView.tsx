@@ -1,12 +1,15 @@
 import { ArrowLeft, Trophy, Zap, Play, Square } from 'lucide-react'
 import { useUIStore } from '../../stores/uiStore'
-import { useModelStore } from '../../stores/modelStore'
+import { useModels } from '../../hooks/useModels'
 import { useBenchmarkStore, getLatestSpeed, getLeaderboard } from '../../stores/benchmarkStore'
 import { useBenchmark } from '../../hooks/useBenchmark'
 
 export function BenchmarkView() {
   const { setView } = useUIStore()
-  const models = useModelStore((s) => s.models)
+  // appMode-filtered view (useModels choke point) — the raw store also holds
+  // hosted lu-cloud models, which would get a "Run Benchmark" button on this
+  // local-hardware view and burn credits measuring network speed.
+  const { models } = useModels()
   const results = useBenchmarkStore((s) => s.results)
   const isRunning = useBenchmarkStore((s) => s.isRunning)
   const currentModel = useBenchmarkStore((s) => s.currentModel)

@@ -229,14 +229,43 @@ export async function transcribeAudioCloud(audioBlob: Blob): Promise<string> {
   return data.text || "";
 }
 
+// The cloud TTS route rejects text over 1500 chars (zod BodySchema) — a
+// typical assistant answer is longer. Split into ≤1400-char pieces on sentence
+// boundaries (hard-splitting any single oversized run) so long messages read
+// aloud instead of 400ing and silently degrading to the local/browser voice.
+const TTS_MAX_CHARS = 1400;
+export function chunkForTts(text: string, max = TTS_MAX_CHARS): string[] {
+  const clean = text.trim();
+  if (clean.length <= max) return clean ? [clean] : [];
+  const parts = clean.split(/(?<=[.!?。！？\n])\s+/);
+  const chunks: string[] = [];
+  let cur = "";
+  for (const p of parts) {
+    if (p.length > max) {
+      if (cur) { chunks.push(cur); cur = ""; }
+      for (let i = 0; i < p.length; i += max) chunks.push(p.slice(i, i + max));
+      continue;
+    }
+    if ((cur ? cur.length + 1 + p.length : p.length) > max) {
+      if (cur) chunks.push(cur);
+      cur = p;
+    } else {
+      cur = cur ? `${cur} ${p}` : p;
+    }
+  }
+  if (cur) chunks.push(cur);
+  return chunks;
+}
+
 /** Cloud TTS: /api/voice/tts streams back MP3 (MiniMax Speech-02). Returns an
- *  object URL for playNeuralAudio; the handful of clips per session makes
- *  revocation bookkeeping not worth it. */
-export async function synthesizeCloud(text: string, voice?: string): Promise<string> {
+ *  object URL for playNeuralAudio (which revokes it when the clip settles).
+ *  `signal` aborts the in-flight synthesis — the server cancels un-metered. */
+export async function synthesizeCloud(text: string, voice?: string, signal?: AbortSignal): Promise<string> {
   const res = await cloudFetch("/api/voice/tts", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ text, ...(voice ? { voice } : {}) }),
+    signal,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { error?: string });
@@ -319,29 +348,40 @@ export async function listInstalledPiperVoices(): Promise<string[]> {
 }
 
 let neuralAudio: HTMLAudioElement | null = null;
+let neuralAudioDone: (() => void) | null = null;
 
-/** Play a WAV data URL; resolves when playback ends. Replaces any current clip. */
+/** Play a WAV data URL or MP3 blob URL; resolves when playback ends (or is
+ *  stopped via stopNeuralAudio). Replaces any current clip. Object URLs are
+ *  revoked once the clip settles so cloud TTS blobs don't pin memory. */
 export function playNeuralAudio(dataUrl: string): Promise<void> {
   return new Promise((resolve, reject) => {
     stopNeuralAudio();
     const audio = new Audio(dataUrl);
-    neuralAudio = audio;
-    audio.onended = () => {
-      if (neuralAudio === audio) neuralAudio = null;
-      resolve();
+    const cleanup = () => {
+      if (neuralAudio === audio) { neuralAudio = null; neuralAudioDone = null; }
+      if (dataUrl.startsWith("blob:")) URL.revokeObjectURL(dataUrl);
     };
+    neuralAudio = audio;
+    neuralAudioDone = () => { cleanup(); resolve(); };
+    audio.onended = () => { cleanup(); resolve(); };
     audio.onerror = () => {
-      if (neuralAudio === audio) neuralAudio = null;
+      cleanup();
       reject(new Error("neural audio playback failed"));
     };
-    audio.play().catch(reject);
+    audio.play().catch((err) => { cleanup(); reject(err); });
   });
 }
 
 export function stopNeuralAudio(): void {
   if (neuralAudio) {
     try { neuralAudio.pause(); } catch { /* noop */ }
+    // pause() never fires onended — settle the pending playNeuralAudio promise
+    // explicitly (which also revokes a blob: URL) so callers' awaits don't
+    // dangle forever after a Stop click.
+    const done = neuralAudioDone;
     neuralAudio = null;
+    neuralAudioDone = null;
+    done?.();
   }
 }
 

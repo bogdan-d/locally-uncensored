@@ -1,8 +1,9 @@
 import { motion } from 'framer-motion'
 import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2 } from 'lucide-react'
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
-import { downloadComfyFile } from '../../../api/backend'
-import { galleryItemUrl } from './galleryUrl'
+import { downloadComfyFile, isTauri } from '../../../api/backend'
+import { refreshResultUrl } from '../../../api/cloud/jobs'
+import { galleryItemUrl, recoverGalleryUrl } from './galleryUrl'
 import { cn } from '../ui/cn'
 
 function phaseIcon(phase: ProgressPhase) {
@@ -61,12 +62,63 @@ interface ResultProps {
   onSendToEditor?: () => void
 }
 
+function extFor(contentType: string, kind: 'image' | 'video'): string {
+  if (contentType.includes('png')) return 'png'
+  if (contentType.includes('jpeg') || contentType.includes('jpg')) return 'jpg'
+  if (contentType.includes('webp')) return 'webp'
+  if (contentType.includes('mp4')) return 'mp4'
+  if (contentType.includes('webm')) return 'webm'
+  return kind === 'video' ? 'mp4' : 'png'
+}
+
+// Save a gallery item. Local ComfyUI outputs (non-empty filename) go through
+// downloadComfyFile's proxy + native dialog. Cloud items have filename '' —
+// fetch their bytes directly (re-signed first: the stored URL expires ~1 h
+// after the last read); dataUrl items decode in place. Tauri gets the native
+// Save-As dialog (WebView2 blob-anchors are unreliable); failures surface via
+// setError instead of a silent no-op.
+async function downloadGalleryItem(item: GalleryItem): Promise<void> {
+  if (item.filename) return downloadComfyFile(item.filename, item.subfolder)
+  try {
+    let url = item.dataUrl ?? item.remoteUrl
+    if (!item.dataUrl && item.jobId) {
+      url = (await refreshResultUrl(item.jobId)) ?? url
+    }
+    if (!url) throw new Error('no source available for this item')
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`fetch failed (${res.status})`)
+    const ext = extFor(res.headers.get('content-type') ?? '', item.type)
+    const name = `lu-${item.id}.${ext}`
+    const bytes = new Uint8Array(await res.arrayBuffer())
+    if (!isTauri()) {
+      const blobUrl = URL.createObjectURL(new Blob([bytes]))
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = name
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(blobUrl)
+      return
+    }
+    const { invoke } = await import('@tauri-apps/api/core')
+    // Returns the chosen path, or null if the user cancelled — nothing to do then.
+    await invoke('save_binary_file_dialog', {
+      bytes: Array.from(bytes),
+      defaultName: name,
+      extension: ext,
+      extLabel: ext.toUpperCase(),
+    })
+  } catch (err) {
+    useCreateStore
+      .getState()
+      .setError(`Download failed — ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
 export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) {
   const url = galleryItemUrl(item)
-  // Desktop build: every gallery item is a ComfyUI output (dataUrl was the
-  // MLX path, remoteUrl the cloud path — both web-only). downloadComfyFile
-  // goes through the native Save-As dialog, which WebView2 blob-anchors can't.
-  const download = () => downloadComfyFile(item.filename, item.subfolder)
+  const download = () => void downloadGalleryItem(item)
   const isVideo = item.type === 'video'
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-6 min-h-0">
@@ -78,12 +130,14 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
             loop
             autoPlay
             muted
+            onError={() => recoverGalleryUrl(item)}
             className="max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]"
           />
         ) : (
           <img
             src={url}
             alt={item.prompt}
+            onError={() => recoverGalleryUrl(item)}
             className={cn('max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', item.intent === 'removebg' && 'lu-checker')}
           />
         )}

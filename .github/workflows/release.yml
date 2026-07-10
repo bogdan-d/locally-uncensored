@@ -20,11 +20,13 @@ permissions:
 #
 # Sidecar: every platform must build the bundled llama.cpp `llama-server`
 # BEFORE tauri-action runs — tauri-build hard-fails on a missing externalBin.
-# The build is cached on (LLAMA_TAG × triple); it only recompiles when the
-# pin in scripts/build-llama.sh moves.
+# The build is cached on (hash of scripts/build-llama.sh × triple); it only
+# recompiles when the script (tag pin or cmake flags) changes.
 env:
-  # Windows Vulkan SDK for the GGML_VULKAN sidecar build. Version pinned;
-  # bump together with the llama.cpp tag. (LunarG keeps old versions up.)
+  # Vulkan SDK pin for the GGML_VULKAN sidecar builds: the Windows lane uses
+  # the full installer version, the Linux lane derives the 3-part family for
+  # LunarG's jammy apt repo. Bump together with the llama.cpp tag; LunarG
+  # keeps old versions up.
   VULKAN_SDK_VERSION: '1.4.313.2'
 
 jobs:
@@ -99,24 +101,33 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .llama-build
-          key: llama-b6231-${{ matrix.sidecar_triple }}-v1
+          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-${{ matrix.sidecar_triple }}-v1
 
       - name: Install Vulkan SDK (Windows)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          curl.exe -o "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" -L `
-            "https://sdk.lunarg.com/sdk/download/${env:VULKAN_SDK_VERSION}/windows/VulkanSDK-${env:VULKAN_SDK_VERSION}-Installer.exe"
+          # LunarG's 1.4.x Windows installer is vulkansdk-windows-X64-<ver>.exe —
+          # the old VulkanSDK-<ver>-Installer.exe name 404s.
+          curl.exe -fL --retry 3 -o "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" `
+            "https://sdk.lunarg.com/sdk/download/${env:VULKAN_SDK_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_SDK_VERSION}.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Vulkan SDK download failed" }
           & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
           Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_SDK_VERSION}"
 
       - name: Install Vulkan toolchain (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
-          sudo apt-get install -y libvulkan-dev glslc || {
-            # glslc is not in every 22.04 mirror set — fall back to shaderc.
-            sudo apt-get install -y libvulkan-dev shaderc
-          }
+          # Jammy ships no glslc/shaderc binary packages, and ggml's Vulkan
+          # backend hard-requires glslc — install the SDK from LunarG's jammy
+          # repo, pinned to the same family as the Windows lane.
+          family="${VULKAN_SDK_VERSION%.*}"
+          wget -qO- https://packages.lunarg.com/lunarg-signing-key-pub.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/lunarg.asc >/dev/null
+          sudo wget -qO "/etc/apt/sources.list.d/lunarg-vulkan-${family}-jammy.list" \
+            "https://packages.lunarg.com/vulkan/${family}/lunarg-vulkan-${family}-jammy.list"
+          sudo apt-get update
+          sudo apt-get install -y vulkan-sdk
 
       - name: Build llama-server sidecar
         shell: bash

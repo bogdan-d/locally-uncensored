@@ -1,5 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
+// The vitest env is 'node' (no DOM). zustand persist reads window.localStorage
+// (createJSONStorage default) at store-module load; without it the persist API
+// is never attached and the partialize test below cannot reach getOptions().
+// Install a Map-backed store BEFORE the hoisted import (same pattern as
+// providerStore.keychain.test.ts, hoisted because static imports run first).
+vi.hoisted(() => {
+  const map = new Map<string, string>()
+  const ls = {
+    getItem: (k: string) => (map.has(k) ? map.get(k)! : null),
+    setItem: (k: string, v: string) => { map.set(k, String(v)) },
+    removeItem: (k: string) => { map.delete(k) },
+    clear: () => { map.clear() },
+    key: (i: number) => [...map.keys()][i] ?? null,
+    get length() { return map.size },
+  }
+  ;(globalThis as unknown as { localStorage: unknown }).localStorage = ls
+  const g = globalThis as unknown as { window?: Record<string, unknown> }
+  g.window = Object.assign(g.window ?? {}, { localStorage: ls })
+})
+
 // Mock comfyui before importing the store
 vi.mock('../../api/comfyui', () => ({
   classifyModel: vi.fn((name: string) => {
@@ -442,6 +462,48 @@ describe('createStore', () => {
       expect(gallery.find(g => g.id === 'item-0')).toBeUndefined()
       // item-200 (newest) should be first
       expect(gallery[0].id).toBe('item-200')
+    })
+  })
+
+  // ── updateGalleryItem ──────────────────────────────────────
+
+  describe('updateGalleryItem', () => {
+    it('patches the matching item in place', () => {
+      useCreateStore.getState().addToGallery(makeGalleryItem('a'))
+      useCreateStore.getState().addToGallery(makeGalleryItem('b'))
+      useCreateStore.getState().updateGalleryItem('a', { remoteUrl: 'https://signed/new' })
+      const gallery = useCreateStore.getState().gallery
+      expect(gallery.find(g => g.id === 'a')?.remoteUrl).toBe('https://signed/new')
+      expect(gallery.find(g => g.id === 'b')?.remoteUrl).toBeUndefined()
+      expect(gallery).toHaveLength(2)
+    })
+
+    it('does nothing when id does not exist', () => {
+      useCreateStore.getState().addToGallery(makeGalleryItem('a'))
+      useCreateStore.getState().updateGalleryItem('nope', { remoteUrl: 'x' })
+      expect(useCreateStore.getState().gallery[0].remoteUrl).toBeUndefined()
+    })
+  })
+
+  // ── persistence: media bytes never hit localStorage ────────
+
+  describe('partialize', () => {
+    it('strips dataUrl from persisted gallery items, keeps remoteUrl + jobId', () => {
+      useCreateStore.getState().addToGallery({
+        ...makeGalleryItem('a'),
+        dataUrl: 'data:image/png;base64,AAAA',
+        remoteUrl: 'https://signed/a',
+        jobId: 'job-a',
+      })
+      const { partialize } = useCreateStore.persist.getOptions()
+      const persisted = partialize!(useCreateStore.getState()) as {
+        gallery: Array<Record<string, unknown>>
+      }
+      expect(persisted.gallery[0].dataUrl).toBeUndefined()
+      expect(persisted.gallery[0].remoteUrl).toBe('https://signed/a')
+      expect(persisted.gallery[0].jobId).toBe('job-a')
+      // in-memory item keeps its dataUrl for the current session
+      expect(useCreateStore.getState().gallery[0].dataUrl).toBe('data:image/png;base64,AAAA')
     })
   })
 

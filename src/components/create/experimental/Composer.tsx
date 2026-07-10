@@ -1,9 +1,16 @@
 import { useCallback, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, X, History, SlidersHorizontal, Square } from 'lucide-react'
-import { useCreateStore, MODEL_TYPE_DEFAULTS } from '../../../stores/createStore'
+import { useCreateStore, MODEL_TYPE_DEFAULTS, type CreateIntent } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
+import {
+  cloudModelById,
+  defaultCloudModel,
+  defaultEditModel,
+  isEditCapable,
+  runCredits,
+} from '../../../stores/cloudCatalogStore'
 import { INTENT_MAP } from './intents'
 import { ModelChip } from './ModelChip'
 import { CreditsMeter } from './CreditsMeter'
@@ -33,6 +40,10 @@ export function Composer({ onOpenAdvanced }: Props) {
   const backend = useCreateStore((s) => s.backend)
   const targetResolution = useCreateStore((s) => s.targetResolution)
   const setTargetResolution = useCreateStore((s) => s.setTargetResolution)
+  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
+  const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  const frames = useCreateStore((s) => s.frames)
+  const fps = useCreateStore((s) => s.fps)
   const { generate, cancel, quota } = useCreateExp()
 
   // The Create button turns into Cancel in place — a double-click's second
@@ -52,9 +63,30 @@ export function Composer({ onOpenAdvanced }: Props) {
   // Single-purpose endpoints (cutout/upscale/eraser): no prompt, no
   // generation knobs, no model choice — just the input (+ mask/resolution).
   const isUtility = meta.id === 'removebg' || meta.id === 'upscale' || meta.id === 'eraser'
+  const { kind: intentKind, op: intentOp } = intentToJob(intent)
+  // Gate on the exact run's cost (model + op + clip length), the same figure
+  // the CreditsMeter shows — quota.costs[kind] is only the tier's
+  // representative per-kind number and would mis-gate utility ops / pricier
+  // models.
+  const pickedModel =
+    (intentKind === 'video' ? cloudVideoModel : cloudImageModel) || defaultCloudModel(intentKind).id
+  const runSeconds =
+    intentKind === 'video' && (intentOp === 'generate' || intentOp === 'animate') && fps > 0
+      ? frames / fps
+      : undefined
   const creditsOk =
     backend !== 'cloud' ||
-    (quota != null && quota.remaining.credits >= quota.costs[intentToJob(intent).kind])
+    (quota != null &&
+      quota.remaining.credits >=
+        runCredits(intentKind, intentOp, pickedModel, runSeconds, quota.costs[intentKind], targetResolution))
+  // Match useCloudCreate's submit-time edit fallback so the Neg gate reflects
+  // the model the run actually uses, not a t2i model still in the picker.
+  const runModel =
+    intentOp === 'edit' && !isEditCapable(pickedModel) ? (defaultEditModel()?.id ?? pickedModel) : pickedModel
+  // The hosted endpoints only honour negative_prompt for a few families —
+  // hide the toggle (and the collapsed field) where it would be silently
+  // dropped, like the other dead knobs on cloud.
+  const negSupported = backend !== 'cloud' || cloudModelById(runModel)?.negative_prompt === true
   const canGenerate =
     (!needPrompt || prompt.trim().length > 0) &&
     (!meta.needsSource || !!source) &&
@@ -78,7 +110,7 @@ export function Composer({ onOpenAdvanced }: Props) {
           )}
 
           <AnimatePresence>
-            {showNegative && meta.needsPrompt && (
+            {showNegative && meta.needsPrompt && negSupported && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
@@ -99,13 +131,13 @@ export function Composer({ onOpenAdvanced }: Props) {
 
           {!meta.needsPrompt && (
             <div className="px-3.5 py-3 t-body text-gray-500">
-              No prompt needed — just hit Create to remove the background.
+              {noPromptHint(meta.id)}
             </div>
           )}
 
           {/* Action bar */}
           <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-white/[0.05]">
-            {meta.needsPrompt && (
+            {meta.needsPrompt && negSupported && (
               <button
                 onClick={toggleNegative}
                 className={cn('t-control px-2 h-[var(--control-h-sm)] rounded-md transition-colors', showNegative ? 'bg-white/10 text-gray-200' : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.05]')}
@@ -150,6 +182,20 @@ export function Composer({ onOpenAdvanced }: Props) {
       </div>
     </div>
   )
+}
+
+// Caption for prompt-less intents so each reads honestly (the old copy said
+// "remove the background" for every one of them — misleading the eraser into
+// a guaranteed "Paint a mask first" error).
+function noPromptHint(id: CreateIntent): string {
+  switch (id) {
+    case 'upscale':
+      return 'No prompt needed — just hit Create to enhance the image.'
+    case 'eraser':
+      return 'No prompt needed — paint a mask over the object to remove, then hit Create.'
+    default:
+      return 'No prompt needed — just hit Create to remove the background.'
+  }
 }
 
 // Quality (proxy over steps) + Aspect (image) + Edit strength (edit).

@@ -455,6 +455,128 @@ describe('OpenAIProvider', () => {
     })
   })
 
+  // Audit finding 17/36: the canned auth/rate-limit texts must be FALLBACKS —
+  // LU Cloud sends honest 403/429 bodies ("closed beta", "monthly credit
+  // budget exhausted") that were being overwritten with dead-end guidance
+  // ("Check Settings > Providers" — lu-cloud has no key field).
+  describe('parseError server-message precedence', () => {
+    it('surfaces a 403 bare-string body verbatim (LU Cloud plan gate)', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LU Cloud' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'LU Cloud is in closed beta (Max plan only)' }), { status: 403 })
+      )
+      try {
+        await provider.listModels()
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).toBe('auth')
+        expect(e.message).toBe('LU Cloud is in closed beta (Max plan only)')
+      }
+      vi.restoreAllMocks()
+    })
+
+    it('surfaces a 429 body verbatim (monthly credit budget)', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LU Cloud' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'monthly credit budget exhausted' }), { status: 429 })
+      )
+      try {
+        await provider.listModels()
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).toBe('rate_limit')
+        expect(e.message).toBe('monthly credit budget exhausted')
+      }
+      vi.restoreAllMocks()
+    })
+
+    it('falls back to the canned texts when the body carries no message', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}', { status: 401 }))
+      try {
+        await provider.listModels()
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).toBe('auth')
+        expect(e.message).toMatch(/Invalid API key/)
+      }
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('', { status: 429 }))
+      try {
+        await provider.listModels()
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).toBe('rate_limit')
+        expect(e.message).toMatch(/Rate limited/)
+      }
+      vi.restoreAllMocks()
+    })
+  })
+
+  // Audit finding 10: DeepInfra (LU Cloud) reasoning models stream thinking as
+  // delta.reasoning_content / delta.reasoning — dropping it left the chat in
+  // dead air for the whole reasoning phase.
+  describe('native reasoning channel', () => {
+    it('chatStream yields delta.reasoning_content as thinking', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      const sse = [
+        'data: {"choices":[{"delta":{"reasoning_content":"pondering"}}]}',
+        '',
+        'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+        '',
+        'data: [DONE]',
+        '',
+      ].join('\n')
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(sse, { status: 200 }))
+      const chunks = []
+      for await (const c of provider.chatStream('m', [{ role: 'user', content: 'hi' }])) chunks.push(c)
+      expect(chunks.some(c => c.thinking === 'pondering')).toBe(true)
+      expect(chunks.some(c => c.content === 'Hi')).toBe(true)
+      vi.restoreAllMocks()
+    })
+
+    it('chatStream yields the delta.reasoning variant too', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      const sse = 'data: {"choices":[{"delta":{"reasoning":"hmm"}}]}\n\ndata: [DONE]\n\n'
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(sse, { status: 200 }))
+      const chunks = []
+      for await (const c of provider.chatStream('m', [{ role: 'user', content: 'hi' }])) chunks.push(c)
+      expect(chunks.some(c => c.thinking === 'hmm')).toBe(true)
+      vi.restoreAllMocks()
+    })
+
+    it('chatWithTools maps message.reasoning_content to thinking', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          choices: [{ message: { content: 'answer', reasoning_content: 'thought' } }],
+        }), { status: 200 })
+      )
+      const result = await provider.chatWithTools('m', [{ role: 'user', content: 'hi' }], [])
+      expect(result.content).toBe('answer')
+      expect(result.thinking).toBe('thought')
+      vi.restoreAllMocks()
+    })
+  })
+
+  // Audit finding P0: the LU Cloud proxy passes upstream 400 AND 422 through
+  // so the retry-without-the-knob path can engage; the retry only checked 400.
+  describe('retry without reasoning knob', () => {
+    it('retries a 422 without reasoning_effort', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'inference upstream error' }), { status: 422 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), { status: 200 }))
+      const result = await provider.chatWithTools('m', [{ role: 'user', content: 'hi' }], [], { thinking: true })
+      expect(result.content).toBe('ok')
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+      const firstBody = JSON.parse(fetchSpy.mock.calls[0][1]?.body as string)
+      expect(firstBody.reasoning_effort).toBe('high')
+      const secondBody = JSON.parse(fetchSpy.mock.calls[1][1]?.body as string)
+      expect('reasoning_effort' in secondBody).toBe(false)
+      vi.restoreAllMocks()
+    })
+  })
+
   describe('OpenRouter headers', () => {
     it('includes OpenRouter-specific headers', async () => {
       const provider = new OpenAIProvider(makeConfig({

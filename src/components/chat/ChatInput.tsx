@@ -73,7 +73,11 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   const thinkMode = activeModelMeta && 'thinkMode' in activeModelMeta ? activeModelMeta.thinkMode : undefined
   const thinkLockedOn = thinkMode === 'always'
   const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
-  const canSeeImages = isVisionCompatible(activeModel)
+  // Same server-over-heuristic precedence for vision (input_modalities →
+  // supportsVision). The flag is `true` or undefined (never false), so
+  // models without it still fall back to the name heuristic.
+  const serverVision = activeModelMeta && 'supportsVision' in activeModelMeta ? activeModelMeta.supportsVision : undefined
+  const canSeeImages = serverVision !== undefined ? serverVision : isVisionCompatible(activeModel)
 
   useEffect(() => {
     if (textareaRef.current) {

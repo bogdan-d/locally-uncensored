@@ -183,6 +183,19 @@ function isSystemPromptEcho(content: string): boolean {
   )
 }
 
+// Server-declared think capability (LU Cloud models carry thinkMode from
+// /models) wins over the local name-heuristic — same precedence as
+// useChat/useAgentChat: 'always' reasoners keep their native channel,
+// 'never' models get no think prompting or knobs.
+function codexThinkMode(model: string) {
+  const meta = useModelStore.getState().models.find((m) => m.name === model)
+  return meta && 'thinkMode' in meta ? meta.thinkMode : undefined
+}
+function codexCanThink(model: string): boolean {
+  const mode = codexThinkMode(model)
+  return mode ? mode === 'toggle' : isThinkingCompatible(model)
+}
+
 export function useCodex() {
   const [isRunning, setIsRunning] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
@@ -368,8 +381,9 @@ export function useCodex() {
       }
     }
 
-    // For non-Ollama providers, inject thinking via system prompt
-    if (settings.thinkingEnabled && providerId !== 'ollama') {
+    // For non-Ollama providers, inject thinking via system prompt — only for
+    // models where the Think toggle actually applies (thinkMode gate).
+    if (settings.thinkingEnabled && providerId !== 'ollama' && codexCanThink(activeModel)) {
       systemPrompt += '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
     }
 
@@ -592,7 +606,7 @@ export function useCodex() {
         let turnContent = ''
 
         // Plain-text-planner escape for Gemma 3/4 — see useChat.ts.
-        const canThinkCx = isThinkingCompatible(activeModel)
+        const canThinkCx = codexCanThink(activeModel)
         const plainPlanCx = isPlainTextPlanner(activeModel)
         const thinkOptCx: boolean | undefined = canThinkCx
           ? (settings.thinkingEnabled === false && plainPlanCx
@@ -684,7 +698,9 @@ export function useCodex() {
             lastUserMsg: lastUserMsg.slice(0, 120),
           })
 
-          const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+          const keepThinking =
+            codexThinkMode(activeModel) === 'always' ||
+            (settings.thinkingEnabled === true && codexCanThink(activeModel))
 
           if (providerId === 'ollama') {
             // ── Streaming path for Ollama ──────────────────────────────
@@ -877,7 +893,9 @@ export function useCodex() {
         // (Gemma channel tags, <thought>, <reasoning>, etc.) are always
         // stripped — they are never user-facing content.
         {
-          const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+          const keepThinking =
+            codexThinkMode(activeModel) === 'always' ||
+            (settings.thinkingEnabled === true && codexCanThink(activeModel))
           turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_m, inner) => {
             if (keepThinking) {
               thinkingContent += (thinkingContent ? '\n\n' : '') + inner

@@ -4,6 +4,7 @@
 
 import { useCallback } from 'react'
 import { useCloudAuthStore, deriveCloudAvailable } from '../stores/cloudAuthStore'
+import { CloudJobError } from '../api/cloud/client'
 import { getQuota } from '../api/cloud/jobs'
 import type { CloudQuota } from '../lib/render/cloud-jobs'
 
@@ -26,8 +27,13 @@ export function useCloudSession(): CloudSession {
     try {
       const q = await getQuota()
       useCloudAuthStore.getState().setQuota(q)
-    } catch {
-      useCloudAuthStore.getState().setQuota(null)
+    } catch (err) {
+      // A transient failure (network, 5xx) keeps the last-known quota so a
+      // blip after a render doesn't silently pin Create to local; only an
+      // auth/gate rejection clears it.
+      if (err instanceof CloudJobError && (err.status === 401 || err.status === 403)) {
+        useCloudAuthStore.getState().setQuota(null)
+      }
     }
   }, [])
 

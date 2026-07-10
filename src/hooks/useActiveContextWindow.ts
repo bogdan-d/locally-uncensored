@@ -96,12 +96,15 @@ export function useActiveContextWindow(reloadTick = 0): ActiveContext {
         }
       }
 
-      // ── Cloud / other: fixed context, not adjustable from here. ──
+      // ── Cloud / other: fixed context, not adjustable from here. The
+      // DEFAULT_CONTEXT_CAP and the local num_ctx override are local-runtime
+      // levers — applying them here would falsify the denominator for
+      // 128k-context hosted models. ──
       const max = await getModelMaxTokens(activeModel).catch(() => 4096)
       if (cancelled) return
       setState({
         provider: 'cloud',
-        contextWindow: effectiveContextWindow(max, override),
+        contextWindow: max,
         modelMax: max,
         isTrue: false,
         adjustable: false,

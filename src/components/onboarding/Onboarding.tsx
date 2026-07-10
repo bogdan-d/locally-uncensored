@@ -1041,6 +1041,7 @@ export function Onboarding() {
                                 name: 'LM Studio',
                                 baseUrl: 'http://localhost:1234/v1',
                                 isLocal: true,
+                                managed: false,
                               })
                             } else if (s.status === 'error') {
                               clearInterval(poll)

@@ -95,9 +95,16 @@ export function useChat() {
           return { role: m.role, content: m.content, mediaKind: media?.kind, mediaArgs: media?.args }
         })
       const route = resolveChatToolRoute(content, !!images?.length, recent)
-      if (route) {
+      // Cloud mode has no local ComfyUI pipeline: media intents stay on the
+      // plain-chat path (cloud renders live in the Create tab) instead of
+      // dead-ending in the local image/video tools, and the media pair is
+      // stripped from the curated list so a web/file turn can't call it.
+      const cloudMode = settings.appMode === 'cloud'
+      if (route && !(cloudMode && route.mediaHint)) {
         return agentChat.sendAgentMessage(content, images, {
-          curatedTools: CHAT_TOOLS,
+          curatedTools: cloudMode
+            ? CHAT_TOOLS.filter((t) => t !== 'image_generate' && t !== 'video_generate')
+            : CHAT_TOOLS,
           chatToolsMode: true,
           mediaHint: route.mediaHint,
         })
@@ -188,9 +195,17 @@ export function useChat() {
       // Memory injection is non-critical
     }
 
-    // For non-Ollama providers, inject thinking via system prompt
+    // For non-Ollama providers, inject thinking via system prompt — but only
+    // for models where the Think toggle actually applies. Server-declared
+    // think capability (LU Cloud models carry thinkMode from /models) wins
+    // over the local name-heuristic: 'always' reasoners use their native
+    // channel untouched, 'never' instruct models get nothing (the blanket
+    // injection made them burn billed tokens on reasoning we then discard).
     const providerId = getProviderIdFromModel(activeModel)
-    if (settings.thinkingEnabled && providerId !== 'ollama') {
+    const activeMeta = useModelStore.getState().models.find((m) => m.name === activeModel)
+    const thinkMode = activeMeta && 'thinkMode' in activeMeta ? activeMeta.thinkMode : undefined
+    const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
+    if (settings.thinkingEnabled && providerId !== 'ollama' && canThink) {
       systemPrompt = (systemPrompt || '') + '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
     }
 
@@ -257,14 +272,11 @@ export function useChat() {
       // the tags silently and keepThinking=false below drops the native
       // thinking field, so the user sees a clean answer without a
       // planning preamble.
-      // Server-declared think capability (LU Cloud models carry thinkMode from
-      // /models): 'always'/'never' models get no reasoning_effort at all — the
-      // upstream reasons (or not) regardless, and forcing 'minimal' on an
-      // always-thinker can 4xx. 'toggle' and unknown fall through to the
-      // name-heuristic + settings switch.
-      const activeMeta = useModelStore.getState().models.find((m) => m.name === activeModel)
-      const thinkMode = activeMeta && 'thinkMode' in activeMeta ? activeMeta.thinkMode : undefined
-      const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
+      // Server-declared think capability (resolved above, alongside the
+      // system-prompt injection): 'always'/'never' models get no
+      // reasoning_effort at all — the upstream reasons (or not) regardless,
+      // and forcing 'minimal' on an always-thinker can 4xx. 'toggle' and
+      // unknown fall through to the name-heuristic + settings switch.
       const plainTextPlanner = isPlainTextPlanner(activeModel)
       const useThinking: boolean | undefined = canThink
         ? (settings.thinkingEnabled === false && plainTextPlanner
@@ -299,7 +311,7 @@ export function useChat() {
         try {
           yield* provider.chatStream(modelId, messages, chatOpts)
         } catch (err: any) {
-          if (useThinking !== undefined && (err?.message?.includes('does not support thinking') || err?.statusCode === 400)) {
+          if (useThinking !== undefined && (err?.message?.includes('does not support thinking') || err?.statusCode === 400 || err?.statusCode === 422)) {
             yield* provider.chatStream(modelId, messages, { ...chatOpts, thinking: undefined })
           } else {
             throw err
@@ -311,6 +323,16 @@ export function useChat() {
 
       let frameScheduled = false
       let firstChunk = true
+      // Thinking visibility is driven by the toggle. When OFF, we still
+      // have to parse <think>…</think> so the state-machine closes
+      // correctly, but we discard the captured text instead of rendering
+      // it. Thinking-native models (QwQ, DeepSeek-R1) emit tags / the
+      // native `thinking` field regardless of the `think: true` flag —
+      // without this gate the block would show up even with the toggle OFF.
+      // 'always' reasoners surface their native channel unconditionally —
+      // their thinking can't be turned off, so hiding it would just burn
+      // tokens invisibly.
+      const keepThinking = useThinking === true || thinkMode === 'always'
       // Reasoning we'd otherwise throw away (Think toggle OFF). Kept so a
       // thought-only completion — model reasons, emits ZERO content, stops —
       // can still explain itself instead of rendering as a silent empty
@@ -332,15 +354,8 @@ export function useChat() {
           useModelStore.getState().setIsModelLoading(false)
         }
 
-        // Thinking visibility is driven by the toggle. When OFF, we still
-        // have to parse <think>…</think> so the state-machine closes
-        // correctly, but we discard the captured text instead of rendering
-        // it. Thinking-native models (QwQ, DeepSeek-R1) emit tags / the
-        // native `thinking` field regardless of the `think: true` flag —
-        // without this gate the block would show up even with the toggle OFF.
-        const keepThinking = useThinking === true
-
-        // Ollama native thinking field (Gemma 4, Qwen 3.5, etc.)
+        // Ollama native thinking field (Gemma 4, Qwen 3.5, etc.) or the
+        // cloud reasoning channel (delta.reasoning_content via the provider).
         if (chunk.thinking && keepThinking) {
           thinkingRef.current += chunk.thinking
         } else if (chunk.thinking) {
@@ -377,24 +392,30 @@ export function useChat() {
             }
           }
 
-          if (!frameScheduled) {
-            frameScheduled = true
-            requestAnimationFrame(() => {
-              const cId = convId!
-              const mId = assistantMessage.id
-              // Always strip non-canonical thinking markers (Gemma channel
-              // tags, `<thought>`, `<reasoning>`, `<reflect>`, `<deepthink>`)
-              // from the streaming bubble. The canonical `<think>…</think>`
-              // is already handled by the char-by-char state-machine above,
-              // so we leave those alone here.
-              const displayContent = stripNonCanonicalTags(contentRef.current)
-              useChatStore.getState().updateMessageContent(cId, mId, displayContent)
-              if (keepThinking && thinkingRef.current) {
-                useChatStore.getState().updateMessageThinking(cId, mId, thinkingRef.current)
-              }
-              frameScheduled = false
-            })
-          }
+        }
+
+        // Coalesced store flush (≤1 per animation frame) for BOTH the answer
+        // and the reasoning block — so the Thinking panel fills live during
+        // the reasoning-only phase too (cloud reasoners stream all their
+        // thinking before the first answer token; previously the flush only
+        // ran on content chunks and the chat sat in dead air).
+        if ((chunk.content || (chunk.thinking && keepThinking)) && !frameScheduled) {
+          frameScheduled = true
+          requestAnimationFrame(() => {
+            const cId = convId!
+            const mId = assistantMessage.id
+            // Always strip non-canonical thinking markers (Gemma channel
+            // tags, `<thought>`, `<reasoning>`, `<reflect>`, `<deepthink>`)
+            // from the streaming bubble. The canonical `<think>…</think>`
+            // is already handled by the char-by-char state-machine above,
+            // so we leave those alone here.
+            const displayContent = stripNonCanonicalTags(contentRef.current)
+            useChatStore.getState().updateMessageContent(cId, mId, displayContent)
+            if (keepThinking && thinkingRef.current) {
+              useChatStore.getState().updateMessageThinking(cId, mId, thinkingRef.current)
+            }
+            frameScheduled = false
+          })
         }
 
         if (chunk.done) {
@@ -435,7 +456,7 @@ export function useChat() {
       // leaving the user staring at silent dead air forever.
       if (!abort.signal.aborted && contentRef.current.trim() === "") {
         const captured = (thinkingRef.current || finalStripThinkingTags(hiddenThinking, false)).trim()
-        if (captured && useThinking === true) {
+        if (captured && keepThinking) {
           // Thinking ON: surface the reasoning so the empty bubble explains
           // itself (MessageBubble renders it + a nudge) instead of dead air.
           useChatStore

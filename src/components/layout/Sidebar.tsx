@@ -53,6 +53,9 @@ export function Sidebar() {
       // when no model is installed/selected, or the model list hasn't
       // populated yet. Send the user to the Models page where they can
       // install or pick one, instead of a dead click with no feedback.
+      // Cloud mode hides that local-hardware view entirely (the hosted
+      // catalog is just still loading/failed) — stay in chat there.
+      if (useSettingsStore.getState().settings.appMode === 'cloud') return
       setView('models')
       return
     }

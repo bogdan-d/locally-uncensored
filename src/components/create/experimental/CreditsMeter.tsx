@@ -1,6 +1,7 @@
 import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
+import { defaultCloudModel, runCredits } from '../../../stores/cloudCatalogStore'
 import { Tooltip } from '../ui/Tooltip'
 import { openExternal } from '../../../api/backend'
 import { CLOUD_BASE } from '../../../api/cloud/config'
@@ -13,10 +14,23 @@ import { cn } from '../ui/cn'
 export function CreditsMeter() {
   const { quota } = useCreateExp()
   const intent = useCreateStore((s) => s.intent())
+  const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
+  const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  const frames = useCreateStore((s) => s.frames)
+  const fps = useCreateStore((s) => s.fps)
+  const targetResolution = useCreateStore((s) => s.targetResolution)
   if (!quota) return null
 
-  const { kind } = intentToJob(intent)
-  const cost = quota.costs[kind]
+  const { kind, op } = intentToJob(intent)
+  // Price the exact run the user is about to make — model, op, (for video)
+  // clip length and (for upscale) target resolution — not the tier's
+  // representative per-kind figure; utility ops and pricier models would
+  // otherwise show a wrong number and mis-gate the button. Same figure
+  // Composer's creditsOk gates on.
+  const picked = (kind === 'video' ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind).id
+  const seconds =
+    kind === 'video' && (op === 'generate' || op === 'animate') && fps > 0 ? frames / fps : undefined
+  const cost = runCredits(kind, op, picked, seconds, quota.costs[kind], targetResolution)
   const remaining = quota.remaining.credits
   const limit = quota.limits.credits
   const enough = remaining >= cost

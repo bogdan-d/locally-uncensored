@@ -943,7 +943,7 @@ async fn mobile_landing() -> Html<String> {
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name='theme-color' content='#0e0e0e'>
-<title>Locally Uncensored</title>
+<title>LU</title>
 <!-- Bug #5: no third-party requests. System fonts only, inline SVG icons. -->
 <!-- Bug #6: restrictive CSP. Self origin only. Inline styles/scripts are
      required because the whole page is a single Rust string; data: images
@@ -1361,7 +1361,7 @@ button{-webkit-appearance:none;appearance:none}
   // with live Thought/Action/Observation cards streamed into the chat.
   // The old "you can't run tools" text was from v2.3.3 before the mobile
   // bridge could actually execute them.
-  var CODEX_PROMPT = 'You are the Coding Agent, an autonomous coding agent inside Locally Uncensored. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.\n\n=== HARD RULES ===\n\n1. AFTER EVERY TOOL RESULT, your very next message MUST be EITHER (a) another tool call to continue the work, OR (b) the final user-facing summary. Empty assistant messages are a FAILURE.\n\n2. DO NOT stop after the first tool. Real coding tasks take 3-15 tool calls. Stopping after one file_read or one shell_execute without producing the requested artefact = FAILURE. "I have called one tool, that is enough" is NOT a valid stop reason.\n\n3. NEVER say "Now I will create X" / "Next I\'ll write Y" as plain prose and then stop. Do the next step RIGHT NOW as a concrete tool call.\n\n4. When your plan has N steps, execute ALL N steps in one session — each step as a concrete tool call. Plan in tool-call form, not prose-then-stop.\n\n5. The ONLY reasons to stop calling tools: (a) the user task is FULLY done with concrete artefacts on disk, OR (b) you are stuck and genuinely need user input.\n\n=== WORKFLOW ===\n\n1. Understand the task.\n2. Explore (file_list, file_read, file_search) when you need to know existing layout.\n3. Plan changes (in your head, not as a stop point).\n4. Implement (file_write) — chain ALL writes without stopping.\n5. Verify (shell_execute / code_execute / file_read).\n6. Only THEN write a short summary of what you did.\n\n=== FILE & DIRECTORY RULES ===\n\n- file_write AUTOMATICALLY creates any missing parent directories. Never call shell_execute with `mkdir`, `New-Item -ItemType Directory`, `md`, or `os.makedirs` to set up a folder before writing — just file_write the target path directly.\n- All relative paths resolve to the current chat workspace folder. Always pass relative paths (e.g. `client/public/index.html`) — do not hard-code absolute drive paths.\n- shell_execute runs inside the workspace folder by default. Do not `cd` into a parent or sibling folder; prefer relative commands.\n- On Windows, the shell is PowerShell. Quote arguments with spaces. Use forward slashes in paths inside commands. Avoid `mkdir -p` (PowerShell mkdir does not accept -p) — again, just use file_write.\n\n=== GENERAL ===\n\n- Always read a file before modifying it.\n- Chain tool calls: after each tool result, if there is another step left, IMMEDIATELY call the next tool.\n- If a command fails, diagnose and retry with corrected arguments — do not introduce yourself again.\n- After 2-3 failures of the same approach, switch strategy (e.g. file_write instead of shell mkdir) instead of repeating.\n- Be concise in text. All real work happens in tool calls.\n- Respond in the same language the user used in their message.';
+  var CODEX_PROMPT = 'You are the Coding Agent, an autonomous coding agent inside LU. You execute coding tasks end-to-end by reading files, writing code, and running shell commands. You MUST use tools — never guess file contents.\n\n=== HARD RULES ===\n\n1. AFTER EVERY TOOL RESULT, your very next message MUST be EITHER (a) another tool call to continue the work, OR (b) the final user-facing summary. Empty assistant messages are a FAILURE.\n\n2. DO NOT stop after the first tool. Real coding tasks take 3-15 tool calls. Stopping after one file_read or one shell_execute without producing the requested artefact = FAILURE. "I have called one tool, that is enough" is NOT a valid stop reason.\n\n3. NEVER say "Now I will create X" / "Next I\'ll write Y" as plain prose and then stop. Do the next step RIGHT NOW as a concrete tool call.\n\n4. When your plan has N steps, execute ALL N steps in one session — each step as a concrete tool call. Plan in tool-call form, not prose-then-stop.\n\n5. The ONLY reasons to stop calling tools: (a) the user task is FULLY done with concrete artefacts on disk, OR (b) you are stuck and genuinely need user input.\n\n=== WORKFLOW ===\n\n1. Understand the task.\n2. Explore (file_list, file_read, file_search) when you need to know existing layout.\n3. Plan changes (in your head, not as a stop point).\n4. Implement (file_write) — chain ALL writes without stopping.\n5. Verify (shell_execute / code_execute / file_read).\n6. Only THEN write a short summary of what you did.\n\n=== FILE & DIRECTORY RULES ===\n\n- file_write AUTOMATICALLY creates any missing parent directories. Never call shell_execute with `mkdir`, `New-Item -ItemType Directory`, `md`, or `os.makedirs` to set up a folder before writing — just file_write the target path directly.\n- All relative paths resolve to the current chat workspace folder. Always pass relative paths (e.g. `client/public/index.html`) — do not hard-code absolute drive paths.\n- shell_execute runs inside the workspace folder by default. Do not `cd` into a parent or sibling folder; prefer relative commands.\n- On Windows, the shell is PowerShell. Quote arguments with spaces. Use forward slashes in paths inside commands. Avoid `mkdir -p` (PowerShell mkdir does not accept -p) — again, just use file_write.\n\n=== GENERAL ===\n\n- Always read a file before modifying it.\n- Chain tool calls: after each tool result, if there is another step left, IMMEDIATELY call the next tool.\n- If a command fails, diagnose and retry with corrected arguments — do not introduce yourself again.\n- After 2-3 failures of the same approach, switch strategy (e.g. file_write instead of shell mkdir) instead of repeating.\n- Be concise in text. All real work happens in tool calls.\n- Respond in the same language the user used in their message.';
 
   // ── Thinking-compatible prefixes (parity with desktop) ──
   var THINKING_COMPATIBLE = ['qwq','deepseek-r1','qwen3.6','qwen3','qwen3.5','qwen3-coder','gemma3','gemma4'];
@@ -1926,7 +1926,7 @@ button{-webkit-appearance:none;appearance:none}
   // blocks in chat with "save this as index.html" instead of calling
   // file_write. Codex already had its own prompt; this matches the
   // strictness for the LU-mode + Agent-on path.
-  var AGENT_PROMPT = 'You are an autonomous AI agent inside Locally Uncensored. You execute tasks end-to-end via tools — you do NOT just describe what to do.\n\n=== HARD RULES ===\n\n1. AFTER EVERY TOOL RESULT, your very next message MUST be EITHER (a) another tool call to continue the work, OR (b) the final user-facing summary. There is no middle ground. Empty messages are a FAILURE.\n\n2. DO NOT stop after the FIRST tool. Real tasks take 3-10 tool calls. If the user said "build X" you write the files. If the user said "use every tool" you keep going through every tool. Stopping after one shell_execute or one get_current_time without producing a useful artefact = FAILURE.\n\n3. NEVER produce a code block followed by "save this as X". That is FAILURE — call file_write yourself.\n\n4. NEVER say "Now I will create X" / "Next I will write Y" as plain prose and stop. Do the next step right now as a concrete tool call.\n\n5. The ONLY reasons to stop calling tools: (a) the user task is FULLY done with concrete artefacts on disk / web results returned / etc., OR (b) you are stuck in a way that genuinely needs user input. "I have called one tool, that should be enough" is NOT a valid stop reason.\n\n=== WORKFLOW ===\n\n- Build / create tasks: file_write each artefact directly, chain ALL writes, then write a 1-3 sentence final answer.\n- Read / explore tasks: file_list / file_read first, then proceed.\n- Web tasks: web_search → web_fetch on the best URL → summarize.\n- Multi-tool / "use every tool" tasks: plan the order, then call each tool one at a time, recording the partial result in a final summary file before the visible reply.\n\n=== FILE RULES ===\n\n- file_write AUTOMATICALLY creates missing parent directories — do NOT shell out to mkdir / New-Item / md / os.makedirs first. Just file_write the target path.\n- Relative paths resolve to the current chat workspace folder. Use relative paths (e.g. `index.html`, `src/app.py`); do not hard-code absolute drive letters.\n- After 2-3 failures of the same approach, switch strategy — do not repeat the same broken command. Do not introduce yourself again.\n\nBe concise in prose. All real work happens in tool calls. Respond in the same language the user used in their message.';
+  var AGENT_PROMPT = 'You are an autonomous AI agent inside LU. You execute tasks end-to-end via tools — you do NOT just describe what to do.\n\n=== HARD RULES ===\n\n1. AFTER EVERY TOOL RESULT, your very next message MUST be EITHER (a) another tool call to continue the work, OR (b) the final user-facing summary. There is no middle ground. Empty messages are a FAILURE.\n\n2. DO NOT stop after the FIRST tool. Real tasks take 3-10 tool calls. If the user said "build X" you write the files. If the user said "use every tool" you keep going through every tool. Stopping after one shell_execute or one get_current_time without producing a useful artefact = FAILURE.\n\n3. NEVER produce a code block followed by "save this as X". That is FAILURE — call file_write yourself.\n\n4. NEVER say "Now I will create X" / "Next I will write Y" as plain prose and stop. Do the next step right now as a concrete tool call.\n\n5. The ONLY reasons to stop calling tools: (a) the user task is FULLY done with concrete artefacts on disk / web results returned / etc., OR (b) you are stuck in a way that genuinely needs user input. "I have called one tool, that should be enough" is NOT a valid stop reason.\n\n=== WORKFLOW ===\n\n- Build / create tasks: file_write each artefact directly, chain ALL writes, then write a 1-3 sentence final answer.\n- Read / explore tasks: file_list / file_read first, then proceed.\n- Web tasks: web_search → web_fetch on the best URL → summarize.\n- Multi-tool / "use every tool" tasks: plan the order, then call each tool one at a time, recording the partial result in a final summary file before the visible reply.\n\n=== FILE RULES ===\n\n- file_write AUTOMATICALLY creates missing parent directories — do NOT shell out to mkdir / New-Item / md / os.makedirs first. Just file_write the target path.\n- Relative paths resolve to the current chat workspace folder. Use relative paths (e.g. `index.html`, `src/app.py`); do not hard-code absolute drive letters.\n- After 2-3 failures of the same approach, switch strategy — do not repeat the same broken command. Do not introduce yourself again.\n\nBe concise in prose. All real work happens in tool calls. Respond in the same language the user used in their message.';
 
   // ── System prompt builder ──
   function buildSystemPrompt(){
@@ -1966,7 +1966,7 @@ button{-webkit-appearance:none;appearance:none}
     el('app').innerHTML =
       '<div class="auth-screen">' +
         '<img class="auth-mark" src="/LU-monogram-white.png" alt="">' +
-        '<div class="auth-logo">LUncensored</div>' +
+        '<div class="auth-logo">LU</div>' +
         '<div class="auth-sub">Remote</div>' +
         '<form class="auth-form" id="auth-form">' +
           '<div>' +
@@ -2089,8 +2089,8 @@ button{-webkit-appearance:none;appearance:none}
       '<div class="app-shell">' +
         '<div class="app-header">' +
           '<button class="icon-btn" onclick="window._toggleDrawer()" aria-label="Menu"><span class="material-symbols-outlined">'+svgIcon('menu')+'</span></button>' +
-          '<span class="header-brand" aria-label="LUncensored">' +
-            '<img class="header-mark" src="/LU-monogram-white.png" alt="LUncensored">' +
+          '<span class="header-brand" aria-label="LU">' +
+            '<img class="header-mark" src="/LU-monogram-white.png" alt="LU">' +
           '</span>' +
           modeTag +
           '<button class="model-badge" onclick="window._openModelPicker()" aria-label="Select model">' +
@@ -2159,7 +2159,7 @@ button{-webkit-appearance:none;appearance:none}
              '<div class="drawer-header">' +
                '<span class="drawer-brand">' +
                  '<img class="drawer-mark" src="/LU-monogram-white.png" alt="">' +
-                 '<span class="drawer-logo">LUncensored</span>' +
+                 '<span class="drawer-logo">LU</span>' +
                '</span>' +
                '<button class="drawer-close" onclick="window._toggleDrawer()" aria-label="Close"><span class="material-symbols-outlined">'+svgIcon('close')+'</span></button>' +
              '</div>' +
@@ -2290,7 +2290,7 @@ button{-webkit-appearance:none;appearance:none}
       p.innerHTML =
         '<div class="chat-welcome">' +
           '<img class="chat-welcome-mark" src="/LU-monogram-white.png" alt="">' +
-          '<div class="chat-welcome-logo">LUncensored</div>' +
+          '<div class="chat-welcome-logo">LU</div>' +
           '<div class="chat-welcome-tag">'+H(tag)+'</div>' +
         '</div>';
       return;
@@ -3796,7 +3796,7 @@ fn ensure_lan_firewall_rule(port: u16) {
     use std::os::windows::process::CommandExt;
     use std::process::Command;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let name = format!("Locally Uncensored Remote {}", port);
+    let name = format!("LU Remote {}", port);
     // Idempotent: drop any prior rule for this name, then add a fresh inbound allow.
     let _ = Command::new("netsh")
         .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", name)])

@@ -51,11 +51,16 @@ export const useModelStore = create<ModelState>()(
           // first-launch behavior so a user is never stuck with no
           // selection while a model exists.
           const stillValid = !!state.activeModel && models.some((m) => m.name === state.activeModel)
+          // Chat models only for the auto-select — ComfyUI image/video
+          // checkpoints share this list and must never become the active CHAT
+          // model (an unprefixed checkpoint name routes to Ollama and every
+          // send fails with model-not-found).
+          const firstChat = models.find((m) => m.type !== 'image' && m.type !== 'video')
           return {
             models,
             activeModel: stillValid
               ? state.activeModel
-              : (models.length > 0 ? models[0].name : null),
+              : (firstChat ? firstChat.name : null),
           }
         }),
 

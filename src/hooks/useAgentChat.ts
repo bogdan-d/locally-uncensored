@@ -598,7 +598,12 @@ export function useAgentChat() {
         // Checklist: / Confidence Score:) with no tags to strip. Pass
         // `undefined` instead so Ollama keeps the model in tagged-
         // thinking mode; the stripper removes the tags silently.
-        const canThinkAgent = isThinkingCompatible(activeModel)
+        // Server-declared think capability wins over the name-heuristic
+        // (same precedence as useChat): 'always'/'never' cloud models get
+        // no reasoning_effort knob at all; 'toggle' follows the switch.
+        const agentMeta = useModelStore.getState().models.find((m) => m.name === activeModel)
+        const agentThinkMode = agentMeta && 'thinkMode' in agentMeta ? agentMeta.thinkMode : undefined
+        const canThinkAgent = agentThinkMode ? agentThinkMode === 'toggle' : isThinkingCompatible(activeModel)
         const plainPlanAgent = isPlainTextPlanner(activeModel)
         // forceNoThink: set by the dud-turn recovery below — a thinking model
         // (gemma4) dumped its whole answer into the thinking channel and emitted
@@ -834,8 +839,8 @@ export function useAgentChat() {
               estimated: false,
             })
           }
-          // Native thinking field from Ollama
-          if ((turn as any).thinking) turnThinking = (turn as any).thinking
+          // Native thinking field (Ollama; LU Cloud reasoning_content)
+          if (turn.thinking) turnThinking = turn.thinking
 
         } else {
           // ── Hermes XML prompt-based tool calling (Ollama fallback) ──
@@ -861,7 +866,7 @@ export function useAgentChat() {
         // toggled Thinking on — thinking-only models (QwQ, DeepSeek-R1)
         // emit these tags unconditionally, and we must not surface them
         // when the user asked for thinking to be OFF.
-        const keepThinking = settings.thinkingEnabled === true && isThinkingCompatible(activeModel)
+        const keepThinking = agentThinkMode === 'always' || (settings.thinkingEnabled === true && canThinkAgent)
         turnContent = turnContent.replace(/<think>([\s\S]*?)<\/think>/g, (_match, inner) => {
           if (keepThinking) {
             turnThinking = turnThinking
@@ -986,9 +991,13 @@ export function useAgentChat() {
         //      has been generated" as plain text and never called the tool, so the
         //      user got a confident lie and no media. Every "regenerate" after the
         //      first clip did exactly this.
+        // Never synthesize a local image/video tool call in cloud mode — the
+        // tools run the LOCAL ComfyUI pipeline, which a cloud-tier user
+        // doesn't have (media belongs to the Create tab there).
         const mediaPending =
-          (wantsImage && maxImageGen > 0 && imageGenDone === 0) ||
-          (wantsVideo && maxVideoGen > 0 && videoGenDone === 0)
+          settings.appMode !== 'cloud' &&
+          ((wantsImage && maxImageGen > 0 && imageGenDone === 0) ||
+            (wantsVideo && maxVideoGen > 0 && videoGenDone === 0))
         const emptyTurn = !turnContent.trim()
         const fakeGenProse = mediaPending && !emptyTurn && FAKE_MEDIA_GEN_RE.test(turnContent)
         if (isFinalTurn && executedCallKeys.size === 0 && (emptyTurn || fakeGenProse)) {

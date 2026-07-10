@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Tauri v2 auto-merges this file into the generated bundle Info.plist
+     (the bundler looks for an Info.plist next to tauri.conf.json). Without
+     NSMicrophoneUsageDescription macOS TCC denies getUserMedia outright, so
+     dictation/voice never even shows the permission prompt. -->
+<plist version="1.0">
+<dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Voice chat and dictation transcribe your speech locally on this device.</string>
+</dict>
+</plist>

@@ -25,8 +25,10 @@
 set -euo pipefail
 
 # --- Pinned, reproducible llama.cpp revision -------------------------------
-# Bump deliberately and re-test; do not float. llama.cpp tags are build numbers.
-LLAMA_TAG="${LLAMA_TAG:-b6231}"
+# Bump deliberately and re-test; do not float. llama.cpp tags are build numbers
+# and upstream SKIPS numbers whose CI failed — verify the tag exists first:
+#   git ls-remote --tags https://github.com/ggml-org/llama.cpp.git 'refs/tags/<tag>'
+LLAMA_TAG="${LLAMA_TAG:-b9949}"
 LLAMA_REPO="${LLAMA_REPO:-https://github.com/ggml-org/llama.cpp.git}"
 
 # --- Paths -----------------------------------------------------------------
@@ -54,9 +56,12 @@ host_triple() {
 }
 
 # Map a Rust target triple → cmake flags for a static, GPU-embedded llama-server.
+# LLAMA_OPENSSL=OFF: no HTTPS/downloader deps — the app manages model files.
+# LLAMA_BUILD_UI/USE_PREBUILT_UI=OFF: headless sidecar — no npm build and no
+# HF asset fetch at compile time.
 cmake_flags_for() {
   local triple="$1"
-  local common="-DBUILD_SHARED_LIBS=OFF -DLLAMA_CURL=OFF -DGGML_NATIVE=OFF -DCMAKE_BUILD_TYPE=Release"
+  local common="-DBUILD_SHARED_LIBS=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DGGML_NATIVE=OFF -DCMAKE_BUILD_TYPE=Release"
   case "$triple" in
     aarch64-apple-darwin)
       echo "$common -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DCMAKE_OSX_ARCHITECTURES=arm64" ;;
@@ -116,14 +121,17 @@ build_triple() {
   log "installed → $out"
 }
 
-# Boot the host binary and probe /health + /v1/models on an ephemeral port.
+# Boot the host binary and probe /health on an ephemeral port. Without a
+# model llama-server starts in router mode (no weights loaded), so /health
+# answers 200 on any machine.
 check_binary() {
   local triple; triple="$(host_triple)"
   local bin="$BIN_DIR/$(out_name_for "$triple")"
   [ -x "$bin" ] || die "no built binary at $bin — build first"
+  "$bin" --version >/dev/null 2>&1 || die "$bin --version failed"
   local port=8129
-  log "boot check: $bin on 127.0.0.1:$port (no model, /health only)"
-  "$bin" --host 127.0.0.1 --port "$port" --models "$CACHE_DIR" >/dev/null 2>&1 &
+  log "boot check: $bin on 127.0.0.1:$port (no model — router mode, /health only)"
+  "$bin" --host 127.0.0.1 --port "$port" >/dev/null 2>&1 &
   local pid=$!
   trap 'kill "$pid" 2>/dev/null || true' EXIT
   local ok=""

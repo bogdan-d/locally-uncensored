@@ -26,7 +26,16 @@ export class LuCloudProvider implements ProviderClient {
   // Fresh delegate per call: the token rotates (~1 h), and OpenAIProvider
   // reads apiKey from its config. isLocal:false keeps it off the Rust proxy.
   private async delegate(): Promise<OpenAIProvider> {
-    const token = await getAccessToken()
+    let token: string | null
+    try {
+      token = await getAccessToken()
+    } catch (e) {
+      throw new ProviderError(
+        e instanceof Error ? e.message : 'LU Cloud unreachable — check your connection.',
+        'lu-cloud',
+        'network',
+      )
+    }
     if (!token) {
       throw new ProviderError('Sign in to your LU Cloud account to chat in the cloud.', 'lu-cloud', 'auth', 401)
     }

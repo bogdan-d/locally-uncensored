@@ -120,6 +120,28 @@ describe('providerStore keychain (H5)', () => {
     expect(secretDelete).toHaveBeenCalledWith('anthropic')
   })
 
+  it('does not revert concurrent provider changes made while hydrate awaits the vault', async () => {
+    // Locked-keychain scenario: the first secret_get blocks (macOS unlock
+    // prompt) while the app keeps running — e.g. useCloudAuth enables the
+    // lu-cloud provider. The final set() must overlay only the vault-loaded
+    // keys, never replace the providers map with a pre-await snapshot.
+    let release!: (value: string | null) => void
+    secretGet.mockImplementation((id: string) => {
+      if (id === 'ollama') return new Promise<string | null>((resolve) => { release = resolve })
+      return Promise.resolve(null)
+    })
+    const useStore = await freshStore()
+    const hydrating = useStore.getState().hydrateProviderKeys()
+
+    // Concurrent write while the first probe is still pending.
+    useStore.getState().setProviderConfig('lu-cloud', { enabled: true })
+    release('sk-vault-ollama')
+    await hydrating
+
+    expect(useStore.getState().providers['lu-cloud'].enabled).toBe(true)
+    expect(useStore.getState().getProviderApiKey('ollama')).toBe('sk-vault-ollama')
+  })
+
   it('keeps the obfuscated key in localStorage when the vault WRITE fails (no silent loss on restart)', async () => {
     secretGet.mockResolvedValue(null) // keychain usable but empty
     secretSet.mockRejectedValue(new Error('credential store locked'))

@@ -169,13 +169,15 @@ export interface ProviderClient {
 
   /** Non-streaming chat with tool calling support. The optional
    *  promptEvalCount/evalCount carry real token usage (consumed context) so
-   *  the agent/code TokenCounter can show the true fill, not a char/4 estimate. */
+   *  the agent/code TokenCounter can show the true fill, not a char/4 estimate.
+   *  `thinking` carries native model reasoning (Ollama thinking field, LU Cloud
+   *  reasoning_content). */
   chatWithTools(
     model: string,
     messages: ChatMessage[],
     tools: ToolDefinition[],
     options?: ChatOptions
-  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number }>
+  ): Promise<{ content: string; toolCalls: ToolCall[]; promptEvalCount?: number; evalCount?: number; thinking?: string }>
 
   /** List available models from this provider. */
   listModels(): Promise<ProviderModel[]>

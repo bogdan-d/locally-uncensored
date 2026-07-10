@@ -41,7 +41,8 @@ test('cloud render: submit → poll → gallery, meter + utility intents present
   await page.getByRole('button', { name: /^Create$/ }).last().click()
 
   // The mocked job succeeds on the first poll; the image lands in the gallery.
-  await expect(page.locator('img[src^="data:image"]').first()).toBeVisible({ timeout: 30_000 })
+  // Cloud results keep their remote signed URL (no base64 persistence).
+  await expect(page.locator('img[src*="/e2e/result.png"]').first()).toBeVisible({ timeout: 30_000 })
 })
 
 test('media_live=false: generate shows the honest coming-soon message', async ({ page }) => {

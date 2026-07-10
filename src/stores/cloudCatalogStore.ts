@@ -7,7 +7,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { CLOUD_MODEL_SEED, type CloudModel } from '../lib/render/cloud-models'
-import type { RenderKind } from '../lib/render/cloud-jobs'
+import type { RenderKind, RenderOp } from '../lib/render/cloud-jobs'
 import { getCatalog, type CatalogOps, type CloudCatalog } from '../api/cloud/catalog'
 
 interface CloudCatalogState {
@@ -67,6 +67,45 @@ export function cloudModelById(id: string): CloudModel | undefined {
 
 export function isEditCapable(id: string): boolean {
   return cloudModelById(id)?.edit === true
+}
+
+/** First edit-capable image model in the catalog (flux-dev today) — the
+ *  submit-time fallback when the picker holds a t2i-only model for an edit. */
+export function defaultEditModel(): CloudModel | undefined {
+  return useCloudCatalogStore.getState().models.find((m) => m.kind === 'image' && m.edit)
+}
+
+/** Credits the upcoming run draws, priced from the server catalog: per-op
+ *  utility rates, per-model base/long clip rates (the long rate books from
+ *  ~6.5 s, mirroring the server's mediaCredits split). Edit coerces onto the
+ *  edit-capable model exactly like useCloudCreate's submit, so gate + meter
+ *  price the model the run actually uses. Falls back to the quota's
+ *  representative per-kind figure when the catalog carries no price
+ *  (seed/offline). */
+export function runCredits(
+  kind: RenderKind,
+  op: RenderOp,
+  pickedModel: string,
+  seconds: number | undefined,
+  fallback: number,
+  resolution?: string,
+): number {
+  const { ops } = useCloudCatalogStore.getState()
+  if (op === 'removebg' || op === 'eraser' || op === 'upscale') {
+    const upscale =
+      ops && kind === 'image'
+        ? ((resolution && ops.upscale_image_res?.[resolution]) || ops.upscale_image)
+        : ops?.upscale_image
+    const rate = ops ? { removebg: ops.removebg, eraser: ops.eraser, upscale }[op] : undefined
+    return rate ?? fallback
+  }
+  const model =
+    op === 'edit' && !isEditCapable(pickedModel) ? (defaultEditModel()?.id ?? pickedModel) : pickedModel
+  const credits = cloudModelById(model)?.credits
+  if (!credits) return fallback
+  return kind === 'video' && seconds !== undefined && seconds >= 6.5
+    ? (credits.long ?? credits.base)
+    : credits.base
 }
 
 /** Media-live switch from the server (MEDIA_LIVE env). Unknown = live so the

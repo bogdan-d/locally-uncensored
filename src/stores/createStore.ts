@@ -112,7 +112,8 @@ export interface GalleryItem {
   resolvedCLIP?: string
   /** Self-contained PNG data URL for backends that don't serve files over
    *  ComfyUI's /view route (e.g. MLX on Apple Silicon). When set, display +
-   *  download read from this instead of filename/subfolder. */
+   *  download read from this instead of filename/subfolder. In-memory only —
+   *  partialize strips it so media bytes never hit the localStorage quota. */
   dataUrl?: string
   /** Cloud jobs: signed result URL from the render queue. Display prefers
    *  `remoteUrl` → `dataUrl` → the ComfyUI /view path (filename/subfolder). */
@@ -243,6 +244,8 @@ interface CreateState {
   setError: (error: string | null) => void
   setLastGenTime: (time: string | null) => void
   addToGallery: (item: GalleryItem) => void
+  /** Patch a gallery item in place (e.g. a lazily re-signed remoteUrl). */
+  updateGalleryItem: (id: string, patch: Partial<GalleryItem>) => void
   removeFromGallery: (id: string) => void
   clearGallery: () => void
   addToPromptHistory: (prompt: string) => void
@@ -454,6 +457,8 @@ export const useCreateStore = create<CreateState>()(
       setError: (error) => set({ error }),
       setLastGenTime: (time) => set({ lastGenTime: time }),
       addToGallery: (item) => set((s) => ({ gallery: [item, ...s.gallery].slice(0, 200) })),
+      updateGalleryItem: (id, patch) =>
+        set((s) => ({ gallery: s.gallery.map((g) => (g.id === id ? { ...g, ...patch } : g)) })),
       removeFromGallery: (id) => set((s) => ({ gallery: s.gallery.filter((g) => g.id !== id) })),
       clearGallery: () => set({ gallery: [] }),
       addToPromptHistory: (prompt) => set((s) => {
@@ -483,7 +488,11 @@ export const useCreateStore = create<CreateState>()(
         frames: state.frames,
         fps: state.fps,
         denoise: state.denoise,
-        gallery: state.gallery,
+        // Media bytes never go to localStorage — a handful of multi-MB base64
+        // dataUrls would blow the origin quota (~5-10 MB in WebView2/WKWebView)
+        // and every subsequent set() would throw, killing ALL create-store
+        // persistence. Cloud items carry remoteUrl + jobId and re-sign lazily.
+        gallery: state.gallery.map(({ dataUrl, ...g }) => g),
         promptHistory: state.promptHistory,
         // ── redesign additions (advanced params only; runtime inputs
         //    source/mask/backend/caps stay unpersisted). No version bump: these

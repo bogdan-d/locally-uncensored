@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useCompareStore } from '../../stores/compareStore'
-import { useModelStore } from '../../stores/modelStore'
+import { useModels } from '../../hooks/useModels'
 import { useABCompare } from '../../hooks/useABCompare'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ArrowLeft, Send, Square, Zap, Clock, Hash } from 'lucide-react'
@@ -11,7 +11,10 @@ export function ABCompare() {
     statsA, statsB, isStreamingA, isStreamingB,
     setModelA, setModelB, setComparing, reset,
   } = useCompareStore()
-  const models = useModelStore((s) => s.models)
+  // appMode-filtered view (useModels choke point) — the raw store keeps the
+  // full list, which leaked paid lu-cloud models into Local mode (and local
+  // models into Cloud mode) in the Compare pickers.
+  const { models } = useModels()
   const textModels = models.filter(m => m.type === 'text')
   const { sendCompare, stopCompare } = useABCompare()
   const [input, setInput] = useState('')

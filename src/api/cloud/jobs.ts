@@ -115,8 +115,30 @@ export async function refreshResultUrl(jobId: string): Promise<string | null> {
 
 const TERMINAL = new Set(['succeeded', 'failed', 'canceled'])
 
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+}
+
+/** Consecutive getJob failures pollJob rides out before giving up. */
+const MAX_POLL_FAILURES = 5
+
 /** Poll until the job reaches a terminal state, the timeout hits, or the
- *  AbortSignal fires. onTick fires on every poll with the fresh job. */
+ *  AbortSignal fires. onTick fires on every poll with the fresh job.
+ *  A transient getJob failure (network blip, one 5xx, a token-refresh hiccup)
+ *  must not detach the client from a 15–45 minute render that keeps running
+ *  and billing server-side — the loop retries with backoff and only gives up
+ *  after MAX_POLL_FAILURES consecutive errors. Definitive client errors
+ *  (4xx except 401/408/429) fail fast. */
 export async function pollJob(
   id: string,
   opts: {
@@ -128,23 +150,29 @@ export async function pollJob(
 ): Promise<CloudJob> {
   const intervalMs = opts.intervalMs ?? 2_500
   const deadline = Date.now() + (opts.timeoutMs ?? 15 * 60_000)
+  let failures = 0
   for (;;) {
     if (opts.signal?.aborted) throw new CloudJobError('polling aborted', 0)
-    const job = await getJob(id)
+    let job: CloudJob
+    try {
+      job = await getJob(id)
+      failures = 0
+    } catch (err) {
+      // 401 stays retryable: a failed lazy token refresh yields one mid-poll
+      // and must not tell a signed-in user to sign in.
+      const status = err instanceof CloudJobError ? err.status : 0
+      const definitive =
+        status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 429
+      failures += 1
+      if (definitive || failures >= MAX_POLL_FAILURES) throw err
+      if (Date.now() >= deadline) throw new CloudJobError('render timed out', 0)
+      await sleep(Math.min(intervalMs * failures, 15_000), opts.signal)
+      continue
+    }
     opts.onTick?.(job)
     if (TERMINAL.has(job.status)) return job
     if (Date.now() >= deadline) throw new CloudJobError('render timed out', 0)
-    await new Promise<void>((resolve) => {
-      const t = setTimeout(resolve, intervalMs)
-      opts.signal?.addEventListener(
-        'abort',
-        () => {
-          clearTimeout(t)
-          resolve()
-        },
-        { once: true },
-      )
-    })
+    await sleep(intervalMs, opts.signal)
   }
 }
 

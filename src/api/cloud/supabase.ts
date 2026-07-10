@@ -88,9 +88,14 @@ export function supabaseCloud(): SupabaseClient {
 
 /** Current access token, refreshing an expired session if needed. Null when
  *  logged out. Called per request — getSession() is cached in-memory and only
- *  hits the network when the token actually expired. */
+ *  hits the network when the token actually expired. A failed refresh with the
+ *  session still in the keychain is a connectivity problem, not a sign-out —
+ *  throw so callers don't tell a signed-in user to sign in. */
 export async function getAccessToken(): Promise<string | null> {
-  const { data } = await supabaseCloud().auth.getSession()
+  const { data, error } = await supabaseCloud().auth.getSession()
+  if (!data.session && error) {
+    throw new Error('LU Cloud unreachable — check your connection.')
+  }
   return data.session?.access_token ?? null
 }
 
@@ -100,8 +105,11 @@ export type OAuthProvider = 'google' | 'github'
  *  127.0.0.1 loopback port (Rust, fixed ladder registered in the Supabase
  *  redirect allow-list) → open the provider consent in the SYSTEM browser →
  *  Supabase redirects to the loopback with ?code= → exchange the PKCE code
- *  for a session. Rejects with a readable message on timeout/denial. */
-export async function loginWithProvider(provider: OAuthProvider): Promise<void> {
+ *  for a session. Rejects with a readable message on timeout/denial, and
+ *  immediately when `signal` aborts (Cancel while waiting for the browser) —
+ *  the abandoned Rust wait cleans itself up, and any retry's oauth_start
+ *  aborts the stale listener first, so cancelling never wedges the ladder. */
+export async function loginWithProvider(provider: OAuthProvider, signal?: AbortSignal): Promise<void> {
   const port = await oauthStart()
   const { data, error } = await supabaseCloud().auth.signInWithOAuth({
     provider,
@@ -113,7 +121,17 @@ export async function loginWithProvider(provider: OAuthProvider): Promise<void> 
   if (error) throw new Error(error.message)
   if (!data?.url) throw new Error('OAuth start failed — no provider URL')
   await openExternal(data.url)
-  const query = await oauthWait(port, 300)
+  const wait = oauthWait(port, 300)
+  const query = signal
+    ? await Promise.race([
+        wait,
+        new Promise<never>((_, reject) => {
+          const cancel = () => reject(new Error('Sign-in cancelled.'))
+          if (signal.aborted) cancel()
+          else signal.addEventListener('abort', cancel, { once: true })
+        }),
+      ])
+    : await wait
   const params = new URLSearchParams(query)
   const code = params.get('code')
   if (!code) {

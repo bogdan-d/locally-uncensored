@@ -26,7 +26,11 @@ import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 // full picker to come FIRST again on both image AND video. Clearing the saved
 // picks once on upgrade makes the picker the default until the user deliberately
 // saves a model again via the picker's Remember.
-const STORE_VERSION = 10
+// v11 (2.5.7): added settings.appMode (global Local/Cloud switch, default
+// 'local'). Same additive merge backfills it — without the bump, v10 blobs
+// skip migrate entirely and the header ModeSwitch renders with appMode
+// undefined, highlighting neither Local nor Cloud.
+const STORE_VERSION = 11
 
 interface SettingsState {
   settings: Settings

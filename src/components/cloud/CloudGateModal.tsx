@@ -5,6 +5,7 @@
 //   signed-out            → login (email+password + Google/GitHub)
 //   licensed? no          → plan CTA → lu-labs.ai/pricing in the browser
 //   beta gate (access=no) → closed-beta copy → lu-labs.ai
+//   no credit budget      → honest copy → lu-labs.ai/account in the browser
 // Payment stays on lu-labs.ai (browser) — the app never touches Stripe.
 
 import { useEffect, useRef } from 'react'
@@ -43,6 +44,12 @@ export function CloudGateModal() {
       setOpen(false)
     }
   }, [available, setOpen, updateSettings])
+
+  // Re-probe on open — someone staring at this gate shouldn't wait for the
+  // 5-minute background interval to clear a transient quota-fetch failure.
+  useEffect(() => {
+    if (open) void refresh()
+  }, [open, refresh])
 
   const linkBtn =
     'flex items-center gap-1.5 px-3 py-1.5 rounded text-[0.7rem] font-medium bg-gray-900 text-white dark:bg-white dark:text-gray-900 hover:opacity-90 transition-opacity'
@@ -85,6 +92,34 @@ export function CloudGateModal() {
           <div className="flex items-center gap-2">
             <button className={linkBtn} onClick={() => void openExternal(`${CLOUD_BASE}/pricing`)}>
               <ExternalLink size={11} /> Open lu-labs.ai
+            </button>
+            <button className={ghostBtn} onClick={() => void refresh()}>
+              <RefreshCw size={11} /> Re-check
+            </button>
+          </div>
+        </div>
+      ) : quota === null ? (
+        <div className="space-y-3">
+          <p className="text-[0.75rem] text-gray-600 dark:text-gray-400">
+            Your plan is active, but your usage couldn't be loaded just now, so
+            Cloud mode can't switch on yet. Check your connection and re-check.
+          </p>
+          <div className="flex items-center gap-2">
+            <button className={ghostBtn} onClick={() => void refresh()}>
+              <RefreshCw size={11} /> Re-check
+            </button>
+          </div>
+        </div>
+      ) : quota.limits.credits <= 0 ? (
+        <div className="space-y-3">
+          <p className="text-[0.75rem] text-gray-600 dark:text-gray-400">
+            Your plan is active, but it doesn't include a hosted-compute credit
+            budget, so there's nothing for Cloud mode to run on. Plans with
+            cloud credits are on lu-labs.ai.
+          </p>
+          <div className="flex items-center gap-2">
+            <button className={linkBtn} onClick={() => void openExternal(`${CLOUD_BASE}/account`)}>
+              <ExternalLink size={11} /> Open your account on lu-labs.ai
             </button>
             <button className={ghostBtn} onClick={() => void refresh()}>
               <RefreshCw size={11} /> Re-check

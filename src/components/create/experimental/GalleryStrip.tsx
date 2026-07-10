@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { Trash2, Play } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
-import { galleryItemUrl } from './galleryUrl'
+import { galleryItemUrl, recoverGalleryUrl } from './galleryUrl'
 import { cn } from '../ui/cn'
 
 interface Props {
@@ -38,11 +38,11 @@ export function GalleryStrip({ activeId, onSelect }: Props) {
             >
               {g.type === 'video' ? (
                 <>
-                  <video src={galleryItemUrl(g)} muted playsInline className="w-full h-full object-cover" />
+                  <video src={galleryItemUrl(g)} muted playsInline onError={() => recoverGalleryUrl(g)} className="w-full h-full object-cover" />
                   <span className="absolute inset-0 flex items-center justify-center bg-black/20"><Play size={14} className="text-white/90" /></span>
                 </>
               ) : (
-                <img src={galleryItemUrl(g)} alt="" className="w-full h-full object-cover" />
+                <img src={galleryItemUrl(g)} alt="" onError={() => recoverGalleryUrl(g)} className="w-full h-full object-cover" />
               )}
             </button>
             <button

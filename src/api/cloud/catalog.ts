@@ -9,6 +9,9 @@ export interface CatalogOps {
   removebg: number
   eraser: number
   upscale_image: number
+  // Per-target image-upscale rates (2k/4k/8k). Optional: older catalog
+  // payloads (persisted cache) carry only the flat 4k figure above.
+  upscale_image_res?: Record<string, number>
   upscale_video_per_s: number
   upscale_video_min: number
 }

@@ -10,6 +10,7 @@
 
 import { getModelContext } from '../api/ollama'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
+import { useModelStore } from '../stores/modelStore'
 import type { OllamaChatMessage } from '../types/agent-mode'
 
 // ── Token Estimation ────────────────────────────────────────────
@@ -46,6 +47,18 @@ export function estimateMessageTokens(messages: OllamaChatMessage[]): number {
 export async function getModelMaxTokens(modelName: string): Promise<number> {
   try {
     const providerId = getProviderIdFromModel(modelName)
+
+    if (providerId === 'lu-cloud') {
+      // LU Cloud ships the real context_length via /models; the model store
+      // carries it as contextLength. Without this branch the prefixed name
+      // fell into the Ollama path → /api/show 404 → 4096 for EVERY cloud
+      // model (TokenCounter pinned red at 4.1k).
+      const meta = useModelStore.getState().models.find((m) => m.name === modelName)
+      const ctx = meta && 'contextLength' in meta ? meta.contextLength : undefined
+      if (ctx && ctx > 0) return ctx
+      const { provider, modelId } = getProviderForModel(modelName)
+      return await provider.getContextLength(modelId)
+    }
 
     if (providerId === 'openai' || providerId === 'anthropic') {
       // Use provider's getContextLength for cloud models

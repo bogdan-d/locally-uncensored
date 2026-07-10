@@ -75,8 +75,11 @@ describe('mobile_landing HTML › LU branding assets', () => {
     expect(matches.length).toBeGreaterThanOrEqual(4)
   })
 
-  it('has LUncensored wordmark', () => {
-    expect(html).toContain('LUncensored')
+  it('has LU wordmark and no old brand strings', () => {
+    expect(html).toContain('<title>LU</title>')
+    expect(html).toContain('class="auth-logo">LU<')
+    expect(html).not.toContain('LUncensored')
+    expect(html).not.toContain('Locally Uncensored')
   })
 })
 

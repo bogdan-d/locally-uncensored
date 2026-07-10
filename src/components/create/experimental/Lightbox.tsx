@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { X, Sparkles } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
-import { galleryItemUrl } from './galleryUrl'
+import { galleryItemUrl, recoverGalleryUrl } from './galleryUrl'
 import { cn } from '../ui/cn'
 
 export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose: () => void }) {
@@ -57,6 +57,7 @@ export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose:
               controls
               autoPlay
               loop
+              onError={() => recoverGalleryUrl(item)}
               onClick={(e) => e.stopPropagation()}
               className="max-w-full max-h-full object-contain rounded-lg"
             />
@@ -67,6 +68,7 @@ export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose:
               exit={{ scale: 0.95 }}
               src={galleryItemUrl(item)}
               alt={item.prompt}
+              onError={() => recoverGalleryUrl(item)}
               onClick={(e) => e.stopPropagation()}
               className={cn('max-w-full max-h-full object-contain rounded-lg', item.intent === 'removebg' && 'lu-checker')}
             />

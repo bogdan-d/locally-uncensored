@@ -22,6 +22,8 @@ import { useModelHealthStore } from '../../stores/modelHealthStore'
 import { extractMemoriesFromPair } from '../../hooks/useMemory'
 import { detectLocalBackends, type DetectedBackend } from '../../lib/backend-detector'
 import { backendCall, isTauri } from '../../api/backend'
+import { idbStorage } from '../../lib/idbStorage'
+import type { AIModel } from '../../types/models'
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts'
 import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
@@ -29,6 +31,14 @@ import { useCreateStore } from '../../stores/createStore'
 import { CloudGateModal } from '../cloud/CloudGateModal'
 import { ShortcutsModal } from './ShortcutsModal'
 import { Titlebar } from './Titlebar'
+
+// The backup triad must never write %APPDATA%/store_backup.json before the
+// restore decision — on a post-NSIS boot the first doBackup would otherwise
+// snapshot the wiped localStorage over the only good backup. Resolved on every
+// exit path of the restore effect (intact-store fast path, restore-then-reload,
+// no-backup fallback, browser give-up); module-level so a reload starts fresh.
+let resolveRestoreDecided: () => void = () => {}
+const restoreDecided = new Promise<void>((resolve) => { resolveRestoreDecided = resolve })
 
 export function AppShell() {
   const { currentView } = useUIStore()
@@ -68,15 +78,21 @@ export function AppShell() {
   const allModels = useModelStore((s) => s.models)
   useEffect(() => {
     const { activeModel, setActiveModel } = useModelStore.getState()
+    // Chat models only — ComfyUI image/video checkpoints share the list but
+    // carry no provider field, so a bare provider check would pin a checkpoint
+    // as the active CHAT model (mirrors the pull auto-activate guard in
+    // useModels; an unprefixed checkpoint name routes to Ollama and fails).
+    const chatCapable = (m: AIModel) => m.type !== 'image' && m.type !== 'video'
     const inMode = (name: string | null) => {
       if (!name) return false
       const m = allModels.find((x) => x.name === name)
-      const isCloud = m?.provider === 'lu-cloud'
+      if (!m || !chatCapable(m)) return false
+      const isCloud = m.provider === 'lu-cloud'
       return appMode === 'cloud' ? isCloud : !isCloud
     }
     if (inMode(activeModel)) return
     const fallback = allModels.find((m) =>
-      appMode === 'cloud' ? m.provider === 'lu-cloud' : m.provider !== 'lu-cloud',
+      chatCapable(m) && (appMode === 'cloud' ? m.provider === 'lu-cloud' : m.provider !== 'lu-cloud'),
     )
     if (fallback) setActiveModel(fallback.name)
   }, [appMode, allModels])
@@ -105,6 +121,10 @@ export function AppShell() {
     'lu_cloud_teaser', 'lu_image_tool_noti',
   ]
   const STORE_KEYS_SET = new Set(STORE_KEYS)
+  // These two persist via idbStorage (IndexedDB) since v2.5.0 — the backup
+  // snapshot must read them from there; their localStorage copy is deleted by
+  // the one-time idb migration, so localStorage.getItem returns nothing.
+  const IDB_STORE_KEYS = new Set(['chat-conversations', 'locally-uncensored-memory'])
 
   // Feature FF: reserved key under which memory embeddings ride inside the RAG
   // chunk backup file. Never collides with a real documentId (those are UUIDs).
@@ -125,94 +145,124 @@ export function AppShell() {
     return ragOnly
   }
 
-  // On startup: if localStorage was wiped, restore from %APPDATA% backup
+  // On startup: if localStorage was wiped, restore from %APPDATA% backup.
+  // Tauri v2 sets the global asynchronously via `withGlobalTauri` — on slow
+  // cold-starts the first render beats it (commit 835ce86, same reason the
+  // backup triad polls). A bare isTauri() bail here would skip the restore
+  // permanently and let the triad's first doBackup clobber the backup file
+  // with the freshly-wiped state, so we poll with the same 100 ms × 50 pattern.
   useEffect(() => {
-    if (!isTauri()) return
-    const hasStores = STORE_KEYS.some(k => localStorage.getItem(k))
-    const restoreComplete = localStorage.getItem('lu-restore-complete')
-    if (hasStores && restoreComplete) {
-      // localStorage intact, but IndexedDB might have been wiped (different
-      // storage layer, different lifetime). Quietly restore RAG chunks if a
-      // backup exists and the live store has none for the documents the
-      // localStorage `rag-store` knows about. Best-effort; ignore errors.
-      ;(async () => {
-        try {
-          const data = await backendCall<string | null>('restore_rag_chunks')
-          if (!data) return
-          const rawParsed = JSON.parse(data)
-          if (rawParsed && typeof rawParsed === 'object' && !Array.isArray(rawParsed)) {
-            // Feature FF: split memory embeddings out first, then restore the
-            // RAG-only chunk portion. memoryEmbedDB.importAll is last-writer-
-            // wins; safe to run on an intact-localStorage cold start.
-            const parsed = await restoreMemoryVectorsFrom(rawParsed)
-            const { exportAllChunks, importAllChunks } = await import('../../lib/ragDB')
-            const live = await exportAllChunks()
-            // Only import entries the live store is missing — never clobber
-            // newer in-app activity with a stale backup.
-            const toImport: Record<string, any> = {}
-            for (const [docId, chunks] of Object.entries(parsed)) {
-              if (!live[docId] && Array.isArray(chunks) && chunks.length > 0) {
-                toImport[docId] = chunks
-              }
-            }
-            if (Object.keys(toImport).length > 0) {
-              await importAllChunks(toImport)
-            }
-          }
-        } catch { /* best-effort */ }
-      })()
-      return
-    }
-
-    setRestoring(true)
-
-    // 1. Fast path: check onboarding marker to prevent flash
-    backendCall<boolean>('is_onboarding_done').catch(() => false).then(async (markerExists) => {
-      // 2. Try full store restore
-      try {
-        const data = await backendCall<string | null>('restore_stores')
-        if (data) {
-          const parsed = JSON.parse(data)
-          // Validate: must be a plain object with string values, only known keys
-          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            let restored = 0
-            for (const [key, value] of Object.entries(parsed)) {
-              if (STORE_KEYS_SET.has(key) && typeof value === 'string' && value) {
-                localStorage.setItem(key, value)
-                restored++
-              }
-            }
-            if (restored > 0) {
-              // Pull RAG chunks from %APPDATA% before the reload so the new
-              // localStorage references find their embeddings in IndexedDB
-              // (Bug V, kj103x 2026-05-23). Best-effort: missing backup =
-              // chunks need to be re-indexed by re-uploading docs.
-              try {
-                const ragData = await backendCall<string | null>('restore_rag_chunks')
-                if (ragData) {
-                  const parsedRag = JSON.parse(ragData)
-                  if (parsedRag && typeof parsedRag === 'object' && !Array.isArray(parsedRag)) {
-                    // Feature FF: restore memory embeddings, then RAG chunks.
-                    const ragOnly = await restoreMemoryVectorsFrom(parsedRag as Record<string, unknown>)
-                    const { importAllChunks } = await import('../../lib/ragDB')
-                    await importAllChunks(ragOnly as Record<string, any>)
+    const runRestore = () => {
+      const hasStores = STORE_KEYS.some(k => localStorage.getItem(k))
+      const restoreComplete = localStorage.getItem('lu-restore-complete')
+      if (hasStores && restoreComplete) {
+        // localStorage intact, but IndexedDB might have been wiped (different
+        // storage layer, different lifetime). Quietly restore RAG chunks if a
+        // backup exists and the live store has none for the documents the
+        // localStorage `rag-store` knows about. Best-effort; ignore errors.
+        ;(async () => {
+          try {
+            const data = await backendCall<string | null>('restore_rag_chunks')
+            if (data) {
+              const rawParsed = JSON.parse(data)
+              if (rawParsed && typeof rawParsed === 'object' && !Array.isArray(rawParsed)) {
+                // Feature FF: split memory embeddings out first, then restore the
+                // RAG-only chunk portion. memoryEmbedDB.importAll is last-writer-
+                // wins; safe to run on an intact-localStorage cold start.
+                const parsed = await restoreMemoryVectorsFrom(rawParsed)
+                const { exportAllChunks, importAllChunks } = await import('../../lib/ragDB')
+                const live = await exportAllChunks()
+                // Only import entries the live store is missing — never clobber
+                // newer in-app activity with a stale backup.
+                const toImport: Record<string, any> = {}
+                for (const [docId, chunks] of Object.entries(parsed)) {
+                  if (!live[docId] && Array.isArray(chunks) && chunks.length > 0) {
+                    toImport[docId] = chunks
                   }
                 }
-              } catch { /* best-effort */ }
-              localStorage.setItem('lu-restore-complete', '1')
-              window.location.reload()
-              return
+                if (Object.keys(toImport).length > 0) {
+                  await importAllChunks(toImport)
+                }
+              }
+            }
+          } catch { /* best-effort */ }
+          // Release the triad only after the quiet import read the backup
+          // file — doRagBackup would otherwise overwrite it first.
+          resolveRestoreDecided()
+        })()
+        return
+      }
+
+      setRestoring(true)
+
+      // 1. Fast path: check onboarding marker to prevent flash
+      backendCall<boolean>('is_onboarding_done').catch(() => false).then(async (markerExists) => {
+        // 2. Try full store restore
+        try {
+          const data = await backendCall<string | null>('restore_stores')
+          if (data) {
+            const parsed = JSON.parse(data)
+            // Validate: must be a plain object with string values, only known keys
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              let restored = 0
+              for (const [key, value] of Object.entries(parsed)) {
+                if (STORE_KEYS_SET.has(key) && typeof value === 'string' && value) {
+                  localStorage.setItem(key, value)
+                  restored++
+                }
+              }
+              if (restored > 0) {
+                // Pull RAG chunks from %APPDATA% before the reload so the new
+                // localStorage references find their embeddings in IndexedDB
+                // (Bug V, kj103x 2026-05-23). Best-effort: missing backup =
+                // chunks need to be re-indexed by re-uploading docs.
+                try {
+                  const ragData = await backendCall<string | null>('restore_rag_chunks')
+                  if (ragData) {
+                    const parsedRag = JSON.parse(ragData)
+                    if (parsedRag && typeof parsedRag === 'object' && !Array.isArray(parsedRag)) {
+                      // Feature FF: restore memory embeddings, then RAG chunks.
+                      const ragOnly = await restoreMemoryVectorsFrom(parsedRag as Record<string, unknown>)
+                      const { importAllChunks } = await import('../../lib/ragDB')
+                      await importAllChunks(ragOnly as Record<string, any>)
+                    }
+                  }
+                } catch { /* best-effort */ }
+                localStorage.setItem('lu-restore-complete', '1')
+                resolveRestoreDecided()
+                window.location.reload()
+                return
+              }
             }
           }
-        }
-      } catch {}
+        } catch {}
 
-      // 3. No backup available — at least recover onboarding from marker file
-      if (markerExists) {
-        updateSettings({ onboardingDone: true })
+        // 3. No backup available — at least recover onboarding from marker file
+        if (markerExists) {
+          updateSettings({ onboardingDone: true })
+        }
+        resolveRestoreDecided()
+        setRestoring(false)
+      })
+    }
+
+    if (isTauri()) {
+      runRestore()
+      return
+    }
+    let tries = 0
+    const waitForTauri = setInterval(() => {
+      tries++
+      if (isTauri()) {
+        clearInterval(waitForTauri)
+        runRestore()
+      } else if (tries >= 50) {
+        // 5 s elapsed — probably browser dev session, nothing to restore.
+        clearInterval(waitForTauri)
+        resolveRestoreDecided()
       }
-      setRestoring(false)
-    })
+    }, 100)
+    return () => clearInterval(waitForTauri)
   }, [])
 
   // Backup stores to %APPDATA% — three-pronged so chat history survives
@@ -230,19 +280,36 @@ export function AppShell() {
   // BEFORE the global exists, so we poll for up to 5 s, then arm the triad.
   useEffect(() => {
     let cleanup: (() => void) | null = null
+    let disposed = false
     let tries = 0
 
-    const setupTriad = () => {
-      const doBackup = () => {
-        const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
-        for (const key of STORE_KEYS) {
-          const val = localStorage.getItem(key)
-          if (val) snapshot[key] = val
-        }
-        // Always fire — we want backup even if snapshot is mostly empty, and the
-        // sentinel tells the restore-flow this is a valid backup.
-        localStorage.setItem('lu-restore-complete', '1')
-        backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
+    const setupTriad = async () => {
+      // Never write the first backup before the restore effect decided — a
+      // post-NSIS boot with wiped storage would otherwise snapshot the empty
+      // state over the only good store_backup.json.
+      await restoreDecided
+      if (disposed) return
+
+      let backupInflight = false
+      const doBackup = async () => {
+        // Inflight guard: the 1 s debounce and the 5 s interval can overlap
+        // now that the snapshot awaits IndexedDB reads.
+        if (backupInflight) return
+        backupInflight = true
+        try {
+          const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
+          for (const key of STORE_KEYS) {
+            const val = IDB_STORE_KEYS.has(key)
+              ? await Promise.resolve(idbStorage.getItem(key))
+              : localStorage.getItem(key)
+            if (val) snapshot[key] = val
+          }
+          // Always fire — we want backup even if snapshot is mostly empty, and the
+          // sentinel tells the restore-flow this is a valid backup.
+          localStorage.setItem('lu-restore-complete', '1')
+          backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
+        } catch { /* best-effort */ }
+        backupInflight = false
       }
 
       // Separate, debounced backup for RAG IndexedDB chunks (Bug V, kj103x
@@ -287,7 +354,7 @@ export function AppShell() {
         }
       })
 
-      doBackup()  // first immediate backup
+      void doBackup()  // first immediate backup
       // Same first-fire convention for RAG chunks so a fresh post-restore
       // boot writes a complete snapshot back to disk immediately.
       void doRagBackup()
@@ -302,10 +369,10 @@ export function AppShell() {
       const unsubChat = useChatStore.subscribe(scheduleBackup)
 
       const onBeforeUnload = () => {
-        doBackup()
         // Best-effort fire-and-forget — the page is going away, we can't
-        // await. The 30 s interval covers the common case; this is the
+        // await. The 5 s / 30 s intervals cover the common case; this is the
         // "last write" insurance for changes since the previous interval.
+        void doBackup()
         void doRagBackup()
       }
       window.addEventListener('beforeunload', onBeforeUnload)
@@ -323,7 +390,7 @@ export function AppShell() {
       tries++
       if (isTauri()) {
         clearInterval(waitForTauri)
-        setupTriad()
+        void setupTriad()
       } else if (tries >= 50) {
         // 50 × 100 ms = 5 s. Give up silently — probably browser dev session.
         clearInterval(waitForTauri)
@@ -331,6 +398,7 @@ export function AppShell() {
     }, 100)
 
     return () => {
+      disposed = true
       clearInterval(waitForTauri)
       if (cleanup) cleanup()
     }

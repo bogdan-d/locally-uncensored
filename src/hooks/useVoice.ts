@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useVoiceStore } from "../stores/voiceStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useCloudAuthStore, deriveCloudAvailable } from "../stores/cloudAuthStore";
@@ -8,6 +8,7 @@ import {
   synthesizeNeural,
   synthesizeExternal,
   synthesizeCloud,
+  chunkForTts,
   playNeuralAudio,
   stopNeuralAudio,
   isSpeechSynthesisSupported,
@@ -20,7 +21,21 @@ import {
   transcribeAudioCloud,
   type AudioRecorder,
 } from "../api/voice";
+import { CloudJobError } from "../api/cloud/client";
 import { log } from "../lib/logger";
+
+// Honest, actionable copy for dictation failures. The cloud route's own error
+// strings (403 "your plan does not include cloud voice", 429 "monthly credit
+// budget exhausted") are already human-readable — pass those through.
+function sttErrorMessage(err: unknown): string {
+  if (err instanceof CloudJobError) {
+    if (err.status === 401) return "Signed out — sign in again to use cloud dictation";
+    if (err.status === 413) return "Recording too long — try a shorter take";
+    if (err.status >= 500) return "Cloud transcription is unavailable right now — try again";
+    return err.message;
+  }
+  return "Transcription failed — check the microphone and try again";
+}
 
 export function useVoice() {
   const store = useVoiceStore();
@@ -30,6 +45,32 @@ export function useVoice() {
   // (CPU Whisper) transcriptions never pile up.
   const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const interimBusyRef = useRef(false);
+  // Speak-generation counter + abort plumbing: a Stop click bumps the counter
+  // and aborts the in-flight cloud synthesis, so audio that resolves late is
+  // dropped instead of playing over the idle button state.
+  const speakGenRef = useRef(0);
+  const speakAbortRef = useRef<AbortController | null>(null);
+
+  // Unmount teardown (e.g. view switch mid-dictation): kill the interim
+  // transcribe interval and stop the recorder — recorder.stop() releases the
+  // mic tracks and closes the AudioContext. Without this the leaked interval
+  // keeps POSTing WAV snapshots forever, the mic stays hot, and the stuck
+  // store.isRecording can never be cleared.
+  useEffect(
+    () => () => {
+      if (streamTimerRef.current) {
+        clearInterval(streamTimerRef.current);
+        streamTimerRef.current = null;
+      }
+      const rec = recorderRef.current;
+      recorderRef.current = null;
+      if (rec?.isRecording()) {
+        void rec.stop().catch(() => {});
+        useVoiceStore.getState().setRecording(false);
+      }
+    },
+    [],
+  );
 
   // Cloud mode routes voice through the metered lu-labs.ai endpoints — no
   // local Whisper/Piper install needed, both buttons just work.
@@ -72,9 +113,10 @@ export function useVoice() {
    * so slow CPU transcriptions never queue up.
    */
   const startRecording = useCallback(
-    async (onInterim?: (text: string) => void) => {
-      if (recorderRef.current?.isRecording()) return;
+    async (onInterim?: (text: string) => void): Promise<boolean> => {
+      if (recorderRef.current?.isRecording()) return true;
 
+      store.setSttError(null);
       const recorder = createAudioRecorder();
       recorderRef.current = recorder;
 
@@ -107,11 +149,14 @@ export function useVoice() {
             }
           }, 1400);
         }
+        return true;
       } catch (err) {
         log.error("Failed to start recording", { err });
         if (streamTimerRef.current) { clearInterval(streamTimerRef.current); streamTimerRef.current = null; }
         interimBusyRef.current = false;
         recorderRef.current = null;
+        store.setSttError("Microphone unavailable — check mic permissions for LU in System Settings");
+        return false;
       }
     },
     [store, cloudVoice],
@@ -120,7 +165,12 @@ export function useVoice() {
   const stopRecording = useCallback(async (): Promise<string> => {
     if (streamTimerRef.current) { clearInterval(streamTimerRef.current); streamTimerRef.current = null; }
     interimBusyRef.current = false;
-    if (!recorderRef.current) return "";
+    if (!recorderRef.current) {
+      // A leaked take (recorder lost to an unmount) can leave the flag stuck —
+      // clear it so the mic button doesn't stay red forever.
+      store.setRecording(false);
+      return "";
+    }
 
     try {
       // Stop recording and get the final WAV of the whole take.
@@ -138,6 +188,7 @@ export function useVoice() {
         return transcript;
       } catch (err) {
         log.error("Whisper transcription error", { err });
+        store.setSttError(sttErrorMessage(err));
         return "";
       } finally {
         store.setTranscribing(false);
@@ -147,6 +198,7 @@ export function useVoice() {
       store.setRecording(false);
       store.setTranscribing(false);
       recorderRef.current = null;
+      store.setSttError("Recording failed — try again");
       return "";
     }
   }, [store, cloudVoice]);
@@ -164,16 +216,29 @@ export function useVoice() {
       const externalReady = store.ttsMode === "external" && !!store.externalTtsUrl.trim();
       if (!cloudVoice && !externalReady && !store.ttsAvailable && !ttsSupported) return;
 
+      const gen = ++speakGenRef.current;
+      const controller = new AbortController();
+      speakAbortRef.current = controller;
+      const stopped = () => gen !== speakGenRef.current;
+
       store.setSpeaking(true);
       try {
         // Cloud mode: hosted MiniMax TTS first; a failure (offline, 429)
-        // falls through to whatever local engine exists.
+        // falls through to whatever local engine exists. The server caps text
+        // at 1500 chars, so long answers are chunked at sentence boundaries
+        // and the MP3s played strictly sequentially — Stop cancels the whole
+        // queue via the generation counter + the fetch abort.
         if (cloudVoice) {
           try {
-            const url = await synthesizeCloud(text, store.cloudTtsVoice || undefined);
-            await playNeuralAudio(url);
+            for (const chunk of chunkForTts(text)) {
+              if (stopped()) return;
+              const url = await synthesizeCloud(chunk, store.cloudTtsVoice || undefined, controller.signal);
+              if (stopped()) return;
+              await playNeuralAudio(url);
+            }
             return;
           } catch (err) {
+            if (stopped()) return; // Stop click aborted the fetch — no fallback
             log.error("Cloud TTS failed, falling back to local engines", { err });
           }
         }
@@ -181,26 +246,31 @@ export function useVoice() {
         if (externalReady) {
           try {
             const url = await synthesizeExternal(text, store.externalTtsUrl.trim(), store.externalTtsVoice || undefined);
+            if (stopped()) return;
             await playNeuralAudio(url);
             return;
           } catch (err) {
+            if (stopped()) return;
             log.error("External TTS failed, falling back to browser voices", { err });
           }
         } else if (store.ttsAvailable) {
           try {
             const url = await synthesizeNeural(text, store.piperVoice);
+            if (stopped()) return;
             await playNeuralAudio(url);
             return;
           } catch (err) {
+            if (stopped()) return;
             log.error("Neural TTS failed, falling back to browser voices", { err });
           }
         }
-        if (!ttsSupported) return;
+        if (!ttsSupported || stopped()) return;
         let voice: SpeechSynthesisVoice | undefined;
         if (store.ttsVoice) {
           const voices = await getVoicesAsync();
           voice = voices.find((v) => v.name === store.ttsVoice);
         }
+        if (stopped()) return;
         if (streaming) {
           await speakStreaming(text, voice, store.ttsRate, store.ttsPitch);
         } else {
@@ -209,7 +279,8 @@ export function useVoice() {
       } catch (err) {
         log.error("Speech synthesis error", { err });
       } finally {
-        store.setSpeaking(false);
+        // A newer speak/stop already owns the flag — don't clobber it.
+        if (!stopped()) store.setSpeaking(false);
       }
     },
     [store, ttsSupported, cloudVoice]
@@ -219,16 +290,26 @@ export function useVoice() {
   const speakTextStreaming = useCallback((text: string) => speakInternal(text, true), [speakInternal]);
 
   const stopSpeaking = useCallback(() => {
+    // Invalidate the running speak generation (drops queued cloud chunks and
+    // any synthesis that resolves late) and abort the in-flight cloud fetch —
+    // the server cancels un-metered on a client abort.
+    speakGenRef.current++;
+    speakAbortRef.current?.abort();
+    speakAbortRef.current = null;
     stopNeuralAudio();
     stopSpeakingApi();
     store.setSpeaking(false);
   }, [store]);
+
+  const clearSttError = useCallback(() => store.setSttError(null), [store]);
 
   return {
     isRecording: store.isRecording,
     isTranscribing: store.isTranscribing,
     isSpeaking: store.isSpeaking,
     transcript: store.transcript,
+    sttError: store.sttError,
+    clearSttError,
     sttSupported,
     ttsSupported,
     ttsAvailable,

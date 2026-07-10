@@ -193,18 +193,20 @@ export const useProviderStore = create<ProviderState>()(
         // RESOLVES (even returning null) proves the vault is usable here; a
         // reject on the very first probe means no keychain (web build, or Linux
         // "unsupported") → stay on the localStorage path and do nothing.
-        const next = { ...get().providers }
+        const loaded: Partial<Record<ProviderId, string>> = {}
         let usable: boolean | null = null
         for (const id of PROVIDER_IDS) {
           try {
             const stored = await secretGet(id)
             usable = true
             if (stored != null && stored !== '') {
-              next[id] = { ...next[id], apiKey: obfuscate(stored) }
+              loaded[id] = stored
             } else {
               // Nothing in the vault yet. Migrate an existing localStorage key
-              // (an upgrading user) into the vault, once.
-              const existing = deobfuscate(next[id]?.apiKey || '')
+              // (an upgrading user) into the vault, once. Read the CURRENT
+              // store value — a key set while an earlier secret_get awaited
+              // must not be missed.
+              const existing = deobfuscate(get().providers[id]?.apiKey || '')
               if (existing) {
                 // Migrate the old localStorage key into the vault. If the write
                 // fails, mark it so partialize keeps the localStorage copy (no loss).
@@ -218,10 +220,21 @@ export const useProviderStore = create<ProviderState>()(
         }
         if (!usable) return
         keychainReady = true
-        // Apply loaded keys and re-persist; partialize (now that keychainReady
-        // is true) strips the redundant localStorage copy. clearProviderCache
-        // rebuilds any client constructed during startup with an empty key.
-        set({ providers: next })
+        // Overlay ONLY the vault-loaded keys onto the LIVE state and re-persist.
+        // A whole-map snapshot taken before the awaits would revert every
+        // concurrent write (e.g. useCloudAuth enabling lu-cloud, or a Settings
+        // edit, while a locked macOS keychain blocked secret_get for minutes).
+        // partialize (now that keychainReady is true) strips the redundant
+        // localStorage copy. clearProviderCache rebuilds any client constructed
+        // during startup with an empty key.
+        set((s) => ({
+          providers: Object.fromEntries(
+            Object.entries(s.providers).map(([id, p]) => {
+              const key = loaded[id as ProviderId]
+              return key !== undefined ? [id, { ...p, apiKey: obfuscate(key) }] : [id, p]
+            }),
+          ) as Record<ProviderId, ProviderConfig>,
+        }))
         clearProviderCache()
       },
     }),

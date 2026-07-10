@@ -33,13 +33,16 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: .llama-build
-          key: llama-b6231-x86_64-pc-windows-msvc-v1
+          key: llama-${{ hashFiles('scripts/build-llama.sh') }}-x86_64-pc-windows-msvc-v1
 
       - name: Install Vulkan SDK
         shell: pwsh
         run: |
-          curl.exe -o "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" -L `
-            "https://sdk.lunarg.com/sdk/download/${env:VULKAN_SDK_VERSION}/windows/VulkanSDK-${env:VULKAN_SDK_VERSION}-Installer.exe"
+          # LunarG's 1.4.x Windows installer is vulkansdk-windows-X64-<ver>.exe —
+          # the old VulkanSDK-<ver>-Installer.exe name 404s.
+          curl.exe -fL --retry 3 -o "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" `
+            "https://sdk.lunarg.com/sdk/download/${env:VULKAN_SDK_VERSION}/windows/vulkansdk-windows-X64-${env:VULKAN_SDK_VERSION}.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Vulkan SDK download failed" }
           & "$env:RUNNER_TEMP\VulkanSDK-Installer.exe" --accept-licenses --default-answer --confirm-command install
           Add-Content $env:GITHUB_ENV "VULKAN_SDK=C:\VulkanSDK\${env:VULKAN_SDK_VERSION}"
 
@@ -47,13 +50,23 @@ jobs:
         shell: bash
         run: bash scripts/build-llama.sh x86_64-pc-windows-msvc
 
-      - name: Boot smoke — /health on an ephemeral port
+      - name: Boot smoke — real model load + /health
         shell: pwsh
         run: |
           $bin = "src-tauri\bin\llama-server-x86_64-pc-windows-msvc.exe"
           if (-not (Test-Path $bin)) { throw "sidecar binary missing" }
           & $bin --version
-          $proc = Start-Process -FilePath $bin -ArgumentList "--host","127.0.0.1","--port","8129","--models",".llama-build" -PassThru -NoNewWindow
+          if ($LASTEXITCODE -ne 0) { throw "llama-server --version exited $LASTEXITCODE" }
+          # Tiny (~1.2 MB) public GGUF so /health proves a real model load,
+          # not just the HTTP layer. Lands in .llama-build, so the sidecar
+          # cache step keeps it across runs.
+          $model = ".llama-build\stories260K.gguf"
+          if (-not (Test-Path $model)) {
+            curl.exe -fsSL --retry 3 -o $model `
+              "https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories260K.gguf"
+            if ($LASTEXITCODE -ne 0) { throw "smoke model download failed" }
+          }
+          $proc = Start-Process -FilePath $bin -ArgumentList "--host","127.0.0.1","--port","8129","-m",$model -PassThru -NoNewWindow
           $ok = $false
           foreach ($i in 1..40) {
             Start-Sleep -Milliseconds 400
@@ -64,7 +77,7 @@ jobs:
           }
           Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
           if (-not $ok) { throw "llama-server /health never came up" }
-          Write-Host "OK - sidecar boots and answers /health"
+          Write-Host "OK - sidecar boots, loads a model and answers /health"
 
       - name: Upload sidecar artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

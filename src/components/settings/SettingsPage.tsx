@@ -21,6 +21,24 @@ const PIPER_VOICES: { id: string; label: string }[] = [
   { id: 'en_GB-alba-medium', label: 'Alba — UK, female' },
   { id: 'en_GB-northern_english_male-medium', label: 'Northern — UK, male' },
 ]
+
+// MiniMax Speech-02 system voices for the hosted cloud TTS. The server route
+// (/api/voice/tts) forwards the id verbatim as voice_id and only validates the
+// character set; default is Wise_Woman.
+const CLOUD_TTS_VOICES: { id: string; label: string }[] = [
+  { id: 'Wise_Woman', label: 'Wise Woman — default' },
+  { id: 'Calm_Woman', label: 'Calm Woman' },
+  { id: 'Lively_Girl', label: 'Lively Girl' },
+  { id: 'Lovely_Girl', label: 'Lovely Girl' },
+  { id: 'Sweet_Girl_2', label: 'Sweet Girl' },
+  { id: 'Friendly_Person', label: 'Friendly Person' },
+  { id: 'Deep_Voice_Man', label: 'Deep Voice Man' },
+  { id: 'Casual_Guy', label: 'Casual Guy' },
+  { id: 'Patient_Man', label: 'Patient Man' },
+  { id: 'Determined_Man', label: 'Determined Man' },
+  { id: 'Elegant_Man', label: 'Elegant Man' },
+  { id: 'Young_Knight', label: 'Young Knight' },
+]
 import { useAgentModeStore } from '../../stores/agentModeStore'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { MemorySettings } from './MemorySettings'
@@ -1214,6 +1232,27 @@ export function SettingsPage() {
         {/* ── Voice & Remote tab ────────────────────────── */}
         {tab === 'voice-remote' && (<>
           <Section title="Speech" defaultOpen>
+            {settings.appMode === 'cloud' ? (<>
+              {/* Cloud mode: dictation + read-aloud are hosted on lu-labs.ai —
+                  honest copy (audio leaves the machine, metered), no local
+                  install buttons, and a picker for the hosted MiniMax voice. */}
+              <p className="text-[0.55rem] text-gray-500 leading-snug">
+                Cloud mode: dictation and read-aloud run on lu-labs.ai (hosted Whisper speech-to-text + MiniMax text-to-speech) and are metered against your credits. No local installs needed.
+              </p>
+              <InlineToggle label="Read responses aloud" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[0.7rem] text-gray-500">Voice</span>
+                <select
+                  value={voiceSettings.cloudTtsVoice}
+                  onChange={(e) => voiceSettings.updateVoiceSettings({ cloudTtsVoice: e.target.value })}
+                  className="max-w-[210px] px-1.5 py-0.5 rounded bg-transparent border border-white/8 text-[0.65rem] text-gray-300 focus:outline-none"
+                >
+                  {CLOUD_TTS_VOICES.map((v) => (
+                    <option key={v.id} value={v.id}>{v.label}</option>
+                  ))}
+                </select>
+              </div>
+            </>) : (<>
             <p className="text-[0.55rem] text-gray-500 leading-snug">
               Voice runs 100% locally — no cloud. Each engine is a one-time local install.
             </p>
@@ -1347,6 +1386,7 @@ export function SettingsPage() {
                 </p>
               </div>
             )}
+            </>)}
           </Section>
 
           <Section title="Remote Access">
