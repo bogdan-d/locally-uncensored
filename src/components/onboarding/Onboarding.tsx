@@ -15,7 +15,7 @@ import { backendCall } from '../../api/backend'
 import { getSystemVRAM } from '../../api/comfyui'
 import { pullModelTauri, checkConnection as checkOllama } from '../../api/ollama'
 import { hfUrlToOllamaRef, hfUrlToLmStudioSubdir } from '../../lib/hf-to-provider'
-import { startBundledEngine, startBundledEmbed, isManagedBuiltinActive } from '../../api/engine'
+import { startBundledEngine, startBundledEmbed } from '../../api/engine'
 import { BUILTIN_BACKEND_ID, classifyOnboardingBackend, resolveOnboardingBackend } from '../../lib/onboarding-backend'
 
 // Bug (h): the dedicated 'theme' onboarding step was removed because users
@@ -459,10 +459,19 @@ export function Onboarding() {
   const [embeddingsProgress, setEmbeddingsProgress] = useState<{ completed: number; total: number }>({ completed: 0, total: 0 })
   const [embeddingsAlreadyHave, setEmbeddingsAlreadyHave] = useState<boolean | null>(null)
 
+  // Embeddings route on the CHOSEN backend, not isManagedBuiltinActive():
+  // rag.ts only ever queries the bundled embeddings server or Ollama — never
+  // an LM-Studio-style /v1/embeddings — so openai-compat backends must take
+  // the bundled path too. Branching on isManagedBuiltinActive() dead-ended
+  // LM Studio users on a machine that has no Ollama by explicit choice.
+  const embedsViaBundled =
+    classifyOnboardingBackend(resolveOnboardingBackend(selectedBackend, ollamaReady, detectedBackends)) !== 'ollama'
+
   // Probe whether an embedding model is already present. For the built-in
-  // engine (P5) we scan the app models dir via list_bundled_models; otherwise
-  // Ollama lists pulled models. Either way we match anything with
-  // `embed`/`bge`/`nomic` in the name (same heuristic used elsewhere).
+  // engine (P5) and openai-compat backends we scan the app models dir via
+  // list_bundled_models; only Ollama lists its pulled models. Either way we
+  // match anything with `embed`/`bge`/`nomic` in the name (same heuristic
+  // used elsewhere).
   useEffect(() => {
     if (step !== 'embeddings') return
     let cancelled = false
@@ -470,7 +479,7 @@ export function Onboarding() {
       const lower = (name || '').toLowerCase()
       return lower.includes('embed') || lower.includes('bge-') || lower.includes('nomic')
     }
-    const probe = isManagedBuiltinActive()
+    const probe = embedsViaBundled
       ? import('../../api/engine').then(({ listBundledModels }) =>
           listBundledModels().then(models => models.some(m => isEmbed(m.name))))
       : import('../../api/ollama').then(({ listModels }) =>
@@ -479,7 +488,7 @@ export function Onboarding() {
       .then(hasEmbedding => { if (!cancelled) setEmbeddingsAlreadyHave(hasEmbedding) })
       .catch(() => { if (!cancelled) setEmbeddingsAlreadyHave(false) })
     return () => { cancelled = true }
-  }, [step])
+  }, [step, embedsViaBundled])
 
   const handlePullEmbeddings = async () => {
     if (!isTauri) {
@@ -490,10 +499,12 @@ export function Onboarding() {
     setEmbeddingsError(null)
     setEmbeddingsProgress({ completed: 0, total: 0 })
 
-    // P5: built-in engine path — download the embedding GGUF flat into the app
+    // P5: bundled-engine path — download the embedding GGUF flat into the app
     // models dir and boot the embeddings server on it. No Ollama involved, so
     // Document-Chat/RAG works on a fresh install with zero external provider.
-    if (isManagedBuiltinActive()) {
+    // Taken for the built-in engine AND openai-compat backends (LM Studio
+    // etc.) — see embedsViaBundled above.
+    if (embedsViaBundled) {
       try {
         const destDir = await detectProviderModelPath(BUILTIN_BACKEND_ID)
         if (!destDir) throw new Error('Could not resolve the built-in models directory.')
@@ -1698,7 +1709,7 @@ export function Onboarding() {
                       Standard embedding model from Nomic AI. Used purely on-device to chunk and retrieve your documents — never sent anywhere.
                     </p>
                     <p className={`text-[0.55rem] mt-0.5 ${isDark ? 'text-gray-500' : 'text-gray-400'}`}>
-                      {isManagedBuiltinActive() ? '84 MB · bundled engine, runs on any CPU' : '274 MB · runs on any CPU'}
+                      {embedsViaBundled ? '84 MB · bundled engine, runs on any CPU' : '274 MB · runs on any CPU'}
                     </p>
                   </div>
                 </div>
@@ -1729,7 +1740,7 @@ export function Onboarding() {
             <div className="flex items-center gap-2 pt-1">
               {embeddingsAlreadyHave !== true && !embeddingsPulled && !embeddingsPulling && (
                 <button onClick={handlePullEmbeddings} className={primaryBtn} style={{ flex: 1 }}>
-                  <Download size={14} /> Install nomic-embed-text ({isManagedBuiltinActive() ? '84 MB' : '274 MB'})
+                  <Download size={14} /> Install nomic-embed-text ({embedsViaBundled ? '84 MB' : '274 MB'})
                 </button>
               )}
               <button

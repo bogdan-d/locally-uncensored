@@ -15,11 +15,35 @@ import { useSettingsStore } from '../stores/settingsStore'
 import type { CloudQuota } from '../lib/render/cloud-jobs'
 
 const REFRESH_MS = 5 * 60_000
+const PROBE_TIMEOUT_MS = 15_000
+
+// Probe generation guard: probeAccount runs concurrently (boot, interval tick,
+// login/signup/refresh) with no other coordination, and its fetches carry the
+// access token captured at request time. A probe that hangs on a dead
+// connection and resolves after a logout/account-switch must not write its
+// stale result over the newer state — every probe start (and logout) bumps the
+// generation, and a probe only touches the store while it is still the newest.
+let probeGen = 0
+
+// getMe/getQuota take no AbortSignal, so bound the wait here — the abandoned
+// response, if it ever arrives, is discarded by the generation guard.
+function withTimeout<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('cloud probe timed out')), PROBE_TIMEOUT_MS)
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value) },
+      (err) => { clearTimeout(timer); reject(err) },
+    )
+  })
+}
 
 async function probeAccount(): Promise<void> {
+  const gen = ++probeGen
+  const stale = () => gen !== probeGen
   const store = useCloudAuthStore.getState()
   try {
-    const me = await getMe()
+    const me = await withTimeout(getMe())
+    if (stale()) return
     if (!me.user) {
       store.setSignedOut()
       syncChatProvider()
@@ -35,17 +59,19 @@ async function probeAccount(): Promise<void> {
       // Gated accounts would just 403 here — skip the round-trip. A transient
       // quota-fetch failure keeps the last-known quota instead of collapsing
       // the whole cloud axis; only an auth/gate rejection clears it.
-      quota = await getQuota().catch((err) =>
+      quota = await withTimeout(getQuota()).catch((err) =>
         err instanceof CloudJobError && (err.status === 401 || err.status === 403)
           ? null
           : useCloudAuthStore.getState().quota,
       )
+      if (stale()) return
       void refreshCatalog()
     }
     store.setSignedIn({ id: me.user.id, email: me.user.email }, { licenseActive, tier, access, quota })
     syncChatProvider()
     syncAppMode()
   } catch (err) {
+    if (stale()) return
     // Only a definitive auth rejection (401/403) signs out. Network errors,
     // 5xx and timeouts are transient: keep the session and let the next
     // interval tick retry. The boot probe still resolves to signed-out so the
@@ -113,6 +139,9 @@ export function useCloudAuth() {
   }, [])
 
   const logout = useCallback(async (): Promise<void> => {
+    // Invalidate any in-flight probe — its request carried the old (still
+    // unexpired) access token and would resurrect the signed-in state.
+    probeGen++
     await supabaseCloud().auth.signOut().catch(() => {})
     useCloudAuthStore.getState().setSignedOut()
     syncChatProvider()

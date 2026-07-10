@@ -1,9 +1,9 @@
 import { motion } from 'framer-motion'
-import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2 } from 'lucide-react'
+import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff } from 'lucide-react'
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
 import { downloadComfyFile, isTauri } from '../../../api/backend'
 import { refreshResultUrl } from '../../../api/cloud/jobs'
-import { galleryItemUrl, recoverGalleryUrl } from './galleryUrl'
+import { galleryItemUrl, markGalleryItemAvailable, recoverGalleryUrl } from './galleryUrl'
 import { cn } from '../ui/cn'
 
 function phaseIcon(phase: ProgressPhase) {
@@ -78,8 +78,17 @@ function extFor(contentType: string, kind: 'image' | 'video'): string {
 // Save-As dialog (WebView2 blob-anchors are unreliable); failures surface via
 // setError instead of a silent no-op.
 async function downloadGalleryItem(item: GalleryItem): Promise<void> {
-  if (item.filename) return downloadComfyFile(item.filename, item.subfolder)
+  if (item.filename && item.unavailable) {
+    // The item's media already failed to load — the ComfyUI fetch would only
+    // fail again (and downloadComfyFile swallows its errors). Be honest.
+    useCreateStore.getState().setError('Download needs the local engine — start it and try again.')
+    return
+  }
   try {
+    if (item.filename) {
+      await downloadComfyFile(item.filename, item.subfolder)
+      return
+    }
     let url = item.dataUrl ?? item.remoteUrl
     if (!item.dataUrl && item.jobId) {
       url = (await refreshResultUrl(item.jobId)) ?? url
@@ -131,6 +140,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
             autoPlay
             muted
             onError={() => recoverGalleryUrl(item)}
+            onLoadedData={() => markGalleryItemAvailable(item)}
             className="max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]"
           />
         ) : (
@@ -138,14 +148,27 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
             src={url}
             alt={item.prompt}
             onError={() => recoverGalleryUrl(item)}
+            onLoad={() => markGalleryItemAvailable(item)}
             className={cn('max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', item.intent === 'removebg' && 'lu-checker')}
           />
         )}
+        {item.unavailable && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-black/60 text-gray-400 p-6 text-center">
+            <MonitorOff size={20} strokeWidth={1.5} />
+            <span className="t-body">This render lives on the local engine, which isn't reachable right now.</span>
+          </div>
+        )}
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {onSendToEditor && !isVideo && (
+          {onSendToEditor && !isVideo && !item.unavailable && (
             <IconBtn title="Edit with mask" onClick={onSendToEditor}><Wand2 size={14} /></IconBtn>
           )}
-          <IconBtn title="Download" onClick={download}><Download size={14} /></IconBtn>
+          <IconBtn
+            title={item.unavailable ? 'Download needs the local engine' : 'Download'}
+            disabled={item.unavailable}
+            onClick={download}
+          >
+            <Download size={14} />
+          </IconBtn>
           <IconBtn title="Fullscreen" onClick={onFullscreen}><Maximize2 size={14} /></IconBtn>
         </div>
       </div>
@@ -160,9 +183,17 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
   )
 }
 
-function IconBtn({ children, title, onClick }: { children: React.ReactNode; title: string; onClick: () => void }) {
+function IconBtn({ children, title, onClick, disabled }: { children: React.ReactNode; title: string; onClick: () => void; disabled?: boolean }) {
   return (
-    <button onClick={onClick} title={title} className="w-7 h-7 flex items-center justify-center rounded-lg bg-black/50 backdrop-blur text-gray-200 hover:text-white hover:bg-black/70 transition-colors">
+    <button
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      className={cn(
+        'w-7 h-7 flex items-center justify-center rounded-lg bg-black/50 backdrop-blur transition-colors',
+        disabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-200 hover:text-white hover:bg-black/70',
+      )}
+    >
       {children}
     </button>
   )

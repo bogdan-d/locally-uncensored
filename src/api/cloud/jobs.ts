@@ -21,7 +21,7 @@ export interface CloudJobParams {
   source_path?: string
   mask_path?: string
   source_url?: string // video enhance: URL of the clip to upscale
-  target_resolution?: string // upscale target (image 2k|4k|8k, video 720p|1080p|2k|4k)
+  target_resolution?: string // upscale target (image 2k|4k|8k, video 720p|1080p)
 }
 
 export interface CloudJobSubmit {

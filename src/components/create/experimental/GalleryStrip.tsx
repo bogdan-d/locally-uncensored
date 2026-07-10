@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
-import { Trash2, Play } from 'lucide-react'
+import { Trash2, Play, MonitorOff } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
-import { galleryItemUrl, recoverGalleryUrl } from './galleryUrl'
+import { galleryItemUrl, markGalleryItemAvailable, recoverGalleryUrl } from './galleryUrl'
 import { cn } from '../ui/cn'
 
 interface Props {
@@ -38,11 +38,19 @@ export function GalleryStrip({ activeId, onSelect }: Props) {
             >
               {g.type === 'video' ? (
                 <>
-                  <video src={galleryItemUrl(g)} muted playsInline onError={() => recoverGalleryUrl(g)} className="w-full h-full object-cover" />
+                  <video src={galleryItemUrl(g)} muted playsInline onError={() => recoverGalleryUrl(g)} onLoadedData={() => markGalleryItemAvailable(g)} className="w-full h-full object-cover" />
                   <span className="absolute inset-0 flex items-center justify-center bg-black/20"><Play size={14} className="text-white/90" /></span>
                 </>
               ) : (
-                <img src={galleryItemUrl(g)} alt="" onError={() => recoverGalleryUrl(g)} className="w-full h-full object-cover" />
+                <img src={galleryItemUrl(g)} alt="" onError={() => recoverGalleryUrl(g)} onLoad={() => markGalleryItemAvailable(g)} className="w-full h-full object-cover" />
+              )}
+              {g.unavailable && (
+                <span
+                  className="absolute inset-0 flex items-center justify-center bg-black/50 text-gray-500"
+                  title="Local render — the local engine isn't reachable"
+                >
+                  <MonitorOff size={14} />
+                </span>
               )}
             </button>
             <button

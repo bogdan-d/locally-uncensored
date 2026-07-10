@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import { useCreate } from '../../../hooks/useCreate'
-import { useCloudCreate } from '../../../hooks/useCloudCreate'
+import { useCloudCreate, hasActiveCloudRun } from '../../../hooks/useCloudCreate'
 import { useCloudSession } from '../../../hooks/useCloudSession'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useUIStore } from '../../../stores/uiStore'
@@ -19,7 +19,7 @@ interface CreateExpValue {
   generate: () => void | Promise<void>
   cancel: () => void | Promise<void>
   /** Video super-resolution on a finished cloud render (Lightbox "Enhance"). */
-  enhanceVideo: (item: GalleryItem, targetResolution?: '720p' | '1080p' | '2k' | '4k') => Promise<void>
+  enhanceVideo: (item: GalleryItem, targetResolution?: '720p' | '1080p') => Promise<void>
   /** ComfyUI /object_info sampler + scheduler names (fallback lists until loaded). */
   samplerList: string[]
   schedulerList: string[]
@@ -118,7 +118,11 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
 
   const value: CreateExpValue = {
     generate: backend === 'cloud' ? cloud.generate : generate,
-    cancel: backend === 'cloud' ? cloud.cancel : cancel,
+    // Cancel routes by the backend that STARTED the run, not the current axis:
+    // the header switch (or the license probe) can flip local/cloud mid-render,
+    // and routing by the live value would abort a null handle while the real
+    // run keeps going (a cloud job keeps billing; a local job keeps rendering).
+    cancel: () => (hasActiveCloudRun() ? cloud.cancel() : cancel()),
     enhanceVideo: cloud.enhanceVideo,
     samplerList, schedulerList, loraList, vaeList,
     connected, modelsLoaded, modelLoadError, installCapability,

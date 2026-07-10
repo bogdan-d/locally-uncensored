@@ -1,7 +1,8 @@
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { motion } from "framer-motion"
 import { Mic, MicOff, Loader2 } from "lucide-react"
 import { useVoice } from "../../hooks/useVoice"
+import { useVoiceStore } from "../../stores/voiceStore"
 
 interface Props {
   onTranscript: (text: string) => void
@@ -12,7 +13,12 @@ interface Props {
 }
 
 export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabled }: Props) {
-  const { isRecording, isTranscribing, sttSupported, sttError, clearSttError, startRecording, stopRecording, recheckStt } = useVoice()
+  const { isRecording, isTranscribing, sttSupported, sttError, clearSttError, startRecording, stopRecording, recheckStt, maxRecordingMs } = useVoice()
+  // Auto-stop timer for cloud dictation — the transcribe route rejects takes
+  // past ~6.5 min (12 MiB) with a 413 that loses the WHOLE recording, so the
+  // take is stopped and transcribed just under the cap instead.
+  const autoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wasRecordingRef = useRef(false)
 
   useEffect(() => {
     // The startup probe (App.tsx) can run before the persistent Whisper server
@@ -30,22 +36,52 @@ export function VoiceButton({ onTranscript, onInterim, onRecordingChange, disabl
     return () => clearTimeout(t)
   }, [sttError, clearSttError])
 
+  // Recording can end outside handleClick (close-to-tray teardown, unmount
+  // recovery) — mirror the transition to the composer so "Recording…" never
+  // sticks, and drop a pending auto-stop timer so it can't fire on a dead take.
+  useEffect(() => {
+    if (wasRecordingRef.current && !isRecording) {
+      if (autoStopRef.current) { clearTimeout(autoStopRef.current); autoStopRef.current = null }
+      onRecordingChange?.(false)
+    }
+    wasRecordingRef.current = isRecording
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRecording])
+
+  useEffect(() => () => { if (autoStopRef.current) clearTimeout(autoStopRef.current) }, [])
+
+  const finishRecording = async () => {
+    if (autoStopRef.current) { clearTimeout(autoStopRef.current); autoStopRef.current = null }
+    onRecordingChange?.(false)
+    const transcript = await stopRecording()
+    if (transcript.trim()) {
+      onTranscript(transcript.trim())
+    }
+  }
+
   const handleClick = async () => {
     if (disabled || isTranscribing) return
 
     if (isRecording) {
-      onRecordingChange?.(false)
-      const transcript = await stopRecording()
-      if (transcript.trim()) {
-        onTranscript(transcript.trim())
-      }
+      await finishRecording()
     } else {
       onRecordingChange?.(true)
       const ok = await startRecording((interim) => onInterim?.(interim))
       // Roll back the composer's "Recording…" state when the mic never
       // started (permission denied / no input device) — otherwise Enter-to-
       // send stays blocked with no recovery path.
-      if (!ok) onRecordingChange?.(false)
+      if (!ok) {
+        onRecordingChange?.(false)
+        return
+      }
+      if (maxRecordingMs) {
+        autoStopRef.current = setTimeout(() => {
+          autoStopRef.current = null
+          if (!useVoiceStore.getState().isRecording) return
+          useVoiceStore.getState().setSttError("Dictation limit reached — transcribing what was recorded so far")
+          void finishRecording()
+        }, maxRecordingMs)
+      }
     }
   }
 

@@ -13,10 +13,13 @@ import { loadImageRef } from './loadImage'
 interface Props {
   displayed?: GalleryItem
   onOpenMaskEditor: () => void
+  /** Adopt a finished result as the edit source, THEN open the mask editor —
+   *  a t2i run leaves `source` empty, and the editor always reads `source`. */
+  onEditResult: (item: GalleryItem) => void
   onFullscreen: (item: GalleryItem) => void
 }
 
-export function Stage({ displayed, onOpenMaskEditor, onFullscreen }: Props) {
+export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen }: Props) {
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
   const isGenerating = useCreateStore((s) => s.isGenerating)
@@ -50,7 +53,7 @@ export function Stage({ displayed, onOpenMaskEditor, onFullscreen }: Props) {
       <ResultView
         item={displayed}
         onFullscreen={() => onFullscreen(displayed)}
-        onSendToEditor={!meta.isVideo ? onOpenMaskEditor : undefined}
+        onSendToEditor={displayed.type === 'image' ? () => onEditResult(displayed) : undefined}
       />
     )
   } else {
@@ -111,8 +114,10 @@ function InputSlot() {
 
   const handleFile = async (file: File) => {
     // Drag&drop bypasses the input's accept filter — validate here so a
-    // stray .txt/.pdf gets a message instead of a silent no-op.
-    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+    // stray .txt/.pdf gets a message instead of a silent no-op. Exotic image
+    // containers (HEIC/AVIF/GIF) pass: loadImageRef re-encodes them to PNG,
+    // and throws honestly when the WebView can't decode them.
+    if (!file.type.startsWith('image/')) {
       setError('That file type is not supported — use PNG, JPG or WebP.')
       return
     }
@@ -198,11 +203,27 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
 }
 
 function ChangeImageButton({ onChange }: { onChange: (r: Awaited<ReturnType<typeof loadImageRef>>) => void }) {
+  const setError = useCreateStore((s) => s.setError)
   const inputRef = useRef<HTMLInputElement>(null)
+  // Same validation + error surface as the drop zone — this picker used to
+  // hand the raw file straight to loadImageRef, so a .heic/.avif previewed
+  // fine and then 415ed at submit (and a decode failure rejected unhandled).
+  const handleFile = async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setError('That file type is not supported — use PNG, JPG or WebP.')
+      return
+    }
+    setError(null)
+    try {
+      onChange(await loadImageRef(file))
+    } catch (err) {
+      setError(`Could not load the image: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
   return (
     <>
       <Button variant="ghost" icon={ImagePlus} onClick={() => inputRef.current?.click()}>Change image</Button>
-      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) onChange(await loadImageRef(f)) }} />
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void handleFile(f) }} />
     </>
   )
 }

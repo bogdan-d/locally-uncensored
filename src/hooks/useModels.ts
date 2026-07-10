@@ -49,6 +49,13 @@ async function resumeBuiltinEngines(bundled: BundledModel[]) {
       await activateBuiltinModel(activeModel)
     }
   } catch { /* engine unavailable — non-critical */ }
+  await resumeEmbedServer(bundled)
+}
+
+// The bundled embeddings server serves RAG/memory for ANY local backend that
+// downloaded the embed GGUF in onboarding (LM Studio/openai-compat too), so
+// its resume must not depend on the chat engine being the managed builtin.
+async function resumeEmbedServer(bundled: BundledModel[]) {
   try {
     const embed = bundled.find((m) => isEmbeddingModel(m.name))
     if (embed) {
@@ -152,6 +159,13 @@ export function useModels() {
             builtinResumeAttempted = true
             void resumeBuiltinEngines(bundledRaw)
           }
+        } catch { /* engine command unavailable — non-critical */ }
+      } else if (!builtinResumeAttempted) {
+        // Non-builtin chat backend (LM Studio etc.): still resume the bundled
+        // embeddings server when its GGUF exists, so RAG survives a relaunch.
+        builtinResumeAttempted = true
+        try {
+          void resumeEmbedServer(await listBundledModels())
         } catch { /* engine command unavailable — non-critical */ }
       }
       const ollamaEnabled = useProviderStore.getState().providers.ollama.enabled

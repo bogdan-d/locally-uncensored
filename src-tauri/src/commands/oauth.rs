@@ -38,8 +38,9 @@ pub struct OauthPending(pub Mutex<HashMap<u16, PendingLogin>>);
 const CALLBACK_BODY: &str = "<!doctype html><html><body style=\"font-family:-apple-system,system-ui,sans-serif;background:#161616;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0\"><p>Signed in — you can close this tab and return to LU.</p></body></html>";
 const DENIED_BODY: &str = "<!doctype html><html><body style=\"font-family:-apple-system,system-ui,sans-serif;background:#161616;color:#e5e5e5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0\"><p>Sign-in didn't complete — you can close this tab and try again in LU.</p></body></html>";
 
-/// Bind the first free ladder port and arm a single-shot accept. Returns the
-/// port so the frontend can build the redirect URI before opening the browser.
+/// Bind the first free ladder port and arm an accept loop that serves exactly
+/// one callback (strays get a 404). Returns the port so the frontend can build
+/// the redirect URI before opening the browser.
 #[tauri::command]
 pub async fn oauth_start(state: tauri::State<'_, OauthPending>) -> Result<u16, String> {
     // Only one sign-in flow at a time: abort every stale attempt first so an
@@ -58,34 +59,64 @@ pub async fn oauth_start(state: tauri::State<'_, OauthPending>) -> Result<u16, S
         };
         let (tx, rx) = oneshot::channel::<String>();
         let task = tauri::async_runtime::spawn(async move {
-            // One request only; the listener drops with this task. If oauth_wait
-            // times out first, tx.send just errs into the void — harmless.
-            let Ok((mut stream, _)) = listener.accept().await else { return };
-            let mut buf = vec![0u8; 8192];
-            let n = stream.read(&mut buf).await.unwrap_or(0);
-            let req = String::from_utf8_lossy(&buf[..n]);
-            // Request line: GET /callback?code=…&state=… HTTP/1.1
-            let query = req
-                .lines()
-                .next()
-                .and_then(|l| l.split_whitespace().nth(1))
-                .and_then(|path| path.split_once('?').map(|(_, q)| q.to_string()))
-                .unwrap_or_default();
-            // Provider denial arrives as error=…&error_description=… — be
-            // honest in the tab; the frontend gets the raw query either way.
-            let body = if query.split('&').any(|kv| kv.starts_with("error=")) {
-                DENIED_BODY
-            } else {
-                CALLBACK_BODY
-            };
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(resp.as_bytes()).await;
-            let _ = stream.shutdown().await;
-            let _ = tx.send(query);
+            // Accept until a request actually carries the callback query
+            // (code=… or error=…). Strays — browser preconnects that send no
+            // bytes, favicon fetches, localhost port probes — get a 404 and
+            // the armed window stays open for the real redirect. oauth_wait's
+            // timeout/abort bounds the loop's lifetime; the listener drops
+            // with this task. If oauth_wait times out first, tx.send just
+            // errs into the void — harmless.
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else { return };
+                let mut buf = vec![0u8; 8192];
+                // Short read deadline so an idle preconnect socket can't park
+                // the loop while the real callback waits in the backlog.
+                let n = match tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    stream.read(&mut buf),
+                )
+                .await
+                {
+                    Ok(Ok(n)) => n,
+                    _ => 0,
+                };
+                let req = String::from_utf8_lossy(&buf[..n]);
+                // Request line: GET /callback?code=…&state=… HTTP/1.1
+                let query = req
+                    .lines()
+                    .next()
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .and_then(|path| path.split_once('?').map(|(_, q)| q.to_string()))
+                    .unwrap_or_default();
+                let is_callback = query
+                    .split('&')
+                    .any(|kv| kv.starts_with("code=") || kv.starts_with("error="));
+                if !is_callback {
+                    let _ = stream
+                        .write_all(
+                            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        .await;
+                    let _ = stream.shutdown().await;
+                    continue;
+                }
+                // Provider denial arrives as error=…&error_description=… — be
+                // honest in the tab; the frontend gets the raw query either way.
+                let body = if query.split('&').any(|kv| kv.starts_with("error=")) {
+                    DENIED_BODY
+                } else {
+                    CALLBACK_BODY
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+                let _ = stream.shutdown().await;
+                let _ = tx.send(query);
+                return;
+            }
         });
         let id = NEXT_ATTEMPT.fetch_add(1, Ordering::Relaxed);
         state

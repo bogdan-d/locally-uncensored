@@ -3797,6 +3797,13 @@ fn ensure_lan_firewall_rule(port: u16) {
     use std::process::Command;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
     let name = format!("LU Remote {}", port);
+    // One-release legacy sweep: <=2.5.6 created the rule under the old brand
+    // name and no uninstall path removes it, so clear it here best-effort.
+    let legacy = format!("Locally Uncensored Remote {}", port);
+    let _ = Command::new("netsh")
+        .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", legacy)])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
     // Idempotent: drop any prior rule for this name, then add a fresh inbound allow.
     let _ = Command::new("netsh")
         .args(["advfirewall", "firewall", "delete", "rule", &format!("name={}", name)])

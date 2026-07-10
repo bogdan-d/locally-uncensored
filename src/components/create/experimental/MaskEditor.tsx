@@ -13,6 +13,12 @@ import { cn } from '../ui/cn'
 
 export function MaskEditor({ open, onClose }: { open: boolean; onClose: () => void }) {
   const source = useCreateStore((s) => s.source)
+  // Opened without a source, nothing mounts below — and onClose only exists
+  // inside the never-mounted Inner, so `open` would latch true and pop the
+  // editor uninvited the moment a source appears later. Reset immediately.
+  useEffect(() => {
+    if (open && !source) onClose()
+  }, [open, source, onClose])
   return (
     <AnimatePresence>
       {open && source && <MaskEditorInner key={source.filename} onClose={onClose} />}

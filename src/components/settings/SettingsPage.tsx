@@ -1049,6 +1049,8 @@ export function SettingsPage() {
             <ChatBackupSettings />
           </Section>
 
+          {/* ComfyUI-only knobs — cloud renders use server-side limits. */}
+          {settings.appMode !== 'cloud' && (
           <Section title="Image / Video Generation Timeouts">
             <div className="text-[0.6rem] text-gray-500 dark:text-gray-500 leading-relaxed pb-1.5">
               Maximum minutes a ComfyUI generation can run before LU aborts it. Bump these up if you run on iGPU or CPU only — a 1024px image on integrated graphics can take 30+ min.
@@ -1078,24 +1080,46 @@ export function SettingsPage() {
               />
             </div>
           </Section>
+          )}
 
           <Section title="Privacy">
-            <div className="space-y-2 py-1 text-[0.65rem] text-gray-500 dark:text-gray-400 leading-relaxed">
-              <div className="flex items-start gap-2">
-                <Lock size={12} className="mt-0.5 shrink-0 text-emerald-500" />
-                <div>
-                  <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">100% local by default.</p>
-                  <p>Chat, agent runs, image &amp; video generation all execute on your machine. No telemetry, no analytics, no model pings home. The only network calls LU makes unless you explicitly opt in are: update checks against GitHub Releases, and cloud provider APIs (OpenAI, Anthropic, etc.) that you configure yourself with your own API keys.</p>
+            {settings.appMode === 'cloud' ? (
+              /* Cloud mode: the 100%-local pledge doesn't hold — say so
+                 honestly, mirroring the Speech section's cloud copy. */
+              <div className="space-y-2 py-1 text-[0.65rem] text-gray-500 dark:text-gray-400 leading-relaxed">
+                <div className="flex items-start gap-2">
+                  <Lock size={12} className="mt-0.5 shrink-0 text-sky-500" />
+                  <div>
+                    <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">Cloud mode is active.</p>
+                    <p>Chat, Create renders and voice run on lu-labs.ai against your LU account and are metered against your credits; generated media and job records are stored with your account. Switch to Local in the header to run everything on your machine — the 100%-local pledge below then applies.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2 pt-1.5">
+                  <Shield size={12} className="mt-0.5 shrink-0 text-emerald-500" />
+                  <div>
+                    <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">Local mode: 100% local.</p>
+                    <p>In local mode chat, agent runs, and image &amp; video generation all execute on your machine — no telemetry, no analytics, no model pings home. Your local data lives in <code className="px-1 py-0.5 rounded bg-black/5 dark:bg-white/5 font-mono text-[0.6rem]">%APPDATA%/Locally Uncensored</code> on Windows (or the equivalent on Linux/macOS).</p>
+                  </div>
                 </div>
               </div>
-              <div className="flex items-start gap-2 pt-1.5">
-                <Shield size={12} className="mt-0.5 shrink-0 text-emerald-500" />
-                <div>
-                  <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">You own your data.</p>
-                  <p>Conversations, memories, and generated media live in <code className="px-1 py-0.5 rounded bg-black/5 dark:bg-white/5 font-mono text-[0.6rem]">%APPDATA%/Locally Uncensored</code> on Windows (or the equivalent on Linux/macOS). Back up the folder, move it between machines, or delete it — LU writes nothing else.</p>
+            ) : (
+              <div className="space-y-2 py-1 text-[0.65rem] text-gray-500 dark:text-gray-400 leading-relaxed">
+                <div className="flex items-start gap-2">
+                  <Lock size={12} className="mt-0.5 shrink-0 text-emerald-500" />
+                  <div>
+                    <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">100% local by default.</p>
+                    <p>Chat, agent runs, image &amp; video generation all execute on your machine. No telemetry, no analytics, no model pings home. The only network calls LU makes unless you explicitly opt in are: update checks against GitHub Releases, and cloud provider APIs (OpenAI, Anthropic, etc.) that you configure yourself with your own API keys.</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-2 pt-1.5">
+                  <Shield size={12} className="mt-0.5 shrink-0 text-emerald-500" />
+                  <div>
+                    <p className="text-gray-700 dark:text-gray-300 font-medium mb-0.5">You own your data.</p>
+                    <p>Conversations, memories, and generated media live in <code className="px-1 py-0.5 rounded bg-black/5 dark:bg-white/5 font-mono text-[0.6rem]">%APPDATA%/Locally Uncensored</code> on Windows (or the equivalent on Linux/macOS). Back up the folder, move it between machines, or delete it — LU writes nothing else.</p>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </Section>
 
           <Section title="Onboarding">
@@ -1137,6 +1161,11 @@ export function SettingsPage() {
           </Section>
 
           <Section title="ComfyUI (Image & Video)">
+            {settings.appMode === 'cloud' && (
+              <p className="text-[0.55rem] text-gray-500 leading-snug pb-1">
+                Local mode only — cloud renders run on lu-labs.ai and never use ComfyUI.
+              </p>
+            )}
             <ComfyUISettings />
           </Section>
         </>)}

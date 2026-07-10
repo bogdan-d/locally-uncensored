@@ -41,6 +41,22 @@ describe('AppShell backup triad (Bug #7)', () => {
     expect(src).toContain('onBeforeUnload')
   })
 
+  it('beforeunload flush is synchronous — never awaits IndexedDB during teardown', () => {
+    // doBackup awaits idbStorage reads; an await inside beforeunload means the
+    // trailing backup_stores invoke may never fire. The handler must call the
+    // sync snapshot (localStorage + idbCache mirror) instead of doBackup.
+    expect(src).toContain('flushSyncBackup()')
+    expect(src).toMatch(/const onBeforeUnload = \(\) => \{[^}]*flushSyncBackup\(\)/s)
+    expect(src).not.toMatch(/const onBeforeUnload = \(\) => \{[^}]*void doBackup\(\)/s)
+  })
+
+  it('restore writes IDB-backed keys through idbStorage, not localStorage (quota)', () => {
+    // The chat blob can exceed the ~5 MB localStorage quota — a raw
+    // localStorage.setItem would throw QuotaExceededError and abort the whole
+    // restore on exactly the post-NSIS boot it exists to protect.
+    expect(src).toContain('idbStorage.setItem(key, value)')
+  })
+
   it('cleans up all three hooks in the useEffect return', () => {
     // Regression guard: the return() block must clear interval, debounce,
     // subscription, and event listener.

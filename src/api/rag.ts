@@ -1,7 +1,7 @@
 import { v4 as uuid } from "uuid"
 import type { DocumentMeta, TextChunk, RAGContext, VectorSearchResult } from "../types/rag"
 import { ollamaUrl, localFetch } from "./backend"
-import { isManagedBuiltinActive, embedBaseUrl } from "./engine"
+import { isManagedBuiltinActive, embedBaseUrl, bundledEmbedStatus } from "./engine"
 
 export async function extractText(file: File): Promise<string> {
   const ext = file.name.split(".").pop()?.toLowerCase()
@@ -67,11 +67,18 @@ export async function generateEmbeddings(
 ): Promise<number[][]> {
   // P5: when the app-managed built-in engine is the active backend, embed
   // against the bundled `llama-server --embeddings` (OpenAI `/v1/embeddings`)
-  // so Document-Chat/RAG works with zero Ollama. Otherwise fall back to the
+  // so Document-Chat/RAG works with zero Ollama. The bundled embed server also
+  // serves LM Studio/openai-compat setups that downloaded the embed GGUF in
+  // onboarding — use it whenever it is running. Otherwise fall back to the
   // Ollama `/api/embed` path (still supported as an "Advanced" backend).
   if (isManagedBuiltinActive()) {
     return embedViaBuiltin(texts, model)
   }
+  try {
+    if ((await bundledEmbedStatus()).running) {
+      return embedViaBuiltin(texts, model)
+    }
+  } catch { /* engine command unavailable — fall through to Ollama */ }
   return embedViaOllama(texts, model)
 }
 

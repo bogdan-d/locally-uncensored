@@ -22,6 +22,7 @@ import {
   type AudioRecorder,
 } from "../api/voice";
 import { CloudJobError } from "../api/cloud/client";
+import { isTauri } from "../api/backend";
 import { log } from "../lib/logger";
 
 // Honest, actionable copy for dictation failures. The cloud route's own error
@@ -37,6 +38,34 @@ function sttErrorMessage(err: unknown): string {
   return "Transcription failed — check the microphone and try again";
 }
 
+// Speak-generation counter + abort plumbing, module-scoped (NOT per hook
+// instance) because playback is a process-wide singleton (one HTMLAudioElement
+// in api/voice): every SpeakerButton mounts its own useVoice, and a Stop click
+// from ANY bubble must invalidate the running cloud chunk loop. A per-instance
+// counter let another button's Stop merely settle the current clip's await,
+// after which the loop kept synthesizing — and billing — the next chunks.
+// Same singleton pattern as useCloudCreate's activeJobId/activeAbort.
+let speakGen = 0;
+let speakAbort: AbortController | null = null;
+
+function stopSpeechPlayback(): void {
+  // Invalidate the running speak generation (drops queued cloud chunks and any
+  // synthesis that resolves late) and abort the in-flight cloud fetch — the
+  // server cancels un-metered on a client abort.
+  speakGen++;
+  speakAbort?.abort();
+  speakAbort = null;
+  stopNeuralAudio();
+  stopSpeakingApi();
+  useVoiceStore.getState().setSpeaking(false);
+}
+
+// Cloud transcribe caps the request body at 12 MiB — about 6.5 minutes of the
+// 16 kHz/16-bit mono WAV the recorder produces (32,000 B/s). Auto-stop just
+// under the cap (~340 s ≈ 10.9 MB) so a long take is transcribed instead of
+// being rejected 413 wholesale.
+const CLOUD_DICTATION_LIMIT_MS = 340_000;
+
 export function useVoice() {
   const store = useVoiceStore();
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -45,11 +74,6 @@ export function useVoice() {
   // (CPU Whisper) transcriptions never pile up.
   const streamTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const interimBusyRef = useRef(false);
-  // Speak-generation counter + abort plumbing: a Stop click bumps the counter
-  // and aborts the in-flight cloud synthesis, so audio that resolves late is
-  // dropped instead of playing over the idle button state.
-  const speakGenRef = useRef(0);
-  const speakAbortRef = useRef<AbortController | null>(null);
 
   // Unmount teardown (e.g. view switch mid-dictation): kill the interim
   // transcribe interval and stop the recorder — recorder.stop() releases the
@@ -71,6 +95,40 @@ export function useVoice() {
     },
     [],
   );
+
+  // Close-to-tray teardown: main.rs intercepts CloseRequested with hide(), so
+  // the webview stays fully alive — without this, read-aloud keeps talking and
+  // a running dictation keeps the mic hot (and the PCM take growing) behind a
+  // window the user believes is closed. main.rs emits `app:hidden` right
+  // before hiding; stop global playback and this instance's recorder.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const stop = await listen("app:hidden", () => {
+        stopSpeechPlayback();
+        if (streamTimerRef.current) {
+          clearInterval(streamTimerRef.current);
+          streamTimerRef.current = null;
+        }
+        interimBusyRef.current = false;
+        const rec = recorderRef.current;
+        recorderRef.current = null;
+        if (rec?.isRecording()) {
+          void rec.stop().catch(() => {});
+          useVoiceStore.getState().setRecording(false);
+        }
+      });
+      if (disposed) stop();
+      else unlisten = stop;
+    })();
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Cloud mode routes voice through the metered lu-labs.ai endpoints — no
   // local Whisper/Piper install needed, both buttons just work.
@@ -216,10 +274,13 @@ export function useVoice() {
       const externalReady = store.ttsMode === "external" && !!store.externalTtsUrl.trim();
       if (!cloudVoice && !externalReady && !store.ttsAvailable && !ttsSupported) return;
 
-      const gen = ++speakGenRef.current;
+      const gen = ++speakGen;
+      // A new read-aloud (from any bubble) supersedes a running one — abort
+      // its in-flight synthesis un-metered instead of leapfrogging playback.
+      speakAbort?.abort();
       const controller = new AbortController();
-      speakAbortRef.current = controller;
-      const stopped = () => gen !== speakGenRef.current;
+      speakAbort = controller;
+      const stopped = () => gen !== speakGen;
 
       store.setSpeaking(true);
       try {
@@ -229,17 +290,24 @@ export function useVoice() {
         // and the MP3s played strictly sequentially — Stop cancels the whole
         // queue via the generation counter + the fetch abort.
         if (cloudVoice) {
+          const chunks = chunkForTts(text);
+          let played = 0;
           try {
-            for (const chunk of chunkForTts(text)) {
+            for (const chunk of chunks) {
               if (stopped()) return;
               const url = await synthesizeCloud(chunk, store.cloudTtsVoice || undefined, controller.signal);
               if (stopped()) return;
               await playNeuralAudio(url);
+              played++;
             }
             return;
           } catch (err) {
             if (stopped()) return; // Stop click aborted the fetch — no fallback
             log.error("Cloud TTS failed, falling back to local engines", { err });
+            // Resume from the failed chunk — the user already heard (and paid
+            // for) the first `played` chunks; re-reading the whole text in a
+            // different voice would double-play them.
+            if (played > 0) text = chunks.slice(played).join(" ");
           }
         }
         // External HTTP TTS engine takes precedence when selected + configured.
@@ -289,17 +357,8 @@ export function useVoice() {
   const speakText = useCallback((text: string) => speakInternal(text, false), [speakInternal]);
   const speakTextStreaming = useCallback((text: string) => speakInternal(text, true), [speakInternal]);
 
-  const stopSpeaking = useCallback(() => {
-    // Invalidate the running speak generation (drops queued cloud chunks and
-    // any synthesis that resolves late) and abort the in-flight cloud fetch —
-    // the server cancels un-metered on a client abort.
-    speakGenRef.current++;
-    speakAbortRef.current?.abort();
-    speakAbortRef.current = null;
-    stopNeuralAudio();
-    stopSpeakingApi();
-    store.setSpeaking(false);
-  }, [store]);
+  // Module-scoped singleton — any instance's Stop halts the global playback.
+  const stopSpeaking = useCallback(() => stopSpeechPlayback(), []);
 
   const clearSttError = useCallback(() => store.setSttError(null), [store]);
 
@@ -315,6 +374,9 @@ export function useVoice() {
     ttsAvailable,
     ttsExternalReady,
     ttsEnabled: store.ttsEnabled,
+    /** Client-side dictation cap (ms) — cloud transcribe 413s past ~6.5 min.
+     *  Null in local mode (no server limit). VoiceButton auto-stops at this. */
+    maxRecordingMs: cloudVoice ? CLOUD_DICTATION_LIMIT_MS : null,
     startRecording,
     stopRecording,
     recheckStt,

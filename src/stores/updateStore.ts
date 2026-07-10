@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { version as currentVersion } from '../../package.json'
-import { isTauri, backendCall } from '../api/backend'
+import { isTauri, backendCall, openExternal } from '../api/backend'
 import type { Update } from '@tauri-apps/plugin-updater'
 
 // ── Types ─────────────────────────────────────────────────────
@@ -28,6 +28,7 @@ interface UpdateState {
   installAndRestart: () => Promise<void>
   dismissUpdate: () => void
   clearDismiss: () => void
+  openReleasePage: () => void
 }
 
 // ── Config ────────────────────────────────────────────────────
@@ -186,15 +187,22 @@ export const useUpdateStore = create<UpdateState>()(
       clearDismiss: () => {
         set({ dismissed: null })
       },
+
+      openReleasePage: () => {
+        void openExternal(`https://github.com/${GITHUB_REPO}/releases/latest`)
+      },
     }),
     {
       name: 'lu-update-checker-v2',
+      // downloadStatus is deliberately NOT persisted: the Update handle lives
+      // in module-level `_pendingUpdate`, which dies with the process — a
+      // rehydrated 'downloaded'/'downloading'/'error' state would render badge
+      // buttons whose actions early-return on the null handle.
       partialize: (state) => ({
         lastChecked: state.lastChecked,
         latestVersion: state.latestVersion,
         updateAvailable: state.updateAvailable,
         releaseNotes: state.releaseNotes,
-        downloadStatus: state.downloadStatus,
       }),
       // Reset stale persisted state when the binary has been updated out-of-band
       // (e.g. user manually installed a newer .deb / .exe than what the persisted
@@ -207,6 +215,14 @@ export const useUpdateStore = create<UpdateState>()(
           state.latestVersion = null
           state.updateAvailable = false
           state.releaseNotes = null
+          state.lastChecked = null
+        } else if (state.updateAvailable) {
+          // Update still pending across a relaunch: any transient download
+          // state is dead (`_pendingUpdate` is null in the new process), and a
+          // persisted `lastChecked` would let the 6h cooldown block the startup
+          // check that repopulates it. Reset so the badge re-offers a working
+          // Download immediately.
+          state.downloadStatus = 'idle'
           state.lastChecked = null
         }
       },

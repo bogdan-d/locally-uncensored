@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { X, Sparkles } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
+import { runCredits } from '../../../stores/cloudCatalogStore'
 import { useCreateExp } from './CreateContext'
 import { galleryItemUrl, recoverGalleryUrl } from './galleryUrl'
 import { cn } from '../ui/cn'
@@ -9,7 +10,7 @@ import { cn } from '../ui/cn'
 export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose: () => void }) {
   const backend = useCreateStore((s) => s.backend)
   const isGenerating = useCreateStore((s) => s.isGenerating)
-  const { enhanceVideo } = useCreateExp()
+  const { enhanceVideo, quota } = useCreateExp()
 
   useEffect(() => {
     if (!item) return
@@ -21,6 +22,15 @@ export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose:
   // Video super-resolution: only for finished CLOUD renders (jobId = the
   // clip lives in the user's render storage, which the enhance op requires).
   const canEnhance = item?.type === 'video' && !!item.jobId && backend === 'cloud' && !isGenerating
+  // Gate on the run's cost like the Composer does — Enhance is a paid action
+  // too, and without the gate the only feedback was a server 429 after the
+  // progress bar had already started. Clip length is unknown client-side, so
+  // runCredits mirrors the server's 8 s default.
+  const enhanceCredits =
+    canEnhance && quota != null
+      ? runCredits('video', 'upscale', item.model || '', undefined, quota.costs.video)
+      : null
+  const enhanceOk = enhanceCredits !== null && quota != null && quota.remaining.credits >= enhanceCredits
 
   return (
     <AnimatePresence>
@@ -39,11 +49,20 @@ export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose:
             <button
               onClick={(e) => {
                 e.stopPropagation()
+                if (!enhanceOk) return
                 onClose()
                 void enhanceVideo(item)
               }}
-              title="Upscale this clip to 1080p on the cloud fleet"
-              className="absolute top-4 right-16 h-9 px-3 flex items-center gap-1.5 rounded-lg bg-white/10 text-gray-200 hover:bg-white/20 text-[0.7rem] font-medium"
+              disabled={!enhanceOk}
+              title={
+                enhanceOk
+                  ? 'Upscale this clip to 1080p on the cloud fleet'
+                  : 'Not enough credits left this month for a video enhance'
+              }
+              className={cn(
+                'absolute top-4 right-16 h-9 px-3 flex items-center gap-1.5 rounded-lg text-[0.7rem] font-medium',
+                enhanceOk ? 'bg-white/10 text-gray-200 hover:bg-white/20' : 'bg-white/5 text-gray-500 cursor-not-allowed',
+              )}
             >
               <Sparkles size={13} /> Enhance
             </button>

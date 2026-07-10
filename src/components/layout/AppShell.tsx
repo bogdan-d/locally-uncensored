@@ -207,8 +207,18 @@ export function AppShell() {
               let restored = 0
               for (const [key, value] of Object.entries(parsed)) {
                 if (STORE_KEYS_SET.has(key) && typeof value === 'string' && value) {
-                  localStorage.setItem(key, value)
-                  restored++
+                  // IDB-backed keys go back to IndexedDB — the chat blob can
+                  // exceed the ~5 MB localStorage quota (that's why those
+                  // stores moved to IDB), and hydration reads them from there.
+                  // Per-key try/catch: one failing key must not abort the rest.
+                  try {
+                    if (IDB_STORE_KEYS.has(key)) {
+                      await Promise.resolve(idbStorage.setItem(key, value))
+                    } else {
+                      localStorage.setItem(key, value)
+                    }
+                    restored++
+                  } catch { /* skip this key, keep restoring the rest */ }
                 }
               }
               if (restored > 0) {
@@ -291,6 +301,11 @@ export function AppShell() {
       if (disposed) return
 
       let backupInflight = false
+      // In-memory mirror of the IDB-backed values, refreshed by every doBackup
+      // run. beforeunload can't await IndexedDB (the page is tearing down), so
+      // the sync flush below reads from this cache instead — at most one
+      // debounce-cycle stale, same freshness the old sync handler had.
+      const idbCache: Record<string, string> = {}
       const doBackup = async () => {
         // Inflight guard: the 1 s debounce and the 5 s interval can overlap
         // now that the snapshot awaits IndexedDB reads.
@@ -302,7 +317,10 @@ export function AppShell() {
             const val = IDB_STORE_KEYS.has(key)
               ? await Promise.resolve(idbStorage.getItem(key))
               : localStorage.getItem(key)
-            if (val) snapshot[key] = val
+            if (val) {
+              snapshot[key] = val
+              if (IDB_STORE_KEYS.has(key)) idbCache[key] = val
+            }
           }
           // Always fire — we want backup even if snapshot is mostly empty, and the
           // sentinel tells the restore-flow this is a valid backup.
@@ -368,11 +386,30 @@ export function AppShell() {
       }
       const unsubChat = useChatStore.subscribe(scheduleBackup)
 
+      // Synchronous "last write" flush for beforeunload: doBackup awaits
+      // IndexedDB reads, and an await during page teardown means the trailing
+      // backup_stores invoke may never fire. Build the snapshot synchronously
+      // from localStorage + the idbCache mirror instead — no await before the
+      // invoke, restoring the pre-async guarantee.
+      const flushSyncBackup = () => {
+        try {
+          const snapshot: Record<string, string> = { __ts: new Date().toISOString() }
+          for (const key of STORE_KEYS) {
+            const val = IDB_STORE_KEYS.has(key)
+              ? (idbCache[key] ?? null)
+              : localStorage.getItem(key)
+            if (val) snapshot[key] = val
+          }
+          localStorage.setItem('lu-restore-complete', '1')
+          backendCall('backup_stores', { data: JSON.stringify(snapshot) }).catch(() => {})
+        } catch { /* best-effort */ }
+      }
+
       const onBeforeUnload = () => {
-        // Best-effort fire-and-forget — the page is going away, we can't
-        // await. The 5 s / 30 s intervals cover the common case; this is the
-        // "last write" insurance for changes since the previous interval.
-        void doBackup()
+        // The 5 s / 30 s intervals cover the common case; this is the "last
+        // write" insurance for changes since the previous interval. Must stay
+        // synchronous — see flushSyncBackup.
+        flushSyncBackup()
         void doRagBackup()
       }
       window.addEventListener('beforeunload', onBeforeUnload)

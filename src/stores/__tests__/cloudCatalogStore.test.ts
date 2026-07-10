@@ -88,6 +88,18 @@ describe('cloudCatalogStore', () => {
       expect(runCredits('image', 'upscale', 'flux-9', undefined, 300)).toBe(1000)
     })
 
+    it('prices video upscale per second with the min floor and the server 8s default', () => {
+      useCloudCatalogStore.getState().setCatalog(serverCatalog)
+      // unknown clip length → server default 8 s → 500 × 8 = 4000 (what the submit claims)
+      expect(runCredits('video', 'upscale', 'wan-9', undefined, 300)).toBe(4000)
+      expect(runCredits('video', 'upscale', 'wan-9', 10, 300)).toBe(5000)
+      // short clip books the floor
+      expect(runCredits('video', 'upscale', 'wan-9', 3, 300)).toBe(2500)
+      // no catalog → quota fallback
+      useCloudCatalogStore.setState({ ops: null })
+      expect(runCredits('video', 'upscale', 'wan-9', undefined, 300)).toBe(300)
+    })
+
     it('prices image upscale per target resolution, flat 4k when the res table is absent', () => {
       useCloudCatalogStore.getState().setCatalog(serverCatalog)
       expect(runCredits('image', 'upscale', 'flux-9', undefined, 300, '8k')).toBe(4000)

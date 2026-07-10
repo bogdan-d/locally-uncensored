@@ -15,9 +15,19 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from './config'
 const SESSION_ACCOUNT = 'lu-cloud-session'
 const LOCAL_KEY = 'lu-cloud-session'
 
-// Keychain-first async storage adapter. A single failed keychain call flips
-// the adapter to localStorage for the rest of the session (Linux, web dev).
+// Keychain-first async storage adapter. Only a *permanent* keychain absence
+// (web build, Linux stub) latches the adapter to localStorage — a transient
+// failure (keychain locked at wake, dismissed unlock prompt, Credential
+// Manager hiccup) falls back for that call only and retries the keychain on
+// the next operation. Latching on a transient error would strand rotated
+// refresh tokens in localStorage while the keychain keeps the rotated-out
+// session, which kills the sign-in on the next launch.
 let keychainBroken = false
+
+function keychainMissing(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('keychain unavailable') || msg.includes('keychain unsupported')
+}
 
 // The PKCE flow stores TWO keys through this adapter: the session under the
 // storageKey and the code verifier under `${storageKey}-code-verifier`. Map
@@ -32,9 +42,15 @@ const keychainStorage = {
   async getItem(key: string): Promise<string | null> {
     if (!keychainBroken) {
       try {
-        return await secretGet(keychainAccount(key))
-      } catch {
-        keychainBroken = true
+        const fromKeychain = await secretGet(keychainAccount(key))
+        // A localStorage copy only exists when a later write missed the
+        // keychain (transient failure, keychain-less build) — when both
+        // stores hold the key, localStorage is the newer one. A clean
+        // keychain miss must also consult it, or a fallback-written session
+        // is invisible on the next launch and the user is signed out.
+        return localStorage.getItem(key) ?? fromKeychain
+      } catch (err) {
+        if (keychainMissing(err)) keychainBroken = true
       }
     }
     return localStorage.getItem(key)
@@ -43,9 +59,12 @@ const keychainStorage = {
     if (!keychainBroken) {
       try {
         await secretSet(keychainAccount(key), value)
+        // Drop any stale fallback copy so the two stores can't diverge and
+        // no refresh token lingers in plaintext once the keychain works.
+        localStorage.removeItem(key)
         return
-      } catch {
-        keychainBroken = true
+      } catch (err) {
+        if (keychainMissing(err)) keychainBroken = true
       }
     }
     localStorage.setItem(key, value)
@@ -54,11 +73,12 @@ const keychainStorage = {
     if (!keychainBroken) {
       try {
         await secretDelete(keychainAccount(key))
-        return
-      } catch {
-        keychainBroken = true
+      } catch (err) {
+        if (keychainMissing(err)) keychainBroken = true
       }
     }
+    // Always clear the fallback copy too — sign-out must never leave a
+    // resurrectable session (or plaintext refresh token) in localStorage.
     localStorage.removeItem(key)
   },
 }

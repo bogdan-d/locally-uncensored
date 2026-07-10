@@ -92,10 +92,13 @@ export function runCredits(
 ): number {
   const { ops } = useCloudCatalogStore.getState()
   if (op === 'removebg' || op === 'eraser' || op === 'upscale') {
-    const upscale =
-      ops && kind === 'image'
-        ? ((resolution && ops.upscale_image_res?.[resolution]) || ops.upscale_image)
-        : ops?.upscale_image
+    // Video upscale is per-second with a floor; the server defaults to 8 s
+    // when the submit carries no clip length (mirrors mediaCredits).
+    const upscale = !ops
+      ? undefined
+      : kind === 'video'
+        ? Math.ceil(Math.max(ops.upscale_video_min, ops.upscale_video_per_s * (seconds && seconds > 0 ? seconds : 8)))
+        : ((resolution && ops.upscale_image_res?.[resolution]) || ops.upscale_image)
     const rate = ops ? { removebg: ops.removebg, eraser: ops.eraser, upscale }[op] : undefined
     return rate ?? fallback
   }

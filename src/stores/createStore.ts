@@ -124,6 +124,11 @@ export interface GalleryItem {
   jobId?: string
   /** Which redesign intent produced this item (gallery tagging). */
   intent?: CreateIntent
+  /** Runtime-only (stripped by partialize): the item's media failed to load
+   *  and can't be recovered right now — a local ComfyUI item while the engine
+   *  is unreachable. Tiles render an honest offline state and Download
+   *  disables instead of silently no-oping. */
+  unavailable?: boolean
 }
 
 interface CreateState {
@@ -492,7 +497,7 @@ export const useCreateStore = create<CreateState>()(
         // dataUrls would blow the origin quota (~5-10 MB in WebView2/WKWebView)
         // and every subsequent set() would throw, killing ALL create-store
         // persistence. Cloud items carry remoteUrl + jobId and re-sign lazily.
-        gallery: state.gallery.map(({ dataUrl, ...g }) => g),
+        gallery: state.gallery.map(({ dataUrl, unavailable, ...g }: GalleryItem) => g),
         promptHistory: state.promptHistory,
         // ── redesign additions (advanced params only; runtime inputs
         //    source/mask/backend/caps stay unpersisted). No version bump: these

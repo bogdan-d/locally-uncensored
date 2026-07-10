@@ -43,6 +43,12 @@ async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
 let activeJobId: string | null = null
 let activeAbort: AbortController | null = null
 
+/** True while a cloud run (generate or enhance) is in flight. CreateContext
+ *  routes Cancel by the backend that STARTED the run, not the current axis —
+ *  the header switch (or the 5-min license probe) can flip local/cloud
+ *  mid-render, and a mis-routed cancel strands a billing cloud job. */
+export const hasActiveCloudRun = (): boolean => activeAbort !== null
+
 export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   const { onQuotaChange } = opts
 
@@ -111,6 +117,14 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       if (op === 'edit') {
         params.denoise = s.denoise
         params.grow_mask_by = s.growMaskBy
+        // The mask is exported at the SOURCE image's resolution, so the output
+        // must match it too — otherwise the painted region no longer aligns.
+        // The generation sliders (s.width/height) are unrelated to a dropped
+        // source, so drive width/height from the source when we have it.
+        if (s.source?.width && s.source?.height) {
+          params.width = s.source.width
+          params.height = s.source.height
+        }
       }
       if (op === 'upscale') {
         params.target_resolution = s.targetResolution
@@ -139,6 +153,14 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
 
       s.setProgress(10, 'Submitting to the render queue…')
       const { id } = await submitCloudJob({ kind, model, prompt: s.prompt, params })
+      // A Cancel during the submit round-trip saw activeJobId still null, so
+      // nothing was cancelled server-side. Now that the id exists, cancel the
+      // just-queued job so its claimed credits refund instead of orphaning a
+      // render we're no longer watching.
+      if (ac.signal.aborted) {
+        cancelJob(id).then(() => onQuotaChange?.()).catch(() => {})
+        return
+      }
       activeJobId = id
       onQuotaChange?.()
       if (s.prompt.trim()) s.addToPromptHistory(s.prompt.trim())
@@ -236,7 +258,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
   // against the user's own storage clip, polls, and lands the enhanced clip
   // as a new gallery item. Runs through the same isGenerating choreography.
   const enhanceVideo = useCallback(
-    async (item: GalleryItem, targetResolution: '720p' | '1080p' | '2k' | '4k' = '1080p') => {
+    async (item: GalleryItem, targetResolution: '720p' | '1080p' = '1080p') => {
       const s = useCreateStore.getState()
       if (s.isGenerating || !item.jobId) return
       s.setError(null)
@@ -261,6 +283,12 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
           prompt: '',
           params: { op: 'upscale', source_url: sourceJob.result_url, target_resolution: targetResolution },
         })
+        // Same submit-window race as generate(): cancel the just-queued job
+        // if the user aborted while the POST was in flight.
+        if (ac.signal.aborted) {
+          cancelJob(id).then(() => onQuotaChange?.()).catch(() => {})
+          return
+        }
         activeJobId = id
         onQuotaChange?.()
 

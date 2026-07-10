@@ -7,7 +7,7 @@ mod state;
 
 use state::AppState;
 use tauri::{
-    Manager,
+    Emitter, Manager,
     menu::{Menu, MenuItem},
     tray::TrayIconBuilder,
     image::Image,
@@ -336,6 +336,12 @@ fn main() {
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
+                        // The hidden webview stays fully alive — read-aloud
+                        // would keep talking and a running dictation would
+                        // keep the mic hot behind a window the user believes
+                        // is closed. Tell the frontend (useVoice) to stop
+                        // both before the window goes to the tray.
+                        let _ = w.emit("app:hidden", ());
                         let _ = w.hide();
                     }
                 });

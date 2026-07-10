@@ -311,7 +311,7 @@ export function useChat() {
         try {
           yield* provider.chatStream(modelId, messages, chatOpts)
         } catch (err: any) {
-          if (useThinking !== undefined && (err?.message?.includes('does not support thinking') || err?.statusCode === 400 || err?.statusCode === 422)) {
+          if (useThinking !== undefined && (err?.message?.includes('does not support thinking') || err?.status === 400 || err?.status === 422)) {
             yield* provider.chatStream(modelId, messages, { ...chatOpts, thinking: undefined })
           } else {
             throw err

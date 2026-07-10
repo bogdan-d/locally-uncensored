@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, X } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
@@ -10,6 +10,9 @@ import { GalleryStrip } from './GalleryStrip'
 import { Lightbox } from './Lightbox'
 import { AdvancedDrawer } from './AdvancedDrawer'
 import { MaskEditor } from './MaskEditor'
+import { INTENT_MAP } from './intents'
+import { galleryItemUrl } from './galleryUrl'
+import { loadImageRef } from './loadImage'
 
 /** The redesigned Create surface. Mounted by AppShell for currentView==='create'. */
 export function CreateExperimental() {
@@ -42,6 +45,46 @@ function CreateExperimentalInner() {
   const displayed = (pinnedId ? gallery.find((g) => g.id === pinnedId) : undefined) ?? gallery[0]
   const banner = error ?? modelLoadError
 
+  // Pull a finished result back in as the working source (ImageRef). Needed
+  // because a text-to-image run leaves `source` empty — without this, "Edit
+  // with mask" on a result and switching to Edit/Upscale/Eraser/Animate were
+  // no-ops that demanded a download + re-upload of the app's own output.
+  const adoptResult = useCallback(async (item: GalleryItem) => {
+    const res = await fetch(galleryItemUrl(item))
+    const blob = await res.blob()
+    const file = new File([blob], item.filename || 'result.png', { type: blob.type || 'image/png' })
+    return loadImageRef(file)
+  }, [])
+
+  const editResultWithMask = useCallback(async (item: GalleryItem) => {
+    useCreateStore.getState().setIntent('edit')
+    try {
+      useCreateStore.getState().setSource(await adoptResult(item))
+      setMaskOpen(true)
+    } catch (err) {
+      setError(`Could not load the result for editing: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }, [adoptResult, setError])
+
+  // Switching to a source-needing intent while an image result is in the
+  // gallery adopts the newest image as the input instead of demanding a
+  // re-upload. Every source-needing intent takes an *image* input, so always
+  // pull the newest image — never a video.
+  const intent = useCreateStore((s) => s.intent())
+  const source = useCreateStore((s) => s.source)
+  useEffect(() => {
+    const meta = INTENT_MAP[intent]
+    if (!meta.needsSource || source) return
+    const img = gallery.find((g) => g.type === 'image')
+    if (!img) return
+    let cancelled = false
+    adoptResult(img)
+      .then((ref) => { if (!cancelled) useCreateStore.getState().setSource(ref) })
+      .catch(() => { /* upload slot stays — user can drop a file */ })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intent])
+
   return (
     <div className="h-full w-full flex flex-col bg-[#141414] text-gray-200 overflow-hidden">
       <IntentBar />
@@ -72,6 +115,7 @@ function CreateExperimentalInner() {
         <Stage
           displayed={displayed}
           onOpenMaskEditor={() => setMaskOpen(true)}
+          onEditResult={(it) => { void editResultWithMask(it) }}
           onFullscreen={(it) => setLightbox(it)}
         />
         <GalleryStrip activeId={pinnedId} onSelect={setPinnedId} />
