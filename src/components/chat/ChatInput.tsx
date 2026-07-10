@@ -67,7 +67,12 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
   const thinkingEnabled = useSettingsStore((s) => s.settings.thinkingEnabled)
   const updateSettings = useSettingsStore((s) => s.updateSettings)
   const activeModel = useModelStore((s) => s.activeModel)
-  const canThink = isThinkingCompatible(activeModel)
+  const activeModelMeta = useModelStore((s) => s.models.find((m) => m.name === s.activeModel))
+  // Server-declared capability (LU Cloud carries thinkMode from /models) wins
+  // over the local name-heuristic; 'always' renders the toggle locked on.
+  const thinkMode = activeModelMeta && 'thinkMode' in activeModelMeta ? activeModelMeta.thinkMode : undefined
+  const thinkLockedOn = thinkMode === 'always'
+  const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
   const canSeeImages = isVisionCompatible(activeModel)
 
   useEffect(() => {
@@ -363,19 +368,25 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             className="flex-1 bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[0.75rem] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"
           />
 
-          {/* Think toggle */}
+          {/* Think toggle ('always'-models render it locked on) */}
           <button
             onClick={() => {
               if (canThink) updateSettings({ thinkingEnabled: !thinkingEnabled })
             }}
             className={`flex items-center gap-1 px-1.5 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ${
-              thinkingEnabled && canThink
+              (thinkingEnabled && canThink) || thinkLockedOn
                 ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
                 : !canThink
                   ? 'text-gray-600 opacity-40 cursor-default'
                   : 'text-gray-500 hover:text-gray-300 hover:bg-white/5'
             }`}
-            title={canThink ? (thinkingEnabled ? 'Thinking ON' : 'Thinking OFF') : 'Model does not support thinking'}
+            title={
+              thinkLockedOn
+                ? 'Thinking is always on for this model'
+                : canThink
+                  ? (thinkingEnabled ? 'Thinking ON' : 'Thinking OFF')
+                  : 'Model does not support thinking'
+            }
           >
             <Brain size={11} />
             <span>Think</span>
