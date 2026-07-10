@@ -174,7 +174,7 @@ export function assertNodeInstallOk(result: unknown, name: string): void {
   if (result && typeof result === 'object' && 'status' in result) {
     const status = String((result as { status?: unknown }).status)
     if (status !== 'installed' && status !== 'updated') {
-      throw new Error(`backend reported status "${status}"`)
+      throw new Error(`${name}: backend reported status "${status}"`)
     }
   }
 }
