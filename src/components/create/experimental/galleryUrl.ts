@@ -47,3 +47,35 @@ export function recoverGalleryUrl(item: GalleryItem): void {
 export function markGalleryItemAvailable(item: GalleryItem): void {
   if (item.unavailable) useCreateStore.getState().updateGalleryItem(item.id, { unavailable: undefined })
 }
+
+/** Fetch a gallery item's media bytes for adoption as an op source.
+ *
+ *  The naive `fetch(galleryItemUrl(item))` was the "failed to fetch" behind
+ *  every source-needing op in cloud mode (David 2026-07-10): a cloud item's
+ *  signed URL expires ~1 h after issue, and a local ComfyUI item's /view URL
+ *  is dead whenever the local engine isn't running — both surface as a bare
+ *  TypeError. Re-sign expired cloud media once via the job id, and turn the
+ *  unrecoverable cases into actionable messages. */
+export async function fetchGalleryItemBlob(item: GalleryItem): Promise<Blob> {
+  const tryFetch = async (url: string) => {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`media request failed (${res.status})`)
+    return res.blob()
+  }
+  try {
+    return await tryFetch(galleryItemUrl(item))
+  } catch (err) {
+    if (item.jobId) {
+      const fresh = await refreshResultUrl(item.jobId).catch(() => null)
+      if (fresh) {
+        useCreateStore.getState().updateGalleryItem(item.id, { remoteUrl: fresh, unavailable: undefined })
+        return tryFetch(fresh)
+      }
+      throw new Error('The cloud copy of this render is no longer available — pick another image or upload one from disk.')
+    }
+    if (!item.remoteUrl && !item.dataUrl) {
+      throw new Error('This image lives in your local ComfyUI output, which is not running right now — switch to Local (or start ComfyUI) to use it, or upload the file from disk.')
+    }
+    throw err
+  }
+}

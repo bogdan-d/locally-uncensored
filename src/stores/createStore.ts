@@ -444,12 +444,23 @@ export const useCreateStore = create<CreateState>()(
       setTargetResolution: (targetResolution) => set({ targetResolution }),
       setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null }) }),
       setMask: (mask) => set({ mask }),
-      // Flipping to local clears a cloud-only utility intent (upscale/eraser
-      // have no local lane) so the surface never strands on a dead op.
+      // Flipping to local clears every cloud-only intent (edit/animate/
+      // upscale/eraser have no local lane — David 2026-07-10: advanced ops are
+      // cloud-only; only removebg keeps a local lane via the RMBG node) so the
+      // surface never strands on a dead op the IntentBar no longer shows.
       setBackend: (backend) =>
-        set((s) =>
-          backend === 'local' && s.utilityOp ? { backend, utilityOp: null, mask: null, error: null } : { backend },
-        ),
+        set((s) => {
+          if (backend !== 'local') return { backend }
+          const patch: Record<string, unknown> = { backend }
+          if (s.utilityOp) Object.assign(patch, { utilityOp: null, mask: null, error: null })
+          if (s.imageSubMode === 'img2img' && !s.removebg) {
+            Object.assign(patch, { imageSubMode: 'text2img', source: null, mask: null, sourceSetAt: 0, error: null })
+          }
+          if (s.videoSubMode === 'i2v') {
+            Object.assign(patch, { videoSubMode: 't2v', source: null, mask: null, sourceSetAt: 0, error: null })
+          }
+          return patch
+        }),
       setCloudImageModel: (cloudImageModel) => set({ cloudImageModel }),
       setCloudVideoModel: (cloudVideoModel) => set({ cloudVideoModel }),
       setCaps: (caps) => set({ caps }),

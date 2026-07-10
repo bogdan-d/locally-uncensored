@@ -9,6 +9,7 @@ import { EmptyState } from '../ui/EmptyState'
 import { Button } from '../ui/Button'
 import { cn } from '../ui/cn'
 import { loadImageRef } from './loadImage'
+import { galleryItemUrl, fetchGalleryItemBlob, recoverGalleryUrl } from './galleryUrl'
 
 interface Props {
   displayed?: GalleryItem
@@ -107,10 +108,30 @@ function InputSlot() {
   const setSource = useCreateStore((s) => s.setSource)
   const setError = useCreateStore((s) => s.setError)
   const intent = useCreateStore((s) => s.intent())
+  const gallery = useCreateStore((s) => s.gallery)
   const meta = INTENT_MAP[intent]
   const inputRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  // David 2026-07-10: ops never auto-adopt a gallery image — instead the slot
+  // offers the recent gallery images as an EXPLICIT pick, next to drag&drop
+  // and the file picker ("aus Galerie ODER vom Desktop").
+  const galleryImages = gallery.filter((g) => g.type === 'image' && !g.unavailable).slice(0, 8)
+
+  const adoptFromGallery = async (item: GalleryItem) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const blob = await fetchGalleryItemBlob(item)
+      const file = new File([blob], item.filename || 'source.png', { type: blob.type || 'image/png' })
+      setSource(await loadImageRef(file))
+    } catch (err) {
+      setError(`Could not load that gallery image: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const handleFile = async (file: File) => {
     // Drag&drop bypasses the input's accept filter — validate here so a
@@ -153,6 +174,24 @@ function InputSlot() {
         </div>
         <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
       </div>
+      {galleryImages.length > 0 && (
+        <div className="mt-4 w-full max-w-sm">
+          <div className="t-label text-gray-600 mb-2 text-center">or pick from your gallery</div>
+          <div className="flex justify-center gap-1.5 overflow-x-auto pb-1">
+            {galleryImages.map((g) => (
+              <button
+                key={g.id}
+                onClick={() => { if (!loading) void adoptFromGallery(g) }}
+                className="shrink-0 w-12 h-12 rounded-md overflow-hidden border border-white/10 hover:border-white/30 transition-colors"
+                title="Use this image as the source"
+                aria-label="Use this gallery image as the source"
+              >
+                <img src={galleryItemUrl(g)} alt="" className="w-full h-full object-cover" onError={() => recoverGalleryUrl(g)} />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

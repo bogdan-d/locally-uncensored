@@ -12,7 +12,7 @@ import { AdvancedDrawer } from './AdvancedDrawer'
 import { MaskEditor } from './MaskEditor'
 import { VhsInstallModal } from './VhsInstallModal'
 import { INTENT_MAP } from './intents'
-import { galleryItemUrl } from './galleryUrl'
+import { fetchGalleryItemBlob } from './galleryUrl'
 import { loadImageRef } from './loadImage'
 
 /** The redesigned Create surface. Mounted by AppShell for currentView==='create'. */
@@ -52,8 +52,7 @@ function CreateExperimentalInner() {
   // with mask" on a result and switching to Edit/Upscale/Eraser/Animate were
   // no-ops that demanded a download + re-upload of the app's own output.
   const adoptResult = useCallback(async (item: GalleryItem) => {
-    const res = await fetch(galleryItemUrl(item))
-    const blob = await res.blob()
+    const blob = await fetchGalleryItemBlob(item)
     const file = new File([blob], item.filename || 'result.png', { type: blob.type || 'image/png' })
     return loadImageRef(file)
   }, [])
@@ -68,23 +67,18 @@ function CreateExperimentalInner() {
     }
   }, [adoptResult, setError])
 
-  // Switching to a source-needing intent while an image result is in the
-  // gallery adopts the newest image as the input instead of demanding a
-  // re-upload. Every source-needing intent takes an *image* input, so always
-  // pull the newest image — never a video.
+  // David 2026-07-10: source-needing ops must start EMPTY — never silently
+  // adopt a gallery image as the input. Adoption is always explicit: the
+  // InputSlot's "pick from gallery" strip, drag&drop, the file picker, or a
+  // result's "Edit" action. While an op intent owns the stage, clicking a
+  // gallery tile opens the Lightbox (view it, videos play) instead of
+  // pinning into a stage that can't display it.
   const intent = useCreateStore((s) => s.intent())
-  const source = useCreateStore((s) => s.source)
-  useEffect(() => {
-    const meta = INTENT_MAP[intent]
-    if (!meta.needsSource || source) return
-    const img = gallery.find((g) => g.type === 'image')
-    if (!img) return
-    let cancelled = false
-    adoptResult(img)
-      .then((ref) => { if (!cancelled) useCreateStore.getState().setSource(ref) })
-      .catch(() => { /* upload slot stays — user can drop a file */ })
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const openGalleryItem = useCallback((id: string) => {
+    const item = useCreateStore.getState().gallery.find((g) => g.id === id)
+    if (!item) return
+    if (INTENT_MAP[intent].needsSource) setLightbox(item)
+    else setPinnedId(id)
   }, [intent])
 
   return (
@@ -134,7 +128,7 @@ function CreateExperimentalInner() {
           onEditResult={(it) => { void editResultWithMask(it) }}
           onFullscreen={(it) => setLightbox(it)}
         />
-        <GalleryStrip activeId={pinnedId} onSelect={setPinnedId} />
+        <GalleryStrip activeId={pinnedId} onSelect={openGalleryItem} />
         <Composer onOpenAdvanced={() => setAdvancedOpen(true)} />
 
         <AdvancedDrawer open={advancedOpen} onClose={() => setAdvancedOpen(false)} />

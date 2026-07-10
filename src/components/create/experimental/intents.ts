@@ -34,6 +34,7 @@ export const INTENTS: IntentMeta[] = [
     id: 'edit', label: 'Edit Image', short: 'Edit', icon: Wand2,
     placeholder: 'Describe the edit — what should change in the painted area…',
     needsSource: true, needsPrompt: true, allowsMask: true, isVideo: false,
+    cloudOnly: true,
     examples: ['replace the sky with a starry night', 'add a leather jacket', 'remove the person on the left'],
   },
   {
@@ -67,6 +68,7 @@ export const INTENTS: IntentMeta[] = [
     id: 'animate', label: 'Animate Image', short: 'Animate', icon: Film,
     placeholder: 'Describe how the image should move…',
     needsSource: true, needsPrompt: true, allowsMask: false, isVideo: true,
+    cloudOnly: true,
     examples: ['slow zoom in, subtle parallax', 'hair and clothes moving in the wind'],
   },
 ]

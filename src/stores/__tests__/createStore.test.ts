@@ -719,4 +719,67 @@ describe('createStore', () => {
       expect(useCreateStore.getState().progressText).toBe('')
     })
   })
+
+  // David 2026-07-10: edit/animate/upscale/eraser are cloud-only — flipping
+  // the backend to local must clear every cloud-only intent (the IntentBar no
+  // longer shows them) so the surface never strands on a hidden op.
+  describe('setBackend local-flip clears cloud-only intents', () => {
+    const ref = { filename: 'src.png', url: 'data:image/png;base64,x', width: 8, height: 8 }
+
+    it('clears a utility op (upscale) with its mask', () => {
+      const s = useCreateStore.getState()
+      s.setBackend('cloud')
+      s.setIntent('upscale')
+      s.setSource(ref)
+      useCreateStore.getState().setBackend('local')
+      const after = useCreateStore.getState()
+      expect(after.utilityOp).toBeNull()
+      expect(after.intent()).not.toBe('upscale')
+    })
+
+    it('clears edit (img2img falls back to text2img, source dropped)', () => {
+      const s = useCreateStore.getState()
+      s.setBackend('cloud')
+      s.setIntent('edit')
+      s.setSource(ref)
+      useCreateStore.getState().setBackend('local')
+      const after = useCreateStore.getState()
+      expect(after.imageSubMode).toBe('text2img')
+      expect(after.source).toBeNull()
+      expect(after.intent()).toBe('image')
+    })
+
+    it('clears animate (i2v falls back to t2v)', () => {
+      const s = useCreateStore.getState()
+      s.setBackend('cloud')
+      s.setIntent('animate')
+      s.setSource(ref)
+      useCreateStore.getState().setBackend('local')
+      const after = useCreateStore.getState()
+      expect(after.videoSubMode).toBe('t2v')
+      expect(after.source).toBeNull()
+      expect(after.intent()).toBe('video')
+    })
+
+    it('keeps removebg — it has a local lane via the RMBG node', () => {
+      const s = useCreateStore.getState()
+      s.setBackend('cloud')
+      s.setIntent('removebg')
+      s.setSource(ref)
+      useCreateStore.getState().setBackend('local')
+      const after = useCreateStore.getState()
+      expect(after.intent()).toBe('removebg')
+      expect(after.source).not.toBeNull()
+    })
+
+    it('flipping to cloud never resets anything', () => {
+      const s = useCreateStore.getState()
+      s.setBackend('local')
+      s.setIntent('removebg')
+      s.setSource(ref)
+      useCreateStore.getState().setBackend('cloud')
+      expect(useCreateStore.getState().intent()).toBe('removebg')
+      expect(useCreateStore.getState().source).not.toBeNull()
+    })
+  })
 })
