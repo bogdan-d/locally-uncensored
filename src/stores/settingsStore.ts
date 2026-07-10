@@ -33,7 +33,9 @@ import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 // v12 (2.5.7): added settings.comfyGpuMode ('auto'|'cpu'|'gpu', default
 // 'auto') for the AMD ComfyUI GPU path (rhodium92). Additive — the merge
 // fills the default while preserving every existing value; NVIDIA unaffected.
-const STORE_VERSION = 12
+// v13 (2.5.7): added settings.cloudOnboardingSeen (one-time Cloud onboarding
+// on the first successful switch flip, default false). Additive merge.
+const STORE_VERSION = 13
 
 interface SettingsState {
   settings: Settings

@@ -16,6 +16,7 @@ export const DEFAULT_SETTINGS: Settings = {
   onboardingDone: false,
   // Global Local/Cloud switch (2.5.7) — local is and stays the default.
   appMode: 'local',
+  cloudOnboardingSeen: false,
   personasEnabled: true,
   thinkingEnabled: true,
   // Small-Model Mode (v2.5.0) — lean profile for 3B-8B local models.

@@ -29,6 +29,7 @@ import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { useCreateStore } from '../../stores/createStore'
 import { CloudGateModal } from '../cloud/CloudGateModal'
+import { CloudOnboardingModal } from '../cloud/CloudOnboardingModal'
 import { ShortcutsModal } from './ShortcutsModal'
 import { Titlebar } from './Titlebar'
 
@@ -776,6 +777,8 @@ export function AppShell() {
       />
       {/* Cloud gate: login → plan → beta wall, opened by the header switch. */}
       <CloudGateModal />
+      {/* One-time cloud onboarding — first successful switch flip. */}
+      <CloudOnboardingModal />
       <ShortcutsModal />
     </div>
   )

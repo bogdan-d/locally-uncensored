@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { tauriMockInit, DEFAULT_ASSISTANT_REPLY, DEFAULT_MODEL_NAME } from './support/tauri-mock'
-import { routeCloud, seedOnboardingDone, signInViaGate, type CloudScenario } from './support/cloud-mock'
+import { routeCloud, seedOnboardingDone, signInViaGate, cloudSwitch, type CloudScenario } from './support/cloud-mock'
 
 /**
  * 2.5.7 cloud create — hosted rendering through the global Cloud mode.
@@ -20,9 +20,9 @@ async function bootIntoCloudCreate(page: Page, scenario: CloudScenario) {
   await seedOnboardingDone(page)
   await routeCloud(page, scenario)
   await page.goto('/')
-  await expect(page.getByRole('radio', { name: /Local/i })).toBeVisible({ timeout: 20_000 })
+  await expect(cloudSwitch(page)).toBeVisible({ timeout: 20_000 })
   await signInViaGate(page)
-  await expect(page.getByRole('radio', { name: /Cloud/i })).toBeChecked({ timeout: 20_000 })
+  await expect(cloudSwitch(page)).toBeChecked({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
 }
 
@@ -73,7 +73,7 @@ test('local mode offers only the local lane (no cloud-only ops)', async ({ page 
   await seedOnboardingDone(page)
   await routeCloud(page, { license: 'active', access: true, mediaLive: true })
   await page.goto('/')
-  await expect(page.getByRole('radio', { name: /Local/i })).toBeVisible({ timeout: 20_000 })
+  await expect(cloudSwitch(page)).toBeVisible({ timeout: 20_000 })
   await page.getByRole('button', { name: /^Create$/ }).click()
 
   await expect(page.getByRole('radio', { name: /^Image$/i })).toBeVisible({ timeout: 15_000 })

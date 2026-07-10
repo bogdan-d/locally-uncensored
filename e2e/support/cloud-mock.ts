@@ -189,19 +189,27 @@ export async function routeCloud(page: Page, scenario: CloudScenario): Promise<v
  * Pre-seed the persisted settings so the app boots straight into chat (no
  * onboarding walk) in LOCAL mode. The settingsStore merge() backfills every
  * missing field from defaults, so the minimal shape is enough.
+ * cloudOnboardingSeen defaults to true here so the specs exercising the
+ * silent flip stay silent — the first-flip onboarding has its own spec.
  */
-export async function seedOnboardingDone(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+export async function seedOnboardingDone(page: Page, opts?: { cloudOnboardingSeen?: boolean }): Promise<void> {
+  const cloudOnboardingSeen = opts?.cloudOnboardingSeen !== false
+  await page.addInitScript((seen) => {
     window.localStorage.setItem(
       'chat-settings',
-      JSON.stringify({ state: { settings: { onboardingDone: true, appMode: 'local' }, _version: 10 }, version: 10 }),
+      JSON.stringify({ state: { settings: { onboardingDone: true, appMode: 'local', cloudOnboardingSeen: seen }, _version: 10 }, version: 10 }),
     )
-  })
+  }, cloudOnboardingSeen)
+}
+
+/** The purple Cloud light-switch in the header (right cluster). */
+export function cloudSwitch(page: Page) {
+  return page.getByRole('switch', { name: /^Cloud$/i })
 }
 
 /** Sign in through the CloudGateModal that the header switch opens. */
 export async function signInViaGate(page: Page): Promise<void> {
-  await page.getByRole('radio', { name: /Cloud/i }).click()
+  await cloudSwitch(page).click()
   await page.getByPlaceholder('Email').fill('qa@lu-labs.ai')
   await page.getByPlaceholder('Password').fill('e2e-password')
   await page.getByRole('button', { name: /^Sign in$/i }).click()

@@ -23,6 +23,10 @@ export interface Settings {
    * you left. Auto-falls back to 'local' when the account signs out.
    */
   appMode: AppMode
+  /** One-time Cloud onboarding (David 2026-07-10): the FIRST successful flip
+   *  to Cloud shows a short what-changes walkthrough; after that the switch
+   *  flips silently. Persisted so it never re-triggers. */
+  cloudOnboardingSeen: boolean
   /** Master switch for personas. When off, new chats get no persona system
    *  prompt (raw model). Default true. Ported from the uselu web companion. */
   personasEnabled: boolean

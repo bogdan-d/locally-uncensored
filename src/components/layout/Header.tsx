@@ -9,7 +9,7 @@ import { ModelSelector } from '../models/ModelSelector'
 import { MemoryDebugToggle } from '../chat/MemoryDebugPanel'
 import { UpdateBadge } from './UpdateBadge'
 import { DownloadBadge } from './DownloadBadge'
-import { ModeSwitch } from '../cloud/ModeSwitch'
+import { CloudSwitch } from '../cloud/CloudSwitch'
 import { loadModel } from '../../api/ollama'
 import { getProviderIdFromModel } from '../../api/providers'
 import { ModelLoadError } from '../../lib/ollama-errors'
@@ -190,10 +190,6 @@ export function Header() {
               inverted per theme. Matches the web companion. */}
           <img src="/LU-monogram-bw.png" alt="" width={33} height={33} className="dark:invert-0 invert opacity-80" />
         </button>
-        {/* Global Local/Cloud switch (2.5.7) — replaced the waitlist teaser
-            the moment the cloud tier became real. Gated: flipping to Cloud
-            without a usable account opens the CloudGateModal instead. */}
-        <ModeSwitch />
       </div>
 
       {/* Center: model picker, geometrically centered between the logo (left)
@@ -251,6 +247,11 @@ export function Header() {
 
       {/* Right: text nav + icon utilities */}
       <div className="flex items-center justify-end gap-2.5 min-w-0">
+        {/* Purple Cloud light-switch (David 2026-07-10): left of Downloads,
+            purple like the website. Gated: flipping ON without a usable
+            account opens the CloudGateModal; the first successful flip runs
+            the one-time cloud onboarding. */}
+        <CloudSwitch />
         <DownloadBadge />
 
         <button

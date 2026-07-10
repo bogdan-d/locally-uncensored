@@ -6,18 +6,23 @@ interface UIState {
   currentView: View
   sidebarOpen: boolean
   /** CloudGateModal (login → plan → beta gate) — opened by the header's
-   *  Local/Cloud switch when the cloud side isn't usable yet. */
+   *  Cloud switch when the cloud side isn't usable yet. */
   cloudGateOpen: boolean
+  /** One-time Cloud onboarding — opened on the first successful flip to
+   *  Cloud (subscription present, cloudOnboardingSeen still false). */
+  cloudOnboardingOpen: boolean
   setView: (view: View) => void
   toggleSidebar: () => void
   setSidebarOpen: (open: boolean) => void
   setCloudGateOpen: (open: boolean) => void
+  setCloudOnboardingOpen: (open: boolean) => void
 }
 
 export const useUIStore = create<UIState>()((set) => ({
   currentView: 'chat',
   sidebarOpen: true,
   cloudGateOpen: false,
+  cloudOnboardingOpen: false,
 
   // Sidebar visibility follows the view: it's the conversation list, which
   // only makes sense in Chat. The hamburger toggle still works on other views;
@@ -26,4 +31,5 @@ export const useUIStore = create<UIState>()((set) => ({
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setCloudGateOpen: (open) => set({ cloudGateOpen: open }),
+  setCloudOnboardingOpen: (open) => set({ cloudOnboardingOpen: open }),
 }))
