@@ -30,9 +30,21 @@ import {
 } from '../stores/cloudCatalogStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 
-async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  const res = await fetch(dataUrl)
-  return res.blob()
+// Decoded by hand instead of fetch(dataUrl): the webview CSP's connect-src
+// (rightly) has no data: entry, so fetching a data URL throws "Load failed"
+// and killed every source-needing op before the upload even started.
+function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(',')
+  const meta = dataUrl.slice(5, comma)
+  const data = dataUrl.slice(comma + 1)
+  const mime = meta.split(';')[0] || 'application/octet-stream'
+  if (meta.includes('base64')) {
+    const bin = atob(data)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return new Blob([bytes], { type: mime })
+  }
+  return new Blob([decodeURIComponent(data)], { type: mime })
 }
 
 // The in-flight job handle lives at module scope, matching the lifetime of the
@@ -132,7 +144,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
       // ImageRef.url is always a data URL preview; the cloud path re-uploads
       // from it, so a source picked while on the local backend still works.
       if (op !== 'generate' && s.source) {
-        params.source_path = await uploadInput(await dataUrlToBlob(s.source.url), 'source')
+        params.source_path = await uploadInput(dataUrlToBlob(s.source.url), 'source')
       }
       if (op === 'edit' || op === 'eraser') {
         if (!s.mask) {
@@ -144,7 +156,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
           s.setIsGenerating(false)
           return
         }
-        params.mask_path = await uploadInput(await dataUrlToBlob(s.mask.url), 'mask')
+        params.mask_path = await uploadInput(dataUrlToBlob(s.mask.url), 'mask')
       }
 
       // Bail before the (credit-claiming) submit if the user cancelled while
