@@ -278,7 +278,7 @@ pub fn fs_search(
                 if re.is_match(line) {
                     matches.push(serde_json::json!({
                         "line": line_num + 1,
-                        "text": if line.len() > 200 { &line[..200] } else { line },
+                        "text": if line.len() > 200 { line.chars().take(200).collect::<String>() } else { line.to_string() },
                     }));
                     if matches.len() >= 10 {
                         break;

@@ -279,7 +279,9 @@ pub fn execute_code(
 
     let tmp_dir = std::env::temp_dir();
     let script_path = tmp_dir.join(format!("agent-code-{}.py", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)));
 
     fs::write(&script_path, &code)
         .map_err(|e| format!("Write temp script: {}", e))?;

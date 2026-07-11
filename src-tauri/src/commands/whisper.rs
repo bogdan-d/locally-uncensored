@@ -183,7 +183,9 @@ pub fn transcribe(app: AppHandle, audio_base64: String, content_type: String, st
     // Write to temp file
     let tmp_dir = std::env::temp_dir();
     let tmp_file = tmp_dir.join(format!("whisper-{}{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_millis(), ext));
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0), ext));
 
     std::fs::write(&tmp_file, &audio_bytes)
         .map_err(|e| format!("Write temp file: {}", e))?;
@@ -221,7 +223,7 @@ pub fn transcribe(app: AppHandle, audio_base64: String, content_type: String, st
         Ok(response) => {
             if let Some(transcript) = response.get("transcript").and_then(|t| t.as_str()) {
                 println!("[Whisper] Transcribed: \"{}\" (lang: {})",
-                    &transcript[..transcript.len().min(80)],
+                    transcript.chars().take(80).collect::<String>(),
                     response.get("language").and_then(|l| l.as_str()).unwrap_or("?"));
                 info!("transcribe ok");
             }

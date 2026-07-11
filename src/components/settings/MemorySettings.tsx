@@ -35,6 +35,7 @@ export function MemorySettings() {
   // ── New memory form state ───────────────────────────────────
   const [newTitle, setNewTitle] = useState('')
   const [newContent, setNewContent] = useState('')
+  const [addError, setAddError] = useState<string | null>(null)
 
   // ── Edit form state ─────────────────────────────────────────
   const [editTitle, setEditTitle] = useState('')
@@ -148,7 +149,10 @@ export function MemorySettings() {
   }
 
   const handleAddMemory = () => {
-    if (!newTitle.trim() || !newContent.trim()) return
+    // Both fields are required. Give inline feedback instead of a silent no-op
+    // so the Save button never looks broken.
+    if (!newTitle.trim()) { setAddError('Add a title.'); return }
+    if (!newContent.trim()) { setAddError('Add some details.'); return }
     useMemoryStore.getState().addMemory({
       type: 'user',
       title: newTitle.trim().substring(0, 60),
@@ -159,6 +163,7 @@ export function MemorySettings() {
     })
     setNewTitle('')
     setNewContent('')
+    setAddError(null)
     setAddingNew(false)
   }
 
@@ -280,7 +285,7 @@ export function MemorySettings() {
         <div className="space-y-1.5 p-2.5 rounded-lg border border-white/10 bg-white/[0.02]">
           <input
             value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
+            onChange={(e) => { setNewTitle(e.target.value); if (addError) setAddError(null) }}
             placeholder="What should I remember?"
             maxLength={60}
             className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none focus:border-white/20"
@@ -288,23 +293,30 @@ export function MemorySettings() {
           />
           <textarea
             value={newContent}
-            onChange={(e) => setNewContent(e.target.value)}
-            placeholder="Details..."
+            onChange={(e) => { setNewContent(e.target.value); if (addError) setAddError(null) }}
+            placeholder="Details… (required)"
             rows={2}
             className="w-full px-2 py-1 rounded bg-white/5 border border-white/10 text-[0.65rem] text-gray-300 placeholder-gray-600 focus:outline-none resize-none"
           />
+          {addError && (
+            <p className="text-[0.55rem] text-red-400 px-0.5">{addError}</p>
+          )}
           <div className="flex gap-1.5">
-            <button onClick={handleAddMemory} className="flex items-center gap-1 px-2 py-0.5 rounded bg-green-500/20 text-green-400 text-[0.6rem] hover:bg-green-500/30">
+            <button
+              onClick={handleAddMemory}
+              disabled={!newTitle.trim() || !newContent.trim()}
+              className="flex items-center gap-1 px-2 py-0.5 rounded bg-green-500/20 text-green-400 text-[0.6rem] hover:bg-green-500/30 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-green-500/20"
+            >
               <Check size={10} /> Save
             </button>
-            <button onClick={() => { setAddingNew(false); setNewTitle(''); setNewContent('') }} className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 text-gray-400 text-[0.6rem] hover:bg-white/10">
+            <button onClick={() => { setAddingNew(false); setNewTitle(''); setNewContent(''); setAddError(null) }} className="flex items-center gap-1 px-2 py-0.5 rounded bg-white/5 text-gray-400 text-[0.6rem] hover:bg-white/10">
               <X size={10} /> Cancel
             </button>
           </div>
         </div>
       ) : (
         <button
-          onClick={() => setAddingNew(true)}
+          onClick={() => { setAddError(null); setAddingNew(true) }}
           className="w-full flex items-center justify-center gap-1 py-1.5 rounded-lg bg-gray-50 dark:bg-white/[0.03] border border-gray-300 dark:border-white/10 text-[0.6rem] text-gray-500 hover:text-gray-300 hover:border-white/20 transition-colors"
         >
           <Plus size={10} /> Add Memory
