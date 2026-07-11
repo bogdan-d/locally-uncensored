@@ -148,9 +148,36 @@ mod chunked {
     }
 }
 
+/// Test-only kill switch for the OS keychain. A rebuilt ad-hoc-signed app gets a
+/// fresh code-signing hash, so macOS re-prompts for the login password on the
+/// first keychain read after every rebuild — which stalls unattended
+/// rebuild→open test loops. When `LU_NO_KEYCHAIN` is set (env var, or a
+/// `~/.lu-no-keychain` marker file), the secret commands report the keychain as
+/// unavailable; the frontend adapters (supabase.ts session, providerStore keys)
+/// then latch to their localStorage path and never touch the keychain, so no
+/// password prompt appears. A shipped build never triggers this — nothing
+/// creates the marker and no installer sets the env var.
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn keychain_disabled() -> bool {
+    if let Some(v) = std::env::var_os("LU_NO_KEYCHAIN") {
+        if !v.is_empty() {
+            return true;
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        if std::path::Path::new(&home).join(".lu-no-keychain").exists() {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[tauri::command]
 pub fn secret_set(account: String, value: String) -> Result<(), String> {
+    if keychain_disabled() {
+        return Err("keychain unavailable (LU_NO_KEYCHAIN test mode)".into());
+    }
     // An empty value means "no key" — delete rather than store an empty secret,
     // so a cleared key never lingers in the vault.
     if value.is_empty() {
@@ -162,12 +189,18 @@ pub fn secret_set(account: String, value: String) -> Result<(), String> {
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[tauri::command]
 pub fn secret_get(account: String) -> Result<Option<String>, String> {
+    if keychain_disabled() {
+        return Err("keychain unavailable (LU_NO_KEYCHAIN test mode)".into());
+    }
     chunked::get(&account)
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 #[tauri::command]
 pub fn secret_delete(account: String) -> Result<(), String> {
+    if keychain_disabled() {
+        return Err("keychain unavailable (LU_NO_KEYCHAIN test mode)".into());
+    }
     chunked::delete(&account)
 }
 

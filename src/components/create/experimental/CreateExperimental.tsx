@@ -31,21 +31,30 @@ function CreateExperimentalInner() {
   const backend = useCreateStore((s) => s.backend)
   const { modelLoadError, connected, comfyOnCpu } = useCreateExp()
 
-  const [pinnedId, setPinnedId] = useState<string | null>(null)
+  const [shownId, setShownId] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [maskOpen, setMaskOpen] = useState(false)
   const [lightbox, setLightbox] = useState<GalleryItem | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
 
-  // When a fresh generation lands on top, drop any pinned selection so the
-  // newest result shows.
-  const prevTop = useRef<string | undefined>(undefined)
+  // David 2026-07-11: the Stage starts EMPTY and never auto-surfaces a persisted
+  // gallery item — not on mount, not on a mode/intent switch. It fills only on an
+  // explicit pick (a gallery tile, or a result's "Edit" action) or a fresh
+  // generation made in THIS session. Seed prevTop with whatever is already on top
+  // so a persisted item is never mistaken for a just-made result; only a genuinely
+  // new top id (an in-session generation) auto-shows.
+  const prevTop = useRef<string | undefined>(gallery[0]?.id)
   useEffect(() => {
     const top = gallery[0]?.id
-    if (top && top !== prevTop.current) { setPinnedId(null); prevTop.current = top }
+    if (top && top !== prevTop.current) { setShownId(top); prevTop.current = top }
   }, [gallery])
 
-  const displayed = (pinnedId ? gallery.find((g) => g.id === pinnedId) : undefined) ?? gallery[0]
+  // Switching intent/mode returns the Stage to empty — the newest gallery item
+  // must not reappear just because the axis changed.
+  const intent = useCreateStore((s) => s.intent())
+  useEffect(() => { setShownId(null) }, [intent])
+
+  const displayed = shownId ? gallery.find((g) => g.id === shownId) : undefined
   const banner = error ?? modelLoadError
 
   // Pull a finished result back in as the working source (ImageRef). Needed
@@ -73,13 +82,12 @@ function CreateExperimentalInner() {
   // InputSlot's "pick from gallery" strip, drag&drop, the file picker, or a
   // result's "Edit" action. While an op intent owns the stage, clicking a
   // gallery tile opens the Lightbox (view it, videos play) instead of
-  // pinning into a stage that can't display it.
-  const intent = useCreateStore((s) => s.intent())
+  // showing it in a stage that can't display it.
   const openGalleryItem = useCallback((id: string) => {
     const item = useCreateStore.getState().gallery.find((g) => g.id === id)
     if (!item) return
     if (INTENT_MAP[intent].needsSource) setLightbox(item)
-    else setPinnedId(id)
+    else setShownId(id)
   }, [intent])
 
   return (
@@ -137,7 +145,7 @@ function CreateExperimentalInner() {
           <MaskEditor open={maskOpen} onClose={() => setMaskOpen(false)} />
         </div>
 
-        <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={pinnedId} onSelect={openGalleryItem} />
+        <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={shownId} onSelect={openGalleryItem} />
       </div>
 
       <Lightbox item={lightbox} onClose={() => setLightbox(null)} />

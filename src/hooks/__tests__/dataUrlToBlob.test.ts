@@ -31,4 +31,10 @@ describe('dataUrlToBlob', () => {
     const blob = dataUrlToBlob(`data:;base64,${btoa('x')}`)
     expect(blob.type).toBe('application/octet-stream')
   })
+
+  it('throws on a blob: URL instead of silently making a text blob (mask 415 bug)', () => {
+    // A blob: url slipped through as a mask ref once and got parsed into a text
+    // blob of the url string, which the server 415'd. Guard fails loudly now.
+    expect(() => dataUrlToBlob('blob:http://localhost/abc-123')).toThrow(/data: URL/)
+  })
 })

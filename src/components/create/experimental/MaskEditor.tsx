@@ -11,6 +11,15 @@ import { Slider } from '../ui/Slider'
 import { Button } from '../ui/Button'
 import { cn } from '../ui/cn'
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result as string)
+    r.onerror = reject
+    r.readAsDataURL(blob)
+  })
+}
+
 export function MaskEditor({ open, onClose }: { open: boolean; onClose: () => void }) {
   const source = useCreateStore((s) => s.source)
   // Opened without a source, nothing mounts below — and onClose only exists
@@ -182,13 +191,18 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
     const eng = engineRef.current!
     if (!eng.hasPaint()) { setMask(null); onClose(); return }
     const blob = await eng.exportMaskBlob()
+    // ImageRef.url must be a DATA url, never a blob: url. The cloud submit
+    // stages the mask through dataUrlToBlob() (no fetch — the app CSP blocks
+    // connect-src for blob:/data:), which turns a blob: url into a text blob
+    // and 415s the upload ("unsupported image format"). A data url round-trips.
+    const url = await blobToDataUrl(blob)
     // Cloud sessions may have no ComfyUI to stage into — the cloud path
-    // re-uploads from the blob URL at submit time (filename stays '').
+    // re-uploads from the data url at submit time (filename stays '').
     const filename =
       useCreateStore.getState().backend === 'cloud'
         ? ''
         : await uploadImage(new File([blob], 'mask.png', { type: 'image/png' }))
-    const ref: ImageRef = { filename, url: URL.createObjectURL(blob), width: source.width, height: source.height }
+    const ref: ImageRef = { filename, url, width: source.width, height: source.height }
     setMask(ref)
     onClose()
   }

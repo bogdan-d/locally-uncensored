@@ -33,6 +33,12 @@ import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 // (rightly) has no data: entry, so fetching a data URL throws "Load failed"
 // and killed every source-needing op before the upload even started.
 export function dataUrlToBlob(dataUrl: string): Blob {
+  // A blob:/http(s) url here means an ImageRef broke the "url is always a data
+  // url" invariant. Parsing it as a data url silently yields a text blob the
+  // server 415s ("unsupported image format") — fail loudly at the source.
+  if (!dataUrl.startsWith('data:')) {
+    throw new Error(`dataUrlToBlob expects a data: URL, got "${dataUrl.slice(0, 16)}…"`)
+  }
   const comma = dataUrl.indexOf(',')
   const meta = dataUrl.slice(5, comma)
   const data = dataUrl.slice(comma + 1)
