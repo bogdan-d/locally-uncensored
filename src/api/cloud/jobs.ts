@@ -58,12 +58,18 @@ export interface CloudMe {
   }
 }
 
-/** Stage a source image or mask; returns the render-inputs storage path. */
+/** Stage a source image or mask; returns the render-inputs storage path.
+ *  Sends the raw bytes (role in the query) rather than multipart/form-data:
+ *  WKWebView's fetch fails a cross-origin FormData(Blob) body with a bare
+ *  "Load failed", which broke every source-needing op (edit/removebg/eraser/
+ *  upscale/animate). An ArrayBuffer body serialises fine. */
 export async function uploadInput(file: Blob, role: 'source' | 'mask'): Promise<string> {
-  const form = new FormData()
-  form.append('file', file, role === 'mask' ? 'mask.png' : 'source.png')
-  form.append('role', role)
-  const res = await cloudFetch('/api/jobs/upload', { method: 'POST', body: form })
+  const body = await file.arrayBuffer()
+  const res = await cloudFetch(`/api/jobs/upload?role=${role}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream' },
+    body,
+  })
   const { path } = await jsonOrError<{ path: string }>(res)
   return path
 }
