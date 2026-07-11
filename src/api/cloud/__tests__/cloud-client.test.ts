@@ -95,14 +95,16 @@ describe('jobs wrappers', () => {
     expect(JSON.parse(String(init.body)).model).toBe('flux-schnell')
   })
 
-  it('uploadInput sends multipart form-data with the role and returns the path', async () => {
+  it('uploadInput sends raw bytes with the role in the query and returns the path', async () => {
     fetchMock.mockResolvedValue(jsonRes({ path: 'uid/abc.png', role: 'source' }, 201))
     const path = await uploadInput(new Blob(['x']), 'source')
     expect(path).toBe('uid/abc.png')
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe(`${CLOUD_BASE}/api/jobs/upload`)
-    expect(init.body).toBeInstanceOf(FormData)
-    expect((init.body as FormData).get('role')).toBe('source')
+    expect(url).toBe(`${CLOUD_BASE}/api/jobs/upload?role=source`)
+    // WKWebView fails cross-origin FormData(Blob) bodies — the contract is a
+    // bare ArrayBuffer with the octet-stream content type.
+    expect(init.body).toBeInstanceOf(ArrayBuffer)
+    expect((init.headers as Headers).get('content-type')).toBe('application/octet-stream')
   })
 
   it('getJob unwraps { job } and encodes the id', async () => {
