@@ -207,9 +207,12 @@ export function cloudSwitch(page: Page) {
   return page.getByRole('switch', { name: /^Cloud$/i })
 }
 
-/** Sign in through the CloudGateModal that the header switch opens. */
+/** Sign in through the CloudGateModal that the header switch opens. The
+ *  signed-out gate is a stepped flow: hero → plans → in-app sign-in. */
 export async function signInViaGate(page: Page): Promise<void> {
   await cloudSwitch(page).click()
+  await page.getByRole('button', { name: /Get LU Cloud/i }).click()
+  await page.getByRole('button', { name: /Already got an account/i }).click()
   await page.getByPlaceholder('Email').fill('qa@lu-labs.ai')
   await page.getByPlaceholder('Password').fill('e2e-password')
   await page.getByRole('button', { name: /^Sign in$/i }).click()
