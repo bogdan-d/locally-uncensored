@@ -409,6 +409,37 @@ describe('OpenAIProvider', () => {
       vi.restoreAllMocks()
     })
 
+    it('clamps max_tokens to the model context window (Bug 5)', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        }), { status: 200 })
+      )
+      // gpt-4o context = 128000; an absurd budget must be clamped into the window.
+      await provider.chatWithTools('gpt-4o', [{ role: 'user', content: 'hi' }], [], { maxTokens: 999999 })
+      const sent = JSON.parse((fetchSpy.mock.calls[0][1] as any).body)
+      expect(sent.max_tokens).toBeGreaterThan(0)
+      expect(sent.max_tokens).toBeLessThanOrEqual(128000)
+      vi.restoreAllMocks()
+    })
+
+    it('sends a bounded max_tokens even when the budget is unset (Bug 5)', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+        }), { status: 200 })
+      )
+      // No options → previously omitted max_tokens, so DeepInfra over-defaulted the
+      // completion and 400'd. Now it must send a positive, in-window budget.
+      await provider.chatWithTools('gpt-4o', [{ role: 'user', content: 'hi' }], [])
+      const sent = JSON.parse((fetchSpy.mock.calls[0][1] as any).body)
+      expect(sent.max_tokens).toBeGreaterThan(0)
+      expect(sent.max_tokens).toBeLessThanOrEqual(128000)
+      vi.restoreAllMocks()
+    })
+
     it('handles response with no tool calls', async () => {
       const provider = new OpenAIProvider(makeConfig())
       vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(

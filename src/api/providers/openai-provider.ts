@@ -171,6 +171,37 @@ export class OpenAIProvider implements ProviderClient {
     return h
   }
 
+  /**
+   * Bound `max_tokens` so prompt + completion can never exceed the model's real
+   * context window. Some cloud backends (DeepInfra) otherwise default the
+   * completion budget to nearly the whole window and then 400 the moment the
+   * real prompt (agent system prompt + tool definitions) tips it over —
+   * surfaced as "[network] inference upstream error" on tool turns (Bug 5,
+   * 2026-07-11). Under-estimating the context is safe (a shorter cap); we never
+   * over-request. Runs for every request, so an UNSET budget (settings.maxTokens
+   * = 0) sends the full safe remainder instead of letting the server over-default.
+   */
+  private async applyMaxTokens(
+    model: string,
+    body: Record<string, any>,
+    options?: ChatOptions,
+  ): Promise<void> {
+    const requested = options?.maxTokens && options.maxTokens > 0 ? options.maxTokens : 0
+    let ctxLen = 0
+    try { ctxLen = await this.getContextLength(model) } catch { ctxLen = 0 }
+    if (ctxLen <= 0) {
+      // No context info at all — honor an explicit request, else a safe default.
+      body.max_tokens = requested || 4096
+      return
+    }
+    const RESERVE = 512
+    const promptChars =
+      JSON.stringify(body.messages || '').length + JSON.stringify(body.tools || '').length
+    const promptTokens = Math.ceil(promptChars / 4)
+    const headroom = Math.max(256, ctxLen - promptTokens - RESERVE)
+    body.max_tokens = requested > 0 ? Math.min(requested, headroom) : headroom
+  }
+
   async *chatStream(
     model: string,
     messages: ChatMessage[],
@@ -184,7 +215,7 @@ export class OpenAIProvider implements ProviderClient {
 
     if (options?.temperature !== undefined) body.temperature = options.temperature
     if (options?.topP !== undefined) body.top_p = options.topP
-    if (options?.maxTokens) body.max_tokens = options.maxTokens
+    await this.applyMaxTokens(model, body, options)
     // Reasoning-model knob (o1, o3, gpt-5-thinking, etc.). Toggle OFF →
     // "minimal" (least reasoning the API allows). Toggle ON → "high".
     // Non-reasoning models simply ignore this field; older APIs may 400 on
@@ -334,7 +365,7 @@ export class OpenAIProvider implements ProviderClient {
 
     if (options?.temperature !== undefined) body.temperature = options.temperature
     if (options?.topP !== undefined) body.top_p = options.topP
-    if (options?.maxTokens) body.max_tokens = options.maxTokens
+    await this.applyMaxTokens(model, body, options)
     // Same reasoning_effort gate as chatStream.
     if (options?.thinking === true) body.reasoning_effort = 'high'
     else if (options?.thinking === false) body.reasoning_effort = 'minimal'
