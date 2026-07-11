@@ -56,6 +56,11 @@ export function ChatView() {
   const ragEnabled = useRAGStore((s) =>
     activeConversationId ? s.ragEnabled[activeConversationId] ?? false : false
   )
+  // Docs (RAG) needs a LOCAL embeddings backend (built-in llama-server or
+  // Ollama). In global Cloud mode there is none, so mirror the web app and
+  // hide the Docs button rather than offer an upload that fails with
+  // "Ollama is not running". Local mode keeps it (built-in engine embeds).
+  const appMode = useSettingsStore((s) => s.settings.appMode)
   const isAgentActive = useAgentModeStore((s) =>
     activeConversationId ? s.agentModeActive[activeConversationId] ?? false : false
   )
@@ -332,11 +337,13 @@ export function ChatView() {
                 pendingApproval={pendingApproval}
                 onApprove={approveToolCall}
                 onReject={rejectToolCall}
-                onAttachDocs={() => setRagPanelOpen(true)}
+                onAttachDocs={appMode !== 'cloud' ? () => setRagPanelOpen(true) : undefined}
                 composerModel={<ModelSelector openUpward />}
                 composerActions={
                   <>
-                    {/* Documents (RAG) */}
+                    {/* Documents (RAG) — local-embeddings only, so hide in
+                        Cloud mode (web parity). */}
+                    {appMode !== 'cloud' && (
                     <button
                       onClick={() => setRagPanelOpen(!ragPanelOpen)}
                       className={
@@ -358,6 +365,7 @@ export function ChatView() {
                         </span>
                       )}
                     </button>
+                    )}
 
                     {/* Plugins (Chat Tools + Caveman + Personas) */}
                     <PluginsDropdown openUpward />
