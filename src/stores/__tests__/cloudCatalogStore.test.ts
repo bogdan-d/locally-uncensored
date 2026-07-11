@@ -7,6 +7,9 @@ import {
   isEditCapable,
   cloudMediaLive,
   runCredits,
+  t2vModels,
+  i2vModels,
+  modelForOp,
 } from '../cloudCatalogStore'
 import { CLOUD_MODEL_SEED } from '../../lib/render/cloud-models'
 import type { CloudCatalog } from '../../api/cloud/catalog'
@@ -127,6 +130,43 @@ describe('cloudCatalogStore', () => {
     it('unknown model falls back to the quota figure', () => {
       useCloudCatalogStore.getState().setCatalog(serverCatalog)
       expect(runCredits('image', 'generate', 'not-in-catalog', undefined, 321)).toBe(321)
+    })
+  })
+
+  describe('video capability flags (t2v / i2v)', () => {
+    const mixed: CloudCatalog = {
+      ...serverCatalog,
+      models: [
+        { id: 'flux-9', label: 'Flux 9', kind: 'image', edit: true },
+        { id: 'dual', label: 'Dual', kind: 'video', t2v: true, i2v: true },
+        { id: 't2v-only', label: 'T2V only', kind: 'video', t2v: true, i2v: false },
+        { id: 'legacy', label: 'Legacy (no flags)', kind: 'video' },
+      ],
+    }
+
+    it('every seed clip model does both t2v and i2v', () => {
+      const vids = CLOUD_MODEL_SEED.filter((m) => m.kind === 'video')
+      expect(vids.length).toBeGreaterThan(0)
+      expect(vids.every((m) => m.t2v !== false && m.i2v !== false)).toBe(true)
+    })
+
+    it('i2vModels excludes an i2v:false model; an absent flag stays capable', () => {
+      useCloudCatalogStore.getState().setCatalog(mixed)
+      expect(i2vModels().map((m) => m.id)).toEqual(['dual', 'legacy'])
+      expect(t2vModels().map((m) => m.id)).toEqual(['dual', 't2v-only', 'legacy'])
+    })
+
+    it('modelForOp coerces an incapable pick onto the op’s first valid model', () => {
+      useCloudCatalogStore.getState().setCatalog(mixed)
+      // animate with a t2v-only pick → first i2v-capable clip model
+      expect(modelForOp('video', 'animate', 't2v-only')).toBe('dual')
+      // a capable pick is kept untouched
+      expect(modelForOp('video', 'animate', 'legacy')).toBe('legacy')
+      expect(modelForOp('video', 'generate', 't2v-only')).toBe('t2v-only')
+      // edit still coerces onto the edit-capable image model
+      expect(modelForOp('image', 'edit', 'dual')).toBe('flux-9')
+      // a non-video, non-edit op keeps the pick
+      expect(modelForOp('image', 'generate', 'flux-9')).toBe('flux-9')
     })
   })
 })

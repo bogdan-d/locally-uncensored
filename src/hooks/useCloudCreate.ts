@@ -24,8 +24,7 @@ import {
 } from '../api/cloud/jobs'
 import {
   defaultCloudModel,
-  defaultEditModel,
-  isEditCapable,
+  modelForOp,
   cloudMediaLive,
 } from '../stores/cloudCatalogStore'
 import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
@@ -71,10 +70,9 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     const { kind, op } = intentToJob(intent)
     const picked =
       (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind).id
-    // Edit needs an i2i-capable model; the picker may still hold a t2i-only
-    // one the user chose for a generate — fall back so the submit never 400s.
-    const model =
-      op === 'edit' && !isEditCapable(picked) ? (defaultEditModel()?.id ?? picked) : picked
+    // Coerce a leftover/incapable pick onto a model that can run this op
+    // (edit→i2i, animate→i2v, video→t2v) so the submit never 400s.
+    const model = modelForOp(kind, op, picked)
 
     s.setError(null)
     if (!cloudMediaLive()) {

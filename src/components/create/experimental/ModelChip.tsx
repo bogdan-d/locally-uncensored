@@ -1,5 +1,5 @@
 import { useCreateStore } from '../../../stores/createStore'
-import { useCloudCatalogStore, defaultCloudModel, defaultEditModel, isEditCapable } from '../../../stores/cloudCatalogStore'
+import { useCloudCatalogStore, defaultCloudModel } from '../../../stores/cloudCatalogStore'
 import { Select, type SelectOption } from '../ui/Select'
 import { TYPE_BADGE } from './badges'
 
@@ -24,16 +24,20 @@ function CloudModelChip() {
 
   const isVideo = mode === 'video'
   const kind = isVideo ? 'video' : 'image'
-  // Edit needs a masked-img2img model (flux-dev today). Only offer the models
-  // that can actually do it — otherwise the picker lists t2i-only checkpoints
-  // that useCloudCreate silently swaps out at submit, so the user's choice was
-  // a lie. (Video: every catalog clip model is t2v+i2v, so no per-op filter.)
-  const editOnly = intent === 'edit'
-  const list = models.filter((m) => m.kind === kind && (!editOnly || m.edit))
+  // List only the models that can run the current op — otherwise the picker
+  // offers checkpoints that useCloudCreate silently swaps out at submit, so the
+  // user's choice was a lie. Edit needs masked-img2img (flux-dev); Animate needs
+  // i2v; Video needs t2v (absent flag = capable, so today's dual-capable fleet
+  // lists in full, and a future t2v-only model that sets i2v:false is excluded).
+  const list =
+    intent === 'edit' ? models.filter((m) => m.kind === 'image' && m.edit)
+    : intent === 'animate' ? models.filter((m) => m.kind === 'video' && m.i2v !== false)
+    : intent === 'video' ? models.filter((m) => m.kind === 'video' && m.t2v !== false)
+    : models.filter((m) => m.kind === kind)
   const current = (isVideo ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind)?.id || ''
-  // Reflect the model the run will really use, so a t2i model left over from
-  // the Image tab doesn't show as "selected" on an edit it can't perform.
-  const value = editOnly && !isEditCapable(current) ? (defaultEditModel()?.id ?? current) : current
+  // Reflect the model the run will really use, so a leftover pick the current op
+  // can't perform doesn't show as "selected".
+  const value = list.some((m) => m.id === current) ? current : (list[0]?.id ?? current)
 
   const options: SelectOption[] = list.map((m) => ({
     value: m.id,

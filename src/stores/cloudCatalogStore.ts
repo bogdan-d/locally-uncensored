@@ -75,6 +75,30 @@ export function defaultEditModel(): CloudModel | undefined {
   return useCloudCatalogStore.getState().models.find((m) => m.kind === 'image' && m.edit)
 }
 
+// Video models that render text-to-video (the "Video" intent) / image-to-video
+// (the "Animate Image" intent). Absent flag = capable, so a persisted catalog
+// cached before this field existed still lists every clip model; only an
+// explicit false hides a capability-restricted model from that picker.
+export function t2vModels(): CloudModel[] {
+  return useCloudCatalogStore.getState().models.filter((m) => m.kind === 'video' && m.t2v !== false)
+}
+
+export function i2vModels(): CloudModel[] {
+  return useCloudCatalogStore.getState().models.filter((m) => m.kind === 'video' && m.i2v !== false)
+}
+
+/** The model a run will really use for this op — coerces a leftover/incapable
+ *  pick onto a capable one (edit→i2i, animate→i2v, video→t2v) so submit + the
+ *  credits gate agree. Mirrors each picker's per-op filter. */
+export function modelForOp(kind: RenderKind, op: RenderOp, pickedId: string): string {
+  if (op === 'edit') return isEditCapable(pickedId) ? pickedId : (defaultEditModel()?.id ?? pickedId)
+  if (kind === 'video' && (op === 'generate' || op === 'animate')) {
+    const list = op === 'animate' ? i2vModels() : t2vModels()
+    return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? pickedId)
+  }
+  return pickedId
+}
+
 /** Credits the upcoming run draws, priced from the server catalog: per-op
  *  utility rates, per-model base/long clip rates (the long rate books from
  *  ~6.5 s, mirroring the server's mediaCredits split). Edit coerces onto the
@@ -102,8 +126,7 @@ export function runCredits(
     const rate = ops ? { removebg: ops.removebg, eraser: ops.eraser, upscale }[op] : undefined
     return rate ?? fallback
   }
-  const model =
-    op === 'edit' && !isEditCapable(pickedModel) ? (defaultEditModel()?.id ?? pickedModel) : pickedModel
+  const model = modelForOp(kind, op, pickedModel)
   const credits = cloudModelById(model)?.credits
   if (!credits) return fallback
   return kind === 'video' && seconds !== undefined && seconds >= 6.5
