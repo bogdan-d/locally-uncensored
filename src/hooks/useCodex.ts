@@ -266,6 +266,22 @@ export function useCodex() {
       codexStore.workingDirectory ||
       '.'
 
+    // Pin the tool-containment workspace to the SAME folder the model is told
+    // to use (workDir). resolveWorkspace() above only sees the agent-mode
+    // per-chat store + settings.defaultWorkspace — it MISSES the folder the
+    // Code tab's FileTree picker sets (codexStore.workingDirectory), which is
+    // the primary way to pick a repo in the Code tab. Without this, containment
+    // stayed pinned to the per-chat sandbox while the model was told to work in
+    // a real folder, so every file_list/file_read of the working dir failed
+    // with "path escapes the allowed workspace" (live cloud find, 2026-07-11).
+    if (workDir && workDir !== '.') {
+      setActiveWorkspace({
+        kind: 'folder',
+        path: workDir,
+        extraPaths: codexWorkspace && codexWorkspace.kind === 'folder' ? codexWorkspace.extraPaths : undefined,
+      })
+    }
+
     // Add instruction event
     codexStore.addEvent(convId, {
       id: uuid(), type: 'instruction', content: instruction, timestamp: Date.now(),
