@@ -11,6 +11,7 @@ import { ContextDropdown } from './ContextDropdown'
 import { SmallModelModeToggle } from './SmallModelModeToggle'
 import { RealtimeCounter } from './RealtimeCounter'
 import { PluginsDropdown } from './PluginsDropdown'
+import { ModelSelector } from '../models/ModelSelector'
 import { TypingIndicator } from './TypingIndicator'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useModelStore } from '../../stores/modelStore'
@@ -229,7 +230,6 @@ export function CodexView() {
           <TokenCounter />
           <ContextDropdown />
           <SmallModelModeToggle />
-          <PluginsDropdown />
         </div>
 
         {/* Git-missing banner (v2.5.0). Codex shells out to git for
@@ -517,6 +517,8 @@ export function CodexView() {
           onStop={stopCodex}
           isGenerating={isRunning}
           slashCommands
+          composerModel={<ModelSelector openUpward />}
+          composerActions={<PluginsDropdown openUpward />}
         />
       </div>
 

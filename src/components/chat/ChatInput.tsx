@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 import { Send, Square, Paperclip, X, Brain, Terminal } from 'lucide-react'
 import { matchAgentCommands, type AgentCommand } from '../../lib/agent-commands'
@@ -30,6 +30,17 @@ interface Props {
    * receive attachments).
    */
   onAttachDocs?: () => void
+  /**
+   * The model picker, rendered on the right of the action bar (before Send).
+   * The header no longer carries it — each surface passes an upward-opening
+   * ModelSelector so the prompt window owns the model choice (web parity).
+   */
+  composerModel?: ReactNode
+  /**
+   * View-specific action buttons (Docs · Plugins · Tools) shown in the action
+   * bar between Think and the model picker. Chat and Code pass different sets.
+   */
+  composerActions?: ReactNode
 }
 
 function fileToImageAttachment(file: File): Promise<ImageAttachment> {
@@ -45,7 +56,7 @@ function fileToImageAttachment(file: File): Promise<ImageAttachment> {
   })
 }
 
-export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject, disabled, slashCommands, onAttachDocs }: Props) {
+export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApprove, onReject, disabled, slashCommands, onAttachDocs, composerModel, composerActions }: Props) {
   const [input, setInput] = useState('')
   const [images, setImages] = useState<ImageAttachment[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
@@ -237,10 +248,10 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           they belong to. ChatView owns the Enter/Esc keyboard layer. */}
 
       <div
-        className={`relative flex flex-col rounded-lg border px-2.5 py-1 transition-colors ${
+        className={`relative flex flex-col rounded-lg border transition-colors ${
           isDragOver
             ? 'bg-blue-500/5 border-blue-500/30'
-            : 'bg-gray-50 dark:bg-white/[0.03] border-gray-200 dark:border-white/[0.06]'
+            : 'bg-gray-50 dark:bg-white/[0.03] border-gray-200 dark:border-white/[0.06] focus-within:border-gray-400 dark:focus-within:border-white/15'
         }`}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -269,65 +280,84 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
           </div>
         )}
 
-        {/* Non-image attach hint (GH #69) — the clip is images-only; PDFs, Word,
-            and text files go through the Documents panel so the model can read them. */}
-        {docHint && (
-          <div className="flex items-center gap-2 mb-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-[0.62rem] text-amber-700 dark:text-amber-300">
-            <span className="flex-1">The clip attaches images. To ask about a PDF, Word, or text file, add it in the Documents panel.</span>
-            {onAttachDocs && (
-              <button
-                onMouseDown={(e) => { e.preventDefault(); setDocHint(false); onAttachDocs() }}
-                className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 font-medium transition-colors"
-              >
-                Open Documents
-              </button>
-            )}
-            <button
-              onMouseDown={(e) => { e.preventDefault(); setDocHint(false) }}
-              className="shrink-0 text-amber-600/70 hover:text-amber-700 dark:text-amber-400/70 dark:hover:text-amber-300"
-              aria-label="Dismiss"
-            >
-              <X size={11} />
-            </button>
-          </div>
-        )}
-
-        {/* Image previews */}
-        {images.length > 0 && (
-          <div className="flex gap-1.5 mb-1.5 flex-wrap">
-            {images.map((img, i) => (
-              <div key={i} className="relative group">
-                <img
-                  src={`data:${img.mimeType};base64,${img.data}`}
-                  alt={img.name}
-                  className="w-14 h-14 object-cover rounded-lg border border-white/10"
-                />
+        {/* Prompt area — hints, image previews, then the textarea (buttons live
+            in the action bar below, web-parity two-row composer). */}
+        <div className="px-3 pt-2.5">
+          {/* Non-image attach hint (GH #69) — the clip is images-only; PDFs, Word,
+              and text files go through the Documents panel so the model can read them. */}
+          {docHint && (
+            <div className="flex items-center gap-2 mb-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20 text-[0.62rem] text-amber-700 dark:text-amber-300">
+              <span className="flex-1">The clip attaches images. To ask about a PDF, Word, or text file, add it in the Documents panel.</span>
+              {onAttachDocs && (
                 <button
-                  onClick={() => removeImage(i)}
-                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  onMouseDown={(e) => { e.preventDefault(); setDocHint(false); onAttachDocs() }}
+                  className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-800 dark:text-amber-200 font-medium transition-colors"
                 >
-                  <X size={8} />
+                  Open Documents
                 </button>
-                <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-[0.4rem] text-gray-300 text-center rounded-b-lg truncate px-0.5">
-                  {img.name}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+              )}
+              <button
+                onMouseDown={(e) => { e.preventDefault(); setDocHint(false) }}
+                className="shrink-0 text-amber-600/70 hover:text-amber-700 dark:text-amber-400/70 dark:hover:text-amber-300"
+                aria-label="Dismiss"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          )}
 
-        {/* Vision hint — a text-only model can't read the attached image.
-            Non-blocking (send still works); the runtime error is also mapped
-            to friendly copy. gthvidsten, GH Discussion #67. */}
-        {images.length > 0 && activeModel && !canSeeImages && (
-          <div className="flex items-start gap-1.5 mb-1.5 px-1 text-[0.55rem] leading-relaxed text-amber-600 dark:text-amber-400">
-            <span className="shrink-0">⚠</span>
-            <span>This model can't read images. Switch to a vision model (Gemma 4, LLaVA, Qwen-VL) to use the attachment.</span>
-          </div>
-        )}
+          {/* Image previews */}
+          {images.length > 0 && (
+            <div className="flex gap-1.5 mb-1.5 flex-wrap">
+              {images.map((img, i) => (
+                <div key={i} className="relative group">
+                  <img
+                    src={`data:${img.mimeType};base64,${img.data}`}
+                    alt={img.name}
+                    className="w-14 h-14 object-cover rounded-lg border border-white/10"
+                  />
+                  <button
+                    onClick={() => removeImage(i)}
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <X size={8} />
+                  </button>
+                  <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-[0.4rem] text-gray-300 text-center rounded-b-lg truncate px-0.5">
+                    {img.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
-        {/* Input row */}
-        <div className="flex items-end gap-2">
+          {/* Vision hint — a text-only model can't read the attached image.
+              Non-blocking (send still works); the runtime error is also mapped
+              to friendly copy. gthvidsten, GH Discussion #67. */}
+          {images.length > 0 && activeModel && !canSeeImages && (
+            <div className="flex items-start gap-1.5 mb-1.5 px-1 text-[0.55rem] leading-relaxed text-amber-600 dark:text-amber-400">
+              <span className="shrink-0">⚠</span>
+              <span>This model can't read images. Switch to a vision model (Gemma 4, LLaVA, Qwen-VL) to use the attachment.</span>
+            </div>
+          )}
+
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => updateInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={() => setTimeout(() => setCmdMenu([]), 120)}
+            onPaste={handlePaste}
+            placeholder={disabled ? "Unavailable" : isDragOver ? "Drop images here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
+            disabled={disabled}
+            rows={1}
+            className="w-full bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[0.75rem] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"
+          />
+        </div>
+
+        {/* Action bar — attach · voice · think · view actions · model · send.
+            Same in Chat, Code and Remote; each surface passes its own
+            composerActions + composerModel (David 2026-07-11, web parity). */}
+        <div className="flex items-center gap-1 px-2 py-1.5 border-t border-gray-200 dark:border-white/[0.05] flex-wrap">
           {/* Clip button */}
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -359,19 +389,6 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             disabled={isGenerating}
           />
 
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => updateInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onBlur={() => setTimeout(() => setCmdMenu([]), 120)}
-            onPaste={handlePaste}
-            placeholder={disabled ? "Unavailable" : isDragOver ? "Drop images here..." : isTranscribing ? "Transcribing..." : isVoiceRecording ? "Recording..." : "Message..."}
-            disabled={disabled}
-            rows={1}
-            className="flex-1 bg-transparent resize-none text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none text-[0.75rem] leading-relaxed max-h-[200px] disabled:opacity-50 scrollbar-thin"
-          />
-
           {/* Think toggle ('always'-models render it locked on) */}
           <button
             onClick={() => {
@@ -395,6 +412,14 @@ export function ChatInput({ onSend, onStop, isGenerating, pendingApproval, onApp
             <Brain size={11} />
             <span>Think</span>
           </button>
+
+          {/* View-specific actions (Docs · Plugins · Tools) */}
+          {composerActions}
+
+          <div className="flex-1" />
+
+          {/* Model picker — opens upward from the composer */}
+          {composerModel}
 
           {isGenerating ? (
             <motion.button

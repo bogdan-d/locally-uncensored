@@ -5,8 +5,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useChatStore } from '../../stores/chatStore'
 import { useCompareStore } from '../../stores/compareStore'
 import { useModelStore } from '../../stores/modelStore'
-import { ModelSelector } from '../models/ModelSelector'
-import { MemoryDebugToggle } from '../chat/MemoryDebugPanel'
+import { useProviderStore } from '../../stores/providerStore'
 import { UpdateBadge } from './UpdateBadge'
 import { DownloadBadge } from './DownloadBadge'
 import { CloudSwitch } from '../cloud/CloudSwitch'
@@ -27,12 +26,30 @@ export function Header() {
   // the model with "does not support (chat|completion|generate)". Offers a
   // one-click refresh that re-pulls the model (progress tracked in DownloadBadge).
   const [staleError, setStaleError] = useState<{ model: string; message: string } | null>(null)
-  const { pullModel, isPullingModel } = useModels()
+  const { pullModel, isPullingModel, fetchModels } = useModels()
   const healthStaleModels = useModelHealthStore((s) => s.staleModels)
   const addStaleToHealth = useModelHealthStore((s) => s.setStaleModels)
   const markHealthFresh = useModelHealthStore((s) => s.markFresh)
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const isCreateView = currentView === 'create'
+
+  // App-level model bootstrap. This used to ride on the header ModelSelector,
+  // which sat here always-mounted; the picker has moved into the composer
+  // (mounted only inside an active chat), so the header now owns the fetch.
+  // Without it a fresh start never populates the list — and setModels' auto-
+  // select of the first chat model never fires, so `activeModel` stays null and
+  // New Chat dead-ends on the "pick a model" page. Refetch on provider changes
+  // too (enable LM Studio / add a key in Settings), mirroring the old picker.
+  useEffect(() => { fetchModels() }, [fetchModels])
+  useEffect(() => {
+    const unsub = useProviderStore.subscribe((state, prev) => {
+      const changed = (Object.keys(state.providers) as Array<keyof typeof state.providers>)
+        .some((id) => state.providers[id]?.enabled !== prev.providers[id]?.enabled
+          || state.providers[id]?.baseUrl !== prev.providers[id]?.baseUrl)
+      if (changed) fetchModels()
+    })
+    return () => unsub()
+  }, [fetchModels])
 
   // Check if active model is an Ollama model
   const isOllamaModel = activeModel ? getProviderIdFromModel(activeModel) === 'ollama' : false
@@ -197,51 +214,39 @@ export function Header() {
           live here has moved INTO the dropdown — each model row in
           `ModelSelector` has its own load/unload toggle next to the name. */}
       <div className="lg:absolute lg:left-1/2 lg:-translate-x-1/2 flex items-center justify-center gap-2 min-w-0 ">
-        {/* The redesigned Create surface owns its own controls (IntentBar/
-            Composer) — the header center stays empty there, like the chat
-            model picker does not apply to Create. */}
-        {currentView === 'create' ? null : (
-          <>
-            <ModelSelector />
-            {/* Lichtschalter (load/unload into VRAM) now lives per-row inside the
-            ModelSelector dropdown — the header center stays just the picker. */}
-            {/* Memory — moved here from the chat/code/agent toolbars (David
-            2026-06-06). One brain icon next to the model picker → editable
-            memory popover (view / add / delete the injected context). */}
-            <MemoryDebugToggle />
-
-            {isOllamaModel && staleError && (
-              <div
-                className="ml-1.5 flex items-center gap-1 px-1.5 py-[2px] rounded-md bg-amber-500/10 border border-amber-400/30 text-[0.6rem]"
-                title={staleError.message}
-              >
-                <span className="text-amber-600 dark:text-amber-300 font-medium">
-                  stale — refresh?
-                </span>
-                <button
-                  onClick={handleRefreshStale}
-                  disabled={isRefreshing}
-                  className="flex items-center gap-0.5 px-1 py-[1px] rounded text-amber-700 dark:text-amber-200 hover:bg-amber-500/20 disabled:opacity-50 transition-colors"
-                  title={`Re-pull ${staleError.model}`}
-                >
-                  {isRefreshing ? (
-                    <Loader2 size={9} className="animate-spin" />
-                  ) : (
-                    <RefreshCw size={9} />
-                  )}
-                  <span>Refresh</span>
-                </button>
-                <button
-                  onClick={() => setStaleError(null)}
-                  className="flex items-center p-[1px] rounded text-amber-600/70 hover:text-amber-800 hover:bg-amber-500/20 transition-colors"
-                  title="Dismiss"
-                  aria-label="Dismiss"
-                >
-                  <X size={9} />
-                </button>
-              </div>
-            )}
-          </>
+        {/* Model picker + Memory moved out of the header into the composer /
+            top-right (web parity, David 2026-07-11). Only the stale-manifest
+            warning still surfaces here — chat/code only, never Create. */}
+        {currentView !== 'create' && isOllamaModel && staleError && (
+          <div
+            className="flex items-center gap-1 px-1.5 py-[2px] rounded-md bg-amber-500/10 border border-amber-400/30 text-[0.6rem]"
+            title={staleError.message}
+          >
+            <span className="text-amber-600 dark:text-amber-300 font-medium">
+              stale — refresh?
+            </span>
+            <button
+              onClick={handleRefreshStale}
+              disabled={isRefreshing}
+              className="flex items-center gap-0.5 px-1 py-[1px] rounded text-amber-700 dark:text-amber-200 hover:bg-amber-500/20 disabled:opacity-50 transition-colors"
+              title={`Re-pull ${staleError.model}`}
+            >
+              {isRefreshing ? (
+                <Loader2 size={9} className="animate-spin" />
+              ) : (
+                <RefreshCw size={9} />
+              )}
+              <span>Refresh</span>
+            </button>
+            <button
+              onClick={() => setStaleError(null)}
+              className="flex items-center p-[1px] rounded text-amber-600/70 hover:text-amber-800 hover:bg-amber-500/20 transition-colors"
+              title="Dismiss"
+              aria-label="Dismiss"
+            >
+              <X size={9} />
+            </button>
+          </div>
         )}
       </div>
 

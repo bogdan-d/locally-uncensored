@@ -351,7 +351,10 @@ function LoadToggle({ loaded, busy, disabled, onClick }: {
 
 // ── Component ─────────────────────────────────────────────────
 
-export function ModelSelector() {
+// `openUpward` flips the dropdown to open above the trigger, right-aligned —
+// used when the picker lives in the composer action bar (bottom of the screen)
+// instead of the header. Header usage keeps the default downward/centered menu.
+export function ModelSelector({ openUpward = false }: { openUpward?: boolean } = {}) {
   const { models, activeModel, setActiveModel, fetchModels } = useModels()
   const isModelLoading = useModelStore((s) => s.isModelLoading)
   const [open, setOpen] = useState(false)
@@ -601,10 +604,12 @@ export function ModelSelector() {
       <AnimatePresence>
         {open && (
           <motion.div
-            className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 w-72 rounded-lg overflow-hidden z-50 bg-[#363636] border border-white/[0.08] shadow-2xl shadow-black/50"
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            className={`absolute w-72 rounded-lg overflow-hidden z-50 bg-[#363636] border border-white/[0.08] shadow-2xl shadow-black/50 ${
+              openUpward ? 'bottom-full mb-1.5 right-0' : 'top-full mt-1.5 left-1/2 -translate-x-1/2'
+            }`}
+            initial={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            exit={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
             transition={{ duration: 0.12, ease: 'easeOut' }}
           >
             {/* Bug Q v2.4.7 — surface "Start LM Studio Server" inline when

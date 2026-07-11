@@ -14,6 +14,8 @@ import { ErrorBoundary } from '../ui/ErrorBoundary'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { FileText, ChevronDown, Download, Wrench, Radio, RefreshCw, X } from 'lucide-react'
 import { PluginsDropdown } from './PluginsDropdown'
+import { ModelSelector } from '../models/ModelSelector'
+import { MemoryDebugToggle } from './MemoryDebugPanel'
 import { TokenCounter } from './TokenCounter'
 import { ContextDropdown } from './ContextDropdown'
 import { SmallModelModeToggle } from './SmallModelModeToggle'
@@ -170,41 +172,10 @@ export function ChatView() {
               {chatMode === 'codex' ? (
                 <CodexView />
               ) : (<>
-              {/* Top bar — compact (LU mode) */}
+              {/* Top bar — slim: session/meta controls only. Docs · Plugins ·
+                  Tools + the model picker moved into the composer action bar
+                  (web parity, David 2026-07-11); Memory stands alone top-right. */}
               <div className="flex items-center gap-1.5 px-2 pt-0.5">
-                {/* Left: Tools Active dropdown (only when agent is active) */}
-                {isAgentActive && (
-                  <div className="relative">
-                    <button
-                      onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
-                      className="flex items-center gap-1 px-2 py-0.5 rounded border border-gray-200 dark:border-white/[0.06] text-gray-500 hover:border-gray-400 dark:hover:border-white/15 transition-colors text-[0.55rem]"
-                    >
-                      <Wrench size={9} className="text-green-400" />
-                      <span>Tools</span>
-                      <ChevronDown size={8} className={`transition-transform ${toolsDropdownOpen ? 'rotate-180' : ''}`} />
-                    </button>
-                    {/* Image-tool discovery noti dot — signals "open Tools" on
-                        image-gen-capable hardware; clears with the dropdown "1"
-                        (same seen flag). Purely visual. */}
-                    {imageToolNoti && (
-                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-purple-500 ring-2 ring-gray-100 dark:ring-[#141414] pointer-events-none" />
-                    )}
-                    {toolsDropdownOpen && (
-                      <>
-                        <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
-                        <div className="absolute left-0 top-full mt-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
-                          <PermissionOverrideBar />
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {/* Agent Mode — sits directly to the right of the Tools toggle.
-                    Tools only shows when agent is active, so when agent is OFF
-                    this Agent button occupies the Tools spot; when ON, Tools
-                    appears and Agent is immediately to its right. The button
-                    (in AgentModeToggle) is styled the same size as Tools. */}
                 <AgentModeToggle />
                 <AgentWorkspaceBadge />
 
@@ -221,6 +192,9 @@ export function ChatView() {
                     is active; plain chat has no tool calls to lean out. */}
                 {isAgentActive && <SmallModelModeToggle />}
 
+                {/* Memory — standalone, top-right (moved out of the header model
+                    picker; David 2026-07-11). View / add / delete injected context. */}
+                <MemoryDebugToggle />
 
                 {/* Export */}
                 <div className="relative">
@@ -259,34 +233,6 @@ export function ChatView() {
                     </>
                   )}
                 </div>
-
-                {/* Plugins dropdown (Caveman + Personas) */}
-                <PluginsDropdown />
-
-                {/* Documents (RAG) */}
-                <button
-                  onClick={() => setRagPanelOpen(!ragPanelOpen)}
-                  className={
-                    'flex items-center gap-1 px-2 py-0.5 rounded border transition-colors text-[0.55rem] ' +
-                    (ragPanelOpen || ragEnabled
-                      ? 'border-green-500/30 text-green-400'
-                      : 'border-gray-200 dark:border-white/[0.06] hover:border-gray-400 dark:hover:border-white/15 text-gray-500')
-                  }
-                  title="Document Chat (RAG)"
-                >
-                  <FileText size={10} />
-                  <span>Docs</span>
-                  {docCount > 0 && (
-                    <span className={
-                      'min-w-[12px] h-[12px] flex items-center justify-center rounded-full text-[0.45rem] font-bold ' +
-                      (ragEnabled ? 'bg-green-500 text-white' : 'bg-white/15 text-gray-300')
-                    }>
-                      {docCount}
-                    </span>
-                  )}
-                </button>
-
-                {/* (Agent Mode toggle relocated above, next to the Tools toggle.) */}
               </div>
 
               <MessageList
@@ -387,6 +333,62 @@ export function ChatView() {
                 onApprove={approveToolCall}
                 onReject={rejectToolCall}
                 onAttachDocs={() => setRagPanelOpen(true)}
+                composerModel={<ModelSelector openUpward />}
+                composerActions={
+                  <>
+                    {/* Documents (RAG) */}
+                    <button
+                      onClick={() => setRagPanelOpen(!ragPanelOpen)}
+                      className={
+                        'flex items-center gap-1 px-2 py-1.5 rounded-md transition-all shrink-0 text-[0.6rem] font-medium ' +
+                        (ragPanelOpen || ragEnabled
+                          ? 'bg-green-500/15 text-green-400 border border-green-500/30'
+                          : 'text-gray-500 hover:text-gray-300 hover:bg-white/5')
+                      }
+                      title="Document Chat (RAG)"
+                    >
+                      <FileText size={11} />
+                      <span>Docs</span>
+                      {docCount > 0 && (
+                        <span className={
+                          'min-w-[12px] h-[12px] flex items-center justify-center rounded-full text-[0.45rem] font-bold ' +
+                          (ragEnabled ? 'bg-green-500 text-white' : 'bg-white/15 text-gray-300')
+                        }>
+                          {docCount}
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Plugins (Chat Tools + Caveman + Personas) */}
+                    <PluginsDropdown openUpward />
+
+                    {/* Tools — agent permission overrides (only when agent active) */}
+                    {isAgentActive && (
+                      <div className="relative">
+                        <button
+                          onClick={() => setToolsDropdownOpen(!toolsDropdownOpen)}
+                          className="flex items-center gap-1 px-2 py-1.5 rounded-md text-gray-500 hover:text-gray-300 hover:bg-white/5 transition-all shrink-0 text-[0.6rem] font-medium"
+                        >
+                          <Wrench size={11} className="text-green-400" />
+                          <span>Tools</span>
+                          <ChevronDown size={9} className={`transition-transform ${toolsDropdownOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {/* Image-tool discovery noti dot — purely visual. */}
+                        {imageToolNoti && (
+                          <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-purple-500 ring-2 ring-gray-100 dark:ring-[#141414] pointer-events-none" />
+                        )}
+                        {toolsDropdownOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setToolsDropdownOpen(false)} />
+                            <div className="absolute left-0 bottom-full mb-0.5 z-50 w-28 rounded-md bg-white dark:bg-[#1a1a1a] border border-gray-200 dark:border-white/10 shadow-xl py-0.5 px-0.5">
+                              <PermissionOverrideBar />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </>
+                }
               />
             </>)}
             </div>

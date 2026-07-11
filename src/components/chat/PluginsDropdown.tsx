@@ -11,7 +11,9 @@ const CAVEMAN_MODES: { value: CavemanMode; label: string; desc: string }[] = [
   { value: 'ultra', label: 'Ultra', desc: 'Maximum brevity' },
 ]
 
-export function PluginsDropdown() {
+// `openUpward` opens the panel above the trigger — used when Plugins sits in
+// the composer action bar (bottom of the screen) instead of the top toolbar.
+export function PluginsDropdown({ openUpward = false }: { openUpward?: boolean } = {}) {
   const [open, setOpen] = useState(false)
   const [cavemanOpen, setCavemanOpen] = useState(false)
   const [personaOpen, setPersonaOpen] = useState(false)
@@ -66,7 +68,7 @@ export function PluginsDropdown() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 z-50 w-56 rounded-lg bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-1.5">
+          <div className={`absolute right-0 z-50 w-56 rounded-lg bg-white dark:bg-[#262626] border border-gray-200 dark:border-white/10 shadow-xl py-1.5 ${openUpward ? 'bottom-full mb-1' : 'top-full mt-1'}`}>
 
             {/* ── Chat Tools toggle (v2.5.3) ──────────────── */}
             <div className="px-2.5">
