@@ -33,7 +33,7 @@ import { checkPromptSafety, SAFETY_BLOCK_MESSAGE } from '../lib/render/safety'
 // Decoded by hand instead of fetch(dataUrl): the webview CSP's connect-src
 // (rightly) has no data: entry, so fetching a data URL throws "Load failed"
 // and killed every source-needing op before the upload even started.
-function dataUrlToBlob(dataUrl: string): Blob {
+export function dataUrlToBlob(dataUrl: string): Blob {
   const comma = dataUrl.indexOf(',')
   const meta = dataUrl.slice(5, comma)
   const data = dataUrl.slice(comma + 1)
