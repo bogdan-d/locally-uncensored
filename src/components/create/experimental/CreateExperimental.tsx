@@ -6,7 +6,7 @@ import { CreateExpProvider, useCreateExp } from './CreateContext'
 import { IntentBar } from './IntentBar'
 import { Stage } from './Stage'
 import { Composer } from './Composer'
-import { GalleryStrip } from './GalleryStrip'
+import { CreatePanel } from './CreatePanel'
 import { Lightbox } from './Lightbox'
 import { AdvancedDrawer } from './AdvancedDrawer'
 import { MaskEditor } from './MaskEditor'
@@ -35,6 +35,7 @@ function CreateExperimentalInner() {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [maskOpen, setMaskOpen] = useState(false)
   const [lightbox, setLightbox] = useState<GalleryItem | null>(null)
+  const [panelOpen, setPanelOpen] = useState(false)
 
   // When a fresh generation lands on top, drop any pinned selection so the
   // newest result shows.
@@ -120,19 +121,23 @@ function CreateExperimentalInner() {
         </div>
       )}
 
-      {/* Stage + Composer + right Advanced drawer share one relative container */}
-      <div className="flex-1 min-h-0 relative flex flex-col">
-        <Stage
-          displayed={displayed}
-          onOpenMaskEditor={() => setMaskOpen(true)}
-          onEditResult={(it) => { void editResultWithMask(it) }}
-          onFullscreen={(it) => setLightbox(it)}
-        />
-        <GalleryStrip activeId={pinnedId} onSelect={openGalleryItem} />
-        <Composer onOpenAdvanced={() => setAdvancedOpen(true)} />
+      {/* Stage+Composer on the left, the Gallery bubble as a right rail —
+          matched 1:1 with the web companion (the old bottom strip is gone). */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div className="flex-1 min-w-0 relative flex flex-col">
+          <Stage
+            displayed={displayed}
+            onOpenMaskEditor={() => setMaskOpen(true)}
+            onEditResult={(it) => { void editResultWithMask(it) }}
+            onFullscreen={(it) => setLightbox(it)}
+          />
+          <Composer onOpenAdvanced={() => setAdvancedOpen(true)} />
 
-        <AdvancedDrawer open={advancedOpen} onClose={() => setAdvancedOpen(false)} />
-        <MaskEditor open={maskOpen} onClose={() => setMaskOpen(false)} />
+          <AdvancedDrawer open={advancedOpen} onClose={() => setAdvancedOpen(false)} />
+          <MaskEditor open={maskOpen} onClose={() => setMaskOpen(false)} />
+        </div>
+
+        <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={pinnedId} onSelect={openGalleryItem} />
       </div>
 
       <Lightbox item={lightbox} onClose={() => setLightbox(null)} />
