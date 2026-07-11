@@ -107,6 +107,19 @@ export function AppShell() {
     }
   }, [appMode])
 
+  // ── Cloud = cloud-only: release every LOCAL model backend so nothing sits
+  // in RAM/VRAM while inference runs in the cloud (David 2026-07-11). Whisper
+  // STT, the bundled llama.cpp sidecar + embeddings, Ollama-loaded models and
+  // ComfyUI VRAM are freed by offload_local_models; LM Studio via its own JIT
+  // unload (`lms unload --all`). Local mode reloads LAZILY on first use
+  // (chat/voice/render) — nothing is pre-warmed. Fires on entering cloud
+  // (switch OR launch-in-cloud); local mode is a no-op.
+  useEffect(() => {
+    if (!isTauri() || appMode !== 'cloud') return
+    backendCall('offload_local_models').catch(() => {})
+    backendCall('lmstudio_unload_model', { model: '--all' }).catch(() => {})
+  }, [appMode])
+
   // Push the persisted ComfyUI GPU override to the backend on boot + change
   // (rhodium92 AMD, 2026-07-01). The backend resets to "auto" each launch, so
   // without this a saved force-cpu / force-gpu wouldn't apply until the user

@@ -1782,3 +1782,104 @@ mod tests {
         assert_eq!(probe_comfy_gpu(""), Some(false));
     }
 }
+
+/// Cloud mode = cloud-only inference: release every LOCAL model backend so
+/// nothing sits in RAM/VRAM while the app talks to the cloud (David 2026-07-11).
+/// Best-effort per backend — one failing step never blocks the others. Local
+/// mode reloads everything LAZILY on first use, so this is safe to run on every
+/// switch into cloud and on launch-in-cloud. (LM Studio is offloaded separately
+/// by the frontend via `lmstudio_unload_model("--all")`.)
+#[tauri::command]
+pub fn offload_local_models(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let mut freed: Vec<&str> = Vec::new();
+
+    // 1) Whisper STT — the python server holds the model resident; stopping it
+    //    frees ~360 MB. transcribe() lazily restarts it on the next local use.
+    if let Ok(mut w) = state.whisper.lock() {
+        if w.is_running() {
+            w.stop();
+            freed.push("whisper");
+        }
+    }
+
+    // 2) Bundled llama.cpp chat + embeddings sidecars (managed GGUF in RAM).
+    //    Both are graceful no-ops when not running, and lazy-start on next use.
+    if crate::commands::engine::stop_bundled_engine(state.clone()).is_ok() {
+        freed.push("bundled-engine");
+    }
+    if crate::commands::engine::stop_bundled_embed(state.clone()).is_ok() {
+        freed.push("bundled-embed");
+    }
+
+    // 3) Ollama — keep `serve` up (cheap, idle) but evict every loaded model.
+    if offload_ollama_loaded_models() {
+        freed.push("ollama");
+    }
+
+    // 4) ComfyUI — free VRAM/RAM without killing the server, so the next local
+    //    render just reloads the checkpoint (no slow process restart).
+    if free_comfyui_memory() {
+        freed.push("comfyui");
+    }
+
+    println!("[Offload] cloud mode — released local model backends: {:?}", freed);
+    Ok(serde_json::json!({ "offloaded": freed }))
+}
+
+/// Evict every model Ollama currently holds in memory via `keep_alive: 0`,
+/// leaving `ollama serve` running (idle serve is cheap). Best-effort.
+fn offload_ollama_loaded_models() -> bool {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let ps = match client
+        .get("http://localhost:11434/api/ps")
+        .send()
+        .ok()
+        .and_then(|r| r.json::<serde_json::Value>().ok())
+    {
+        Some(v) => v,
+        None => return false,
+    };
+    let models = match ps.get("models").and_then(|m| m.as_array()) {
+        Some(a) => a,
+        None => return false,
+    };
+    let mut any = false;
+    for m in models {
+        if let Some(name) = m
+            .get("name")
+            .or_else(|| m.get("model"))
+            .and_then(|n| n.as_str())
+        {
+            let _ = client
+                .post("http://localhost:11434/api/generate")
+                .json(&serde_json::json!({ "model": name, "keep_alive": 0 }))
+                .send();
+            any = true;
+        }
+    }
+    any
+}
+
+/// Ask ComfyUI to unload checkpoints and free memory, keeping the server up so
+/// the next local render reloads on demand. Best-effort (default port 8188).
+fn free_comfyui_memory() -> bool {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    client
+        .post("http://localhost:8188/free")
+        .json(&serde_json::json!({ "unload_models": true, "free_memory": true }))
+        .send()
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}

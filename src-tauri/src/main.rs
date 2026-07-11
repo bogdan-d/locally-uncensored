@@ -109,6 +109,7 @@ fn main() {
             commands::process::set_comfyui_host,
             commands::process::set_ollama_host,
             commands::process::get_ollama_host,
+            commands::process::offload_local_models,
             // Installation
             commands::install::install_comfyui,
             commands::install::install_comfyui_status,
@@ -349,13 +350,16 @@ fn main() {
                 });
             }
 
-            // ─── Auto-start services ───
-            let state = app.state::<AppState>();
-
-            // Off the main thread: auto_start_comfyui's find_comfyui_path()
-            // walks $HOME, which can take minutes on a big disk — on the main
-            // thread that stalls window creation and the app "runs with no
-            // window" until the scan finishes (2.5.6 regression, re-fixed).
+            // ─── Auto-start services (off the main thread) ───
+            // find_comfyui_path() walks $HOME, which can take minutes on a big
+            // disk — on the main thread that stalls window creation and the app
+            // "runs with no window" until the scan finishes (2.5.6 regression).
+            // Ollama/ComfyUI here are just SERVERS; no model loads until first use.
+            //
+            // Whisper STT is intentionally NOT pre-started any more: it used to
+            // load its model (~360 MB) at launch even in Cloud mode. It now starts
+            // LAZILY on the first transcription (whisper::transcribe) and is
+            // released by offload_local_models whenever the app is in Cloud mode.
             {
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
@@ -364,22 +368,6 @@ fn main() {
                     commands::process::auto_start_comfyui(&state);
                 });
             }
-
-            let handle = app.handle().clone();
-            let python_bin = state.python_bin.lock().unwrap().clone();
-            let whisper = state.whisper.clone();
-            std::thread::spawn(move || {
-                // Whisper auto-start is best-effort and pip-installs faster-whisper
-                // on first launch — silently skip when no Python is on the box, so
-                // a fresh install doesn't fail the whole startup. The user can
-                // install Python later via the ComfyUI flow; whisper picks up on
-                // next launch.
-                if !python_bin.is_empty() {
-                    commands::whisper::auto_start_whisper_sync(&handle, &python_bin, &whisper);
-                } else {
-                    println!("[Whisper] Skipping auto-start: no Python yet (install via ComfyUI step)");
-                }
-            });
 
             Ok(())
         })

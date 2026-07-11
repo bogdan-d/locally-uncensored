@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::os::windows::process::CommandExt;
 
 use base64::Engine;
-use tauri::{Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tracing::{error, info};
 
 use crate::state::AppState;
@@ -132,6 +132,11 @@ impl WhisperServer {
             .map_err(|_| "Whisper transcription timed out".to_string())
     }
 
+    /// Whether the whisper server child is currently running (model resident).
+    pub fn is_running(&self) -> bool {
+        self.process.is_some()
+    }
+
     pub fn stop(&mut self) {
         if let Some(ref mut stdin) = self.stdin_tx {
             let _ = stdin.write_all(b"{\"action\":\"quit\"}\n");
@@ -159,7 +164,7 @@ pub fn whisper_status(state: State<'_, AppState>) -> Result<serde_json::Value, S
 }
 
 #[tauri::command]
-pub fn transcribe(audio_base64: String, content_type: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+pub fn transcribe(app: AppHandle, audio_base64: String, content_type: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     let audio_bytes = base64::engine::general_purpose::STANDARD
         .decode(&audio_base64)
         .map_err(|e| format!("base64 decode: {}", e))?;
@@ -185,6 +190,20 @@ pub fn transcribe(audio_base64: String, content_type: String, state: State<'_, A
 
     let audio_path = tmp_file.to_string_lossy().replace('\\', "/");
     println!("[Whisper] Transcribing: {} ({:.1} KB)", audio_path, audio_bytes.len() as f64 / 1024.0);
+
+    // Lazy-start Whisper on first use — it is no longer pre-started at launch
+    // (it kept ~360 MB resident even in Cloud mode). Block until the server is
+    // spawned; send_command below then waits for the model to finish loading.
+    {
+        let needs_start = state.whisper.lock().map(|w| w.process.is_none()).unwrap_or(true);
+        if needs_start {
+            let python_bin = state.python_bin.lock().unwrap().clone();
+            if python_bin.is_empty() {
+                return Err("Whisper unavailable: no Python runtime detected. Install Python in the setup step, then retry.".to_string());
+            }
+            auto_start_whisper_sync(&app, &python_bin, &state.whisper);
+        }
+    }
 
     // Send to persistent whisper server
     let result = {
