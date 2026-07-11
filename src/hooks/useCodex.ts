@@ -1315,7 +1315,14 @@ export function useCodex() {
           return settings.smallModelMode ? truncateToolResult(text) : text
         }
 
-        if (providerId === 'openai' || providerId === 'anthropic') {
+        // lu-cloud is OpenAI-compatible (DeepInfra) and STRICTLY validates the
+        // OpenAI tool shape: assistant tool_calls carry ids and every tool-result
+        // message needs a matching tool_call_id. Route it through the id-based
+        // branch (not the id-less `native` one below) — otherwise DeepInfra 422s
+        // "messages.N…ChatCompletionToolMessage.tool_call_id: Field required"
+        // and every follow-up turn in the conversation fails. Ollama/LM-Studio
+        // are lenient, which is why this only bit the cloud path.
+        if (providerId === 'openai' || providerId === 'anthropic' || providerId === 'lu-cloud') {
           messages.push({ role: 'assistant', content: turnContent || '', tool_calls: toolCalls })
           for (const { tc } of batch) {
             const result = results.find((r) => r.id === batch.find((b) => b.tc === tc)?.ac.id)!

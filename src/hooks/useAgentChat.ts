@@ -1241,7 +1241,13 @@ export function useAgentChat() {
           return ''
         }
 
-        if (providerId === 'openai' || providerId === 'anthropic') {
+        // lu-cloud is OpenAI-compatible (DeepInfra) and STRICTLY validates the
+        // OpenAI tool shape: assistant tool_calls carry ids and every tool-result
+        // message needs a matching tool_call_id. Route it through the id-based
+        // branch (not the id-less `native` one below) — otherwise DeepInfra 422s
+        // "ChatCompletionToolMessage.tool_call_id: Field required" and every
+        // follow-up turn fails. Ollama/LM-Studio are lenient; only cloud bit.
+        if (providerId === 'openai' || providerId === 'anthropic' || providerId === 'lu-cloud') {
           agentMessages.push({
             role: 'assistant',
             content: turnContent || '',
