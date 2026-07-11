@@ -352,8 +352,18 @@ fn main() {
             // ─── Auto-start services ───
             let state = app.state::<AppState>();
 
-            commands::process::auto_start_ollama(&state);
-            commands::process::auto_start_comfyui(&state);
+            // Off the main thread: auto_start_comfyui's find_comfyui_path()
+            // walks $HOME, which can take minutes on a big disk — on the main
+            // thread that stalls window creation and the app "runs with no
+            // window" until the scan finishes (2.5.6 regression, re-fixed).
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<AppState>();
+                    commands::process::auto_start_ollama(&state);
+                    commands::process::auto_start_comfyui(&state);
+                });
+            }
 
             let handle = app.handle().clone();
             let python_bin = state.python_bin.lock().unwrap().clone();
