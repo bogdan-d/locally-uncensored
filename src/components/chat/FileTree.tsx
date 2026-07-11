@@ -19,7 +19,11 @@ export function FileTree() {
     setLoading(true)
     setError(null)
     try {
-      const result = await toolRegistry.execute('file_list', { path: dir })
+      // List the picked folder as its OWN workspace root so the Rust
+      // containment jail accepts it. Without workingDirectory the list is
+      // checked against the stale per-chat sandbox and every folder outside
+      // ~/agent-workspace fails with "path escapes the allowed workspace".
+      const result = await toolRegistry.execute('file_list', { path: dir, workingDirectory: dir })
       const lines = result.split('\n').filter(Boolean)
       const nodes: FileTreeNode[] = lines.map(line => {
         const isDir = line.startsWith('[DIR]')

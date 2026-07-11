@@ -717,6 +717,14 @@ async function executeFileList(args: Record<string, any>): Promise<string> {
     recursive: args.recursive || false,
     pattern: args.pattern || null,
     ...chatCtx(),
+    // The file-tree browser (FileTree.tsx) points the picker at an arbitrary
+    // folder and lists it as its OWN root. Pass that through so the Rust
+    // containment jail uses the picked folder instead of the per-chat sandbox
+    // — otherwise selecting any folder outside ~/agent-workspace fails with
+    // "path escapes the allowed workspace". Overrides chatCtx()'s stale value.
+    ...(typeof args.workingDirectory === 'string' && args.workingDirectory.trim()
+      ? { workingDirectory: args.workingDirectory }
+      : {}),
   })
   if (Array.isArray(data.entries)) {
     return data.entries
