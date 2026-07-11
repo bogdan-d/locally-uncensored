@@ -52,7 +52,12 @@ export interface Message {
   // the model sees what it did before (parity with original Codex CLI).
   // Hidden messages are included in the API payload but not rendered.
   hidden?: boolean
-  tool_calls?: { function: { name: string; arguments: Record<string, unknown> } }[]
+  tool_calls?: { id?: string; function: { name: string; arguments: Record<string, unknown> } }[]
+  /** OpenAI tool-result linkage on role:'tool' messages. Persisted so id-based
+   *  providers (lu-cloud/DeepInfra, OpenAI) can match a tool result to its call
+   *  ACROSS turns. Without it, once a tool call is in the history DeepInfra 422s
+   *  "tool_call_id: Field required" on every follow-up turn (Bug 4, 2026-07-11). */
+  tool_call_id?: string
   // Real token usage reported by the model (Ollama prompt_eval_count/eval_count,
   // OpenAI/LM-Studio usage.*). promptTokens = the FULL consumed context for that
   // turn (system prompt + tools + RAG + history + input), so it powers a

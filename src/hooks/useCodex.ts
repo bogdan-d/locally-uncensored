@@ -448,6 +448,12 @@ export function useCodex() {
           // model sees the full tool-call chain from previous turns
           // (continue capability, parity with original Codex CLI).
           if (m.tool_calls) msg.tool_calls = m.tool_calls as any
+          // Carry the tool-result linkage across turns too. ed99f82 sets
+          // tool_call_id on role:'tool' messages INSIDE the loop, but the
+          // persist+rebuild round-trip below dropped it — so the SECOND user
+          // turn replayed tool results with no tool_call_id and DeepInfra
+          // (lu-cloud) 422'd "tool_call_id: Field required", wedging the chat.
+          if (m.tool_call_id) msg.tool_call_id = m.tool_call_id
           return msg
         }),
     ]
@@ -1458,6 +1464,10 @@ export function useCodex() {
               timestamp: Date.now(),
               hidden: true,
               tool_calls: tm.tool_calls as any,
+              // Persist the tool-result linkage so the next turn's history
+              // builder can replay it — without this, follow-up turns 422 on
+              // lu-cloud (see types/chat.ts Message.tool_call_id, Bug 4).
+              tool_call_id: tm.tool_call_id,
             })
           }
         }
