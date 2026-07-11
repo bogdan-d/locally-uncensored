@@ -228,7 +228,11 @@ function QuickControls() {
         />
       </LabeledControl>
 
-      {!meta.isVideo && (
+      {/* Aspect only where the output size is actually user-chosen — a pure
+          from-scratch image. Edit/mask ops force the output to the source
+          image's dimensions (useCloudCreate overrides w/h from the source), so
+          the control was dead there; video has no aspect knob at all. */}
+      {!meta.isVideo && !meta.needsSource && (
         <LabeledControl label="Aspect">
           <Segmented
             size="sm"

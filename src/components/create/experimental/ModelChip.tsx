@@ -1,5 +1,5 @@
 import { useCreateStore } from '../../../stores/createStore'
-import { useCloudCatalogStore, defaultCloudModel } from '../../../stores/cloudCatalogStore'
+import { useCloudCatalogStore, defaultCloudModel, defaultEditModel, isEditCapable } from '../../../stores/cloudCatalogStore'
 import { Select, type SelectOption } from '../ui/Select'
 import { TYPE_BADGE } from './badges'
 
@@ -15,6 +15,7 @@ export function ModelChip() {
 
 function CloudModelChip() {
   const mode = useCreateStore((s) => s.mode)
+  const intent = useCreateStore((s) => s.intent())
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
   const setCloudImageModel = useCreateStore((s) => s.setCloudImageModel)
@@ -23,8 +24,16 @@ function CloudModelChip() {
 
   const isVideo = mode === 'video'
   const kind = isVideo ? 'video' : 'image'
-  const list = models.filter((m) => m.kind === kind)
-  const value = (isVideo ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind)?.id || ''
+  // Edit needs a masked-img2img model (flux-dev today). Only offer the models
+  // that can actually do it — otherwise the picker lists t2i-only checkpoints
+  // that useCloudCreate silently swaps out at submit, so the user's choice was
+  // a lie. (Video: every catalog clip model is t2v+i2v, so no per-op filter.)
+  const editOnly = intent === 'edit'
+  const list = models.filter((m) => m.kind === kind && (!editOnly || m.edit))
+  const current = (isVideo ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind)?.id || ''
+  // Reflect the model the run will really use, so a t2i model left over from
+  // the Image tab doesn't show as "selected" on an edit it can't perform.
+  const value = editOnly && !isEditCapable(current) ? (defaultEditModel()?.id ?? current) : current
 
   const options: SelectOption[] = list.map((m) => ({
     value: m.id,
