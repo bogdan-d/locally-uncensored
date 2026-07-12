@@ -1226,7 +1226,15 @@ export function useCodex() {
           // arbitrary-exec tools for an explicit confirm — the mitigation for a
           // prompt-injected model auto-running shell/code. window.confirm works
           // in this Tauri webview (the app uses it elsewhere, e.g. Gallery).
-          awaitApproval: settings.codexConfirmShell
+          //
+          // Security review 2.5.7: ALWAYS confirm when the driving model is the
+          // CLOUD provider, regardless of the setting. A remote/semi-trusted model
+          // (or a compromised/MITM'd cloud endpoint) reaching unattended local
+          // shell is a materially bigger blast radius than a local model the user
+          // deliberately trusts — and a "Cloud"-mode user rarely expects the
+          // remote model to run commands on their box. Local models keep the
+          // unattended default; only the cloud path is force-gated.
+          awaitApproval: (settings.codexConfirmShell || providerId === 'lu-cloud')
             ? async (req) => {
                 if (!CODEX_CONFIRM_TOOLS.has(req.toolName)) return true
                 const a = req.args || {}

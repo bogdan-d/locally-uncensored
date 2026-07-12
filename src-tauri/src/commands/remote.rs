@@ -33,6 +33,11 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 // (separate) lifetime, so this only widens the one-time pairing window.
 const PASSCODE_TTL_SECS: u64 = 900;
 const JWT_TTL_SECS: u64 = 60 * 60;  // 1 hour — how long an authenticated session lasts
+// #73/security-review 2.5.7: hard ceiling on how long a session may keep sliding
+// itself alive. After this (measured from the token's issued-at, which is copied
+// unchanged across refreshes), the sliding refresh stops and the device must
+// re-pair — so a leaked bearer token can't be renewed forever.
+const MAX_SESSION_SECS: u64 = 24 * 60 * 60;  // 24 hours
 const MAX_FAILED_ATTEMPTS: u32 = 3;
 const COOLDOWN_SECS: u64 = 60;
 
@@ -107,6 +112,13 @@ struct Claims {
     sub: String,
     ip: String,
     exp: usize,
+    /// Session start (unix secs). Set once at pairing and COPIED UNCHANGED into
+    /// every sliding refresh, so the server can cap total session age regardless
+    /// of how many times the token was renewed. `serde(default)` = a pre-upgrade
+    /// token without this claim decodes with iat 0 → treated as past the cap →
+    /// stops sliding and re-pairs, instead of failing to decode.
+    #[serde(default)]
+    iat: usize,
 }
 
 fn generate_passcode() -> String {
@@ -115,13 +127,14 @@ fn generate_passcode() -> String {
     format!("{:06}", rng.gen_range(0..1000000))
 }
 
-fn generate_jwt(secret: &str, ip: &str, sub: &str) -> Result<String, String> {
+fn generate_jwt(secret: &str, ip: &str, sub: &str, iat: u64) -> Result<String, String> {
     use jsonwebtoken::{encode, Header, EncodingKey};
     let exp = chrono_now_secs() + JWT_TTL_SECS;
     let claims = Claims {
         sub: sub.to_string(),
         ip: ip.to_string(),
         exp: exp as usize,
+        iat: iat as usize,
     };
     encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
         .map_err(|e| e.to_string())
@@ -248,19 +261,35 @@ async fn auth_middleware(
             // the JS client, Set-Cookie for /comfyui asset loads). An idle
             // token still dies after the full TTL and needs re-pairing —
             // deliberate on this surface; only USE keeps a session alive.
-            let refreshed = if should_refresh_jwt(claims.exp as u64, chrono_now_secs(), JWT_TTL_SECS) {
-                generate_jwt(&jwt_secret, &claims.ip, &claims.sub).ok()
+            // #73 revocation (security-review 2.5.7): only honor the token while
+            // its device is still in the connected list. Disconnect removes the
+            // row and a server restart clears the in-memory list, so BOTH now
+            // truly end the session — previously a valid token kept working (and
+            // kept sliding) even after Disconnect, so a leaked token was
+            // effectively unrevocable short of restarting the whole server.
+            let device_known = {
+                let mut devices = state.connected_devices.lock().await;
+                if let Some(dev) = devices.iter_mut().find(|d| d.id == claims.sub) {
+                    dev.last_seen = chrono_now_secs();
+                    true
+                } else {
+                    false
+                }
+            };
+            if !device_known {
+                drop(jwt_secret);
+                return (StatusCode::UNAUTHORIZED, "Session ended — re-pair from the desktop.")
+                    .into_response();
+            }
+            // #73 sliding refresh, now bounded: renew a past-half-life token only
+            // while the session (from the unchanging `iat`) is under MAX_SESSION,
+            // and carry `iat` forward unchanged so the cap actually bites.
+            let refreshed = if should_slide_session(claims.iat as u64, claims.exp as u64, chrono_now_secs()) {
+                generate_jwt(&jwt_secret, &claims.ip, &claims.sub, claims.iat as u64).ok()
             } else {
                 None
             };
             drop(jwt_secret);
-            // Update last_seen for this device
-            {
-                let mut devices = state.connected_devices.lock().await;
-                if let Some(dev) = devices.iter_mut().find(|d| d.id == claims.sub) {
-                    dev.last_seen = chrono_now_secs();
-                }
-            }
             let mut response = next.run(req).await;
             if let Some(fresh) = refreshed {
                 let cookie = format!(
@@ -286,6 +315,15 @@ async fn auth_middleware(
 /// lifetime. Pure so it is unit-testable. `exp`/`now` in unix seconds.
 fn should_refresh_jwt(exp: u64, now: u64, ttl_secs: u64) -> bool {
     exp > now && exp.saturating_sub(now) < ttl_secs / 2
+}
+
+/// #73/security-review 2.5.7: the full sliding-refresh decision. Renew only when
+/// the token is past half-life AND the session (measured from the unchanging
+/// `iat`) is still under the hard MAX_SESSION_SECS cap — so an active session
+/// renews smoothly, but a captured token can't be kept alive past the cap. Pure
+/// so it is unit-testable.
+fn should_slide_session(iat: u64, exp: u64, now: u64) -> bool {
+    now.saturating_sub(iat) < MAX_SESSION_SECS && should_refresh_jwt(exp, now, JWT_TTL_SECS)
 }
 
 // ─── Route handlers ───
@@ -368,7 +406,10 @@ async fn handle_auth(
     let device_id = format!("dev-{}-{:x}", chrono_now_secs(), rand::random::<u64>());
 
     let jwt_secret = state.jwt_secret.lock().await;
-    match generate_jwt(&jwt_secret, &ip, &device_id) {
+    // `now` (captured at the top of handle_auth) is the pairing time — the
+    // session start. It seeds `iat` and is copied unchanged into every later
+    // refresh so MAX_SESSION_SECS is measured from here, not from the last renew.
+    match generate_jwt(&jwt_secret, &ip, &device_id, now) {
         Ok(token) => {
             drop(jwt_secret);
             // Dedup by IP: if this IP is already registered (reauth, refresh,
@@ -4666,7 +4707,10 @@ async fn mobile_monogram() -> Response {
 
 #[cfg(test)]
 mod jwt_refresh_tests {
-    use super::{generate_jwt, validate_jwt, should_refresh_jwt, JWT_TTL_SECS};
+    use super::{
+        generate_jwt, validate_jwt, should_refresh_jwt, should_slide_session, JWT_TTL_SECS,
+        MAX_SESSION_SECS,
+    };
 
     // #73 (ossobucco): sliding-session decision boundaries.
     #[test]
@@ -4684,18 +4728,42 @@ mod jwt_refresh_tests {
         assert!(!should_refresh_jwt(now, now, ttl));
     }
 
+    // Security-review 2.5.7: the sliding refresh must STOP at the session cap so
+    // a leaked token can't be renewed forever.
     #[test]
-    fn refreshed_jwt_roundtrips_with_same_identity() {
+    fn slide_stops_past_max_session() {
+        let iat = 1_000_000u64;
+        // A token past half-life, early in the session → slides.
+        let now_early = iat + 100;
+        let exp_soon = now_early + JWT_TTL_SECS / 2 - 1;
+        assert!(should_slide_session(iat, exp_soon, now_early));
+        // Same past-half-life token, but the session is now past the cap → no slide,
+        // even though should_refresh_jwt alone would still say yes.
+        let now_late = iat + MAX_SESSION_SECS + 1;
+        let exp_late = now_late + JWT_TTL_SECS / 2 - 1;
+        assert!(should_refresh_jwt(exp_late, now_late, JWT_TTL_SECS));
+        assert!(!should_slide_session(iat, exp_late, now_late));
+        // Exactly at the cap boundary → no slide.
+        let now_cap = iat + MAX_SESSION_SECS;
+        assert!(!should_slide_session(iat, now_cap + JWT_TTL_SECS / 2 - 1, now_cap));
+    }
+
+    #[test]
+    fn refreshed_jwt_roundtrips_with_same_identity_and_iat() {
         let secret = "test-secret";
-        let tok = generate_jwt(secret, "1.2.3.4", "device-1").unwrap();
+        let session_start = 1_700_000_000u64;
+        let tok = generate_jwt(secret, "1.2.3.4", "device-1", session_start).unwrap();
         let claims = validate_jwt(secret, &tok).unwrap();
         assert_eq!(claims.sub, "device-1");
         assert_eq!(claims.ip, "1.2.3.4");
-        // A refresh mints a token for the SAME identity that validates again
-        let fresh = generate_jwt(secret, &claims.ip, &claims.sub).unwrap();
+        assert_eq!(claims.iat as u64, session_start);
+        // A refresh mints a token for the SAME identity, carrying iat UNCHANGED
+        // (so the session cap is measured from the original pairing, not the renew).
+        let fresh = generate_jwt(secret, &claims.ip, &claims.sub, claims.iat as u64).unwrap();
         let fresh_claims = validate_jwt(secret, &fresh).unwrap();
         assert_eq!(fresh_claims.sub, "device-1");
         assert_eq!(fresh_claims.ip, "1.2.3.4");
+        assert_eq!(fresh_claims.iat as u64, session_start);
         assert!(fresh_claims.exp >= claims.exp);
     }
 }

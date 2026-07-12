@@ -82,34 +82,9 @@ export function checkPromptSafety(text: string): SafetyVerdict {
 export const SAFETY_BLOCK_MESSAGE =
   'This prompt was blocked: content sexualizing minors is never generated, on any backend.'
 
-/**
- * Out-of-band alert on a CSAM block so it is not just a log line nobody tails.
- * Posts to SAFETY_ALERT_WEBHOOK_URL if set (Slack/PagerDuty/etc.). Deliberately
- * carries NO prompt content — only the user id, the match reason, and a
- * timestamp — so the alert channel never becomes a store of blocked text.
- * Fire-and-forget: never throws, never blocks the request path.
- */
-export async function alertCsamBlock(meta: {
-  userId: string
-  reason?: string
-  kind?: string
-}): Promise<void> {
-  const url = process.env.SAFETY_ALERT_WEBHOOK_URL
-  if (!url) return
-  try {
-    await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        event: 'csam_blocked',
-        user_id: meta.userId,
-        reason: meta.reason ?? 'unknown',
-        kind: meta.kind ?? 'unknown',
-        at: new Date().toISOString(),
-        note: 'A generation prompt was refused by the AI-CSAM gate. Review for 18 U.S.C. § 2258A reporting.',
-      }),
-    })
-  } catch {
-    // Alerting must never break the block itself — the 422 + log already stand.
-  }
-}
+// NOTE: the operator-facing CSAM alert (out-of-band webhook POST) lives in the
+// SERVER, not here. It was previously exported from this client lib but never
+// imported — and `process.env` is undefined in WebView2, so it was inert dead
+// code. Removed in the 2.5.7 security pass: an escalation/alerting path has no
+// business shipping in the desktop bundle. The client's job ends at
+// `checkPromptSafety` (the local gate) + the 422 the server returns.

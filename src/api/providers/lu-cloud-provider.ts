@@ -14,6 +14,7 @@ import type {
 import { ProviderError } from './types'
 import { OpenAIProvider } from './openai-provider'
 import { getAccessToken } from '../cloud/supabase'
+import { CLOUD_BASE } from '../cloud/config'
 
 export class LuCloudProvider implements ProviderClient {
   readonly id = 'lu-cloud' as const
@@ -39,7 +40,15 @@ export class LuCloudProvider implements ProviderClient {
     if (!token) {
       throw new ProviderError('Sign in to your LU Cloud account to chat in the cloud.', 'lu-cloud', 'auth', 401)
     }
-    return new OpenAIProvider({ ...this.config, apiKey: token, isLocal: false })
+    // Hard-pin the endpoint at call time. The Supabase access token is a live
+    // bearer; if we trusted `this.config.baseUrl` a tampered provider store could
+    // repoint it at an attacker host and leak the token (security review 2.5.7).
+    return new OpenAIProvider({
+      ...this.config,
+      baseUrl: `${CLOUD_BASE}/api/inference/v1`,
+      apiKey: token,
+      isLocal: false,
+    })
   }
 
   async *chatStream(

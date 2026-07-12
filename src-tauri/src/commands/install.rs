@@ -2643,6 +2643,33 @@ fn install_custom_node_blocking(
 ) -> Result<serde_json::Value, String> {
     let repo_url = repoUrl;
     let node_name = nodeName;
+
+    // Security review 2.5.7: this clones `repo_url` and joins `node_name` under
+    // custom_nodes/. Every in-app caller passes a hardcoded registry entry, so
+    // these are trusted today — but a single renderer foothold could call the
+    // command with a hostile value, so validate defensively. Reject anything that
+    // isn't a plain https:// URL: git's `ext::`/`file::`/`ssh` transports execute
+    // commands, and a leading `-` would be parsed as a git flag. Reject any path
+    // syntax in `node_name` (`/`, `\`, `..`, `:`, leading `-`/`.`) — an absolute
+    // or `..` component makes `custom_nodes_dir.join(node_name)` escape the dir.
+    if !repo_url.starts_with("https://")
+        || repo_url.len() > 512
+        || repo_url.contains(|c: char| c.is_whitespace() || c.is_control())
+    {
+        return Err("Refusing to install: repository URL must be a plain https:// URL.".to_string());
+    }
+    if node_name.is_empty()
+        || node_name.len() > 128
+        || node_name.contains('/')
+        || node_name.contains('\\')
+        || node_name.contains("..")
+        || node_name.contains(':')
+        || node_name.starts_with('-')
+        || node_name.starts_with('.')
+    {
+        return Err("Refusing to install: invalid custom-node name.".to_string());
+    }
+
     info!(node = %node_name, "custom node install start");
 
     let comfy_dir = match comfy_path {

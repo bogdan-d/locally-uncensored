@@ -154,22 +154,34 @@ mod chunked {
 /// rebuild→open test loops. When `LU_NO_KEYCHAIN` is set (env var, or a
 /// `~/.lu-no-keychain` marker file), the secret commands report the keychain as
 /// unavailable; the frontend adapters (supabase.ts session, providerStore keys)
-/// then latch to their localStorage path and never touch the keychain, so no
-/// password prompt appears. A shipped build never triggers this — nothing
-/// creates the marker and no installer sets the env var.
+/// then latch to their localStorage path and never touch the keychain.
+///
+/// SECURITY (review 2.5.7): this bypass is gated behind the `insecure-test-keychain`
+/// Cargo feature, which is NOT in any default and is never enabled in a shipped
+/// build. In a release binary the whole env/marker check compiles out to `false`,
+/// so a same-user process cannot drop `~/.lu-no-keychain` (or set the env var) to
+/// silently downgrade the Supabase session + provider keys to plaintext
+/// localStorage. Only builds made with `--features insecure-test-keychain` honor it.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 fn keychain_disabled() -> bool {
-    if let Some(v) = std::env::var_os("LU_NO_KEYCHAIN") {
-        if !v.is_empty() {
-            return true;
-        }
+    #[cfg(not(feature = "insecure-test-keychain"))]
+    {
+        false
     }
-    if let Some(home) = std::env::var_os("HOME") {
-        if std::path::Path::new(&home).join(".lu-no-keychain").exists() {
-            return true;
+    #[cfg(feature = "insecure-test-keychain")]
+    {
+        if let Some(v) = std::env::var_os("LU_NO_KEYCHAIN") {
+            if !v.is_empty() {
+                return true;
+            }
         }
+        if let Some(home) = std::env::var_os("HOME") {
+            if std::path::Path::new(&home).join(".lu-no-keychain").exists() {
+                return true;
+            }
+        }
+        false
     }
-    false
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]

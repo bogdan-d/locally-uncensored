@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { FolderOpen, Folder, FileText, ArrowLeft, RefreshCw } from 'lucide-react'
 import { useCodexStore } from '../../stores/codexStore'
-import { toolRegistry } from '../../api/mcp'
-import { isTauri } from '../../api/backend'
+import { isTauri, backendCall } from '../../api/backend'
 import type { FileTreeNode } from '../../types/codex'
 
 export function FileTree() {
@@ -19,20 +18,22 @@ export function FileTree() {
     setLoading(true)
     setError(null)
     try {
-      // List the picked folder as its OWN workspace root so the Rust
-      // containment jail accepts it. Without workingDirectory the list is
-      // checked against the stale per-chat sandbox and every folder outside
-      // ~/agent-workspace fails with "path escapes the allowed workspace".
-      const result = await toolRegistry.execute('file_list', { path: dir, workingDirectory: dir })
-      const lines = result.split('\n').filter(Boolean)
-      const nodes: FileTreeNode[] = lines.map(line => {
-        const isDir = line.startsWith('[DIR]')
-        const parts = line.replace('[DIR] ', '').split('  ')
-        const nameSize = parts[0]?.trim() || ''
-        const path = parts[1]?.trim() || ''
-        const name = nameSize.split(' (')[0]?.trim() || ''
-        return { name, path, isDirectory: isDir }
-      }).filter(n => n.name)
+      // The tree browser lists the picked folder as its OWN workspace root so
+      // the Rust containment jail accepts it. This is a UI browse — go STRAIGHT
+      // to the backend, NOT through the model's `file_list` tool executor, so a
+      // model-supplied `workingDirectory` can never pick its own jail root
+      // (security review 2.5.7: that passthrough let a prompt-injected model
+      // enumerate any directory on disk).
+      const data = await backendCall('fs_list', {
+        path: dir,
+        recursive: false,
+        pattern: null,
+        workingDirectory: dir,
+      })
+      const entries: any[] = Array.isArray(data?.entries) ? data.entries : []
+      const nodes: FileTreeNode[] = entries
+        .map((e) => ({ name: e.name as string, path: e.path as string, isDirectory: !!e.isDir }))
+        .filter((n) => n.name)
 
       setFileTree(nodes)
       setWorkingDirectory(dir)

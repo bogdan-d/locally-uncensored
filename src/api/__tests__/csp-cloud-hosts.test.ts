@@ -41,4 +41,13 @@ describe('CSP connect-src cloud provider hosts (GH #71)', () => {
     expect(connectSrc).toContain('https://huggingface.co')
     expect(connectSrc).toContain('https://ollama.com')
   })
+
+  // Security review 2.5.7: a `*.supabase.co` wildcard authorizes EVERY Supabase
+  // project on the internet, turning img-src/media-src into an attacker-readable
+  // exfil sink (anyone can provision a free <ref>.supabase.co and read its
+  // request logs). Pin the one project the app actually talks to.
+  it('pins the Supabase project host and never re-widens to a wildcard', () => {
+    expect(csp).not.toContain('*.supabase.co')
+    expect(connectSrc).toContain('https://lrrhheztdytyfpizvuup.supabase.co')
+  })
 })

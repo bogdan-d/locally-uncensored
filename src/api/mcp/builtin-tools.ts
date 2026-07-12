@@ -716,15 +716,14 @@ async function executeFileList(args: Record<string, any>): Promise<string> {
     path: args.path,
     recursive: args.recursive || false,
     pattern: args.pattern || null,
+    // NOTE: the model does NOT get to pick the jail root. `workingDirectory`
+    // comes only from chatCtx() (the active, user-chosen workspace). The
+    // file-tree UI browser needs to list arbitrary picked folders, so it calls
+    // the `fs_list` backend command DIRECTLY (FileTree.tsx) instead of through
+    // this model tool. Security review 2.5.7: passing the model's own
+    // `workingDirectory` through here let a prompt-injected model set
+    // `workingDirectory: "C:/Users/<user>/.ssh"` and enumerate any directory.
     ...chatCtx(),
-    // The file-tree browser (FileTree.tsx) points the picker at an arbitrary
-    // folder and lists it as its OWN root. Pass that through so the Rust
-    // containment jail uses the picked folder instead of the per-chat sandbox
-    // — otherwise selecting any folder outside ~/agent-workspace fails with
-    // "path escapes the allowed workspace". Overrides chatCtx()'s stale value.
-    ...(typeof args.workingDirectory === 'string' && args.workingDirectory.trim()
-      ? { workingDirectory: args.workingDirectory }
-      : {}),
   })
   if (Array.isArray(data.entries)) {
     return data.entries

@@ -5,6 +5,13 @@ description = "Private, local AI chat & image/video generation"
 authors = ["purpledoubled"]
 edition = "2021"
 
+[features]
+# Test-only: let LU_NO_KEYCHAIN / ~/.lu-no-keychain bypass the OS keychain during
+# unattended rebuild→open E2E loops. NEVER enabled in a shipped build (not in any
+# default), so a release binary always uses the OS vault regardless of env vars or
+# marker files. Build test artifacts with: tauri build --features insecure-test-keychain
+insecure-test-keychain = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
