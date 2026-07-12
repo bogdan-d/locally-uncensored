@@ -444,18 +444,16 @@ export const useCreateStore = create<CreateState>()(
       setTargetResolution: (targetResolution) => set({ targetResolution }),
       setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null }) }),
       setMask: (mask) => set({ mask }),
-      // Flipping to local clears every cloud-only intent (edit/animate/
-      // upscale/eraser have no local lane — David 2026-07-10: advanced ops are
-      // cloud-only; only removebg keeps a local lane via the RMBG node) so the
-      // surface never strands on a dead op the IntentBar no longer shows.
+      // Flipping to local clears the intents that STILL have no local lane
+      // (upscale/eraser hosted endpoints, animate i2v) so the surface never
+      // strands on a dead op the IntentBar no longer shows. Edit keeps its
+      // state since 2.5.7 — it has a local lane now (checkpoint mask inpaint),
+      // exactly like removebg keeps its local RMBG lane.
       setBackend: (backend) =>
         set((s) => {
           if (backend !== 'local') return { backend }
           const patch: Record<string, unknown> = { backend }
           if (s.utilityOp) Object.assign(patch, { utilityOp: null, mask: null, error: null })
-          if (s.imageSubMode === 'img2img' && !s.removebg) {
-            Object.assign(patch, { imageSubMode: 'text2img', source: null, mask: null, sourceSetAt: 0, error: null })
-          }
           if (s.videoSubMode === 'i2v') {
             Object.assign(patch, { videoSubMode: 't2v', source: null, mask: null, sourceSetAt: 0, error: null })
           }

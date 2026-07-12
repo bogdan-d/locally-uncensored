@@ -3,9 +3,9 @@ import { useCreate } from '../../../hooks/useCreate'
 import { useCloudCreate, hasActiveCloudRun } from '../../../hooks/useCloudCreate'
 import { useCloudSession } from '../../../hooks/useCloudSession'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
-import { getLoraModels, getVAEModels } from '../../../api/comfyui'
+import { getLoraModels, getVAEModels, checkComfyConnection, refreshComfyModels } from '../../../api/comfyui'
 import { getAllNodeInfo, clearNodeCache } from '../../../api/comfyui-nodes'
-import { installCustomNodes } from '../../../api/discover'
+import { installCustomNodes, getImageBundles, getVideoBundles, startModelDownload, getDownloadProgress } from '../../../api/discover'
 import { backendCall } from '../../../api/backend'
 import { ensureLocalFilename } from './loadImage'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
@@ -34,11 +34,19 @@ interface CreateExpValue {
    *  RX 7900 XTX): surfaces the honest slow-mode warning instead of a silent
    *  20-minute timeout. */
   comfyOnCpu: boolean
-  /** Install a missing capability in place: download the custom node, restart
-   *  ComfyUI, and re-probe until it's available. Reports progress via the
-   *  optional callback and throws on failure. Currently only background
-   *  removal (the RMBG node). */
-  installCapability: (cap: 'rmbg', onProgress?: (msg: string) => void) => Promise<void>
+  /** Install a missing capability in place: ensure ComfyUI runs (installing it
+   *  first if needed), download the custom node when one is required, restart,
+   *  and re-probe until available. Reports progress via the optional callback
+   *  and throws on failure. 'rmbg' = the RMBG cutout node; 'inpaint-nodes' =
+   *  ComfyUI's core inpaint nodes (nothing to clone — present on any current
+   *  install once ComfyUI is up). */
+  installCapability: (cap: 'rmbg' | 'inpaint-nodes', onProgress?: (msg: string) => void) => Promise<void>
+  /** One-click "everything you need" for a fresh PC: ensure ComfyUI runs
+   *  (installing it first if needed), then download the default starter
+   *  bundle for the intent kind (image → SDXL checkpoint, video → Wan 2.1)
+   *  with streamed progress, refresh ComfyUI's model enums and re-fetch the
+   *  model lists. Throws on failure. */
+  installModelBundle: (kind: 'image' | 'video', onProgress?: (msg: string) => void) => Promise<void>
   /** Runtime backend axis: hosted rendering offered for this session? */
   cloudAvailable: boolean
   quota: CloudQuota | null
@@ -135,13 +143,63 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true }
   }, [connected, setCaps])
 
-  // Install background removal in place — mirrors the VHS one-click flow (#72):
-  // clone the custom node + pip install, restart ComfyUI so it registers, then
-  // poll /object_info (clearing the node cache each round so we don't read the
-  // stale pre-install catalogue) until the RMBG node shows up. The BiRefNet /
-  // RMBG-2.0 cutout model is fetched by the node itself on the first run.
-  const installCapability = useCallback(async (cap: 'rmbg', onProgress?: (msg: string) => void) => {
-    if (cap !== 'rmbg') return
+  // One-click prerequisite: make sure a local ComfyUI is actually running —
+  // start it if it's merely stopped, INSTALL it first if it's missing (the
+  // "complete noob PC" case: every Create tab's Download & install button must
+  // deliver a 100% functional run, not assume ComfyUI exists).
+  const ensureComfyRunning = useCallback(async (onProgress?: (msg: string) => void) => {
+    if (await checkComfyConnection()) return
+    onProgress?.('Starting ComfyUI…')
+    try { await backendCall('start_comfyui') } catch { /* not installed yet — handled below */ }
+    for (let i = 0; i < 15; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      if (await checkComfyConnection()) { checkConnection(); return }
+    }
+    onProgress?.('ComfyUI is not installed — downloading & installing it now (one-time, a few GB)…')
+    await backendCall('install_comfyui')
+    // Poll the same status contract the Settings installer uses. Generous cap:
+    // a slow connection legitimately needs a while for the one-time install.
+    for (let i = 0; i < 2700; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const st = await backendCall<{ status?: string; logs?: string[] }>('install_comfyui_status').catch(() => null)
+      const lastLog = st?.logs?.length ? String(st.logs[st.logs.length - 1]) : ''
+      if (lastLog) onProgress?.(lastLog)
+      if (st?.status === 'complete') break
+      if (st?.status === 'error') {
+        throw new Error(lastLog || 'ComfyUI install failed — see Settings → AI Backends for details.')
+      }
+    }
+    onProgress?.('Starting ComfyUI…')
+    await backendCall('start_comfyui')
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      if (await checkComfyConnection()) { checkConnection(); return }
+    }
+    throw new Error('Installed ComfyUI but it did not come up — check Settings → AI Backends.')
+  }, [checkConnection])
+
+  // Install a capability in place — mirrors the VHS one-click flow (#72):
+  // ensure ComfyUI runs, clone the custom node + pip install where one is
+  // needed, restart ComfyUI so it registers, then poll /object_info (clearing
+  // the node cache each round so we don't read the stale pre-install
+  // catalogue) until the node shows up. The BiRefNet / RMBG-2.0 cutout model
+  // is fetched by the node itself on the first run.
+  const installCapability = useCallback(async (cap: 'rmbg' | 'inpaint-nodes', onProgress?: (msg: string) => void) => {
+    await ensureComfyRunning(onProgress)
+    if (cap === 'inpaint-nodes') {
+      // Core ComfyUI nodes — nothing to clone. If they're still missing after
+      // ComfyUI is up, the install is ancient; re-probe and say so honestly.
+      const nodes = await getAllNodeInfo()
+      const names = new Set(Object.keys(nodes))
+      const ok = names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning')
+      setCaps({ rmbg: names.has('RMBG'), 'inpaint-nodes': ok })
+      if (!ok) {
+        throw new Error(
+          'This ComfyUI is missing its core inpaint nodes (VAEEncodeForInpaint) — update ComfyUI to a current version.',
+        )
+      }
+      return
+    }
     onProgress?.('Downloading & installing the background-removal node — this can take a minute…')
     await installCustomNodes(['rmbg'])
     onProgress?.('Restarting ComfyUI to register the node…')
@@ -168,7 +226,43 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
       "Installed ComfyUI-RMBG and restarted ComfyUI, but it still isn't listing the RMBG node. " +
       'Open the Model Manager to finish the install, or check the ComfyUI console for a pip error.',
     )
-  }, [setCaps])
+  }, [setCaps, ensureComfyRunning])
+
+  // One-click starter models for a fresh PC: ensure ComfyUI, then pull the
+  // default bundle for the intent kind (image → SDXL checkpoint, video →
+  // Wan 2.1 files) through the existing resumable downloader, streaming
+  // percent progress into the card, then refresh ComfyUI's model enums so the
+  // new files are pickable without a restart.
+  const installModelBundle = useCallback(async (kind: 'image' | 'video', onProgress?: (msg: string) => void) => {
+    await ensureComfyRunning(onProgress)
+    const bundle = (kind === 'image' ? getImageBundles() : getVideoBundles())[0]
+    if (!bundle) throw new Error('No starter bundle available for this intent.')
+    for (const file of bundle.files) {
+      if (!file.downloadUrl || !file.filename || !file.subfolder) continue
+      const size = file.sizeGB ? ` (${file.sizeGB} GB)` : ''
+      onProgress?.(`Downloading ${file.filename}${size}…`)
+      const expected = file.sizeGB ? Math.round(file.sizeGB * 1_073_741_824) : undefined
+      const start = await startModelDownload(file.downloadUrl, file.subfolder, file.filename, expected)
+      if (start.status === 'error') throw new Error(start.error || `Could not start the ${file.filename} download.`)
+      // 'exists' = already complete on disk — skip polling.
+      if (start.status !== 'exists') {
+        for (;;) {
+          await new Promise((r) => setTimeout(r, 1500))
+          const all = await getDownloadProgress()
+          const p = Object.values(all).find((d) => d.filename === file.filename)
+          if (!p || p.status === 'complete') break
+          if (p.status === 'error') throw new Error(p.error || `Download failed: ${file.filename}`)
+          if (p.total > 0) {
+            onProgress?.(`Downloading ${file.filename} — ${Math.round((p.progress / p.total) * 100)}%`)
+          }
+        }
+      }
+    }
+    onProgress?.('Refreshing the model list…')
+    await refreshComfyModels().catch(() => false)
+    clearNodeCache()
+    await fetchModels()
+  }, [ensureComfyRunning, fetchModels])
 
   const value: CreateExpValue = {
     generate: backend === 'cloud' ? cloud.generate : generate,
@@ -179,7 +273,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     cancel: () => (hasActiveCloudRun() ? cloud.cancel() : cancel()),
     enhanceVideo: cloud.enhanceVideo,
     samplerList, schedulerList, loraList, vaeList,
-    connected, modelsLoaded, modelLoadError, comfyOnCpu, installCapability,
+    connected, modelsLoaded, modelLoadError, comfyOnCpu, installCapability, installModelBundle,
     cloudAvailable, quota, refreshQuota,
   }
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>

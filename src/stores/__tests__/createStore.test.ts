@@ -737,16 +737,15 @@ describe('createStore', () => {
       expect(after.intent()).not.toBe('upscale')
     })
 
-    it('clears edit (img2img falls back to text2img, source dropped)', () => {
+    it('keeps edit — it has a local lane via checkpoint inpaint (2.5.7)', () => {
       const s = useCreateStore.getState()
       s.setBackend('cloud')
       s.setIntent('edit')
       s.setSource(ref)
       useCreateStore.getState().setBackend('local')
       const after = useCreateStore.getState()
-      expect(after.imageSubMode).toBe('text2img')
-      expect(after.source).toBeNull()
-      expect(after.intent()).toBe('image')
+      expect(after.intent()).toBe('edit')
+      expect(after.source).not.toBeNull()
     })
 
     it('clears animate (i2v falls back to t2v)', () => {

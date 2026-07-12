@@ -287,6 +287,12 @@ export function useCreate() {
       setError('Please add a source image first.')
       return
     }
+    // Local Edit is mask inpaint — without a painted mask it would silently
+    // degrade to plain img2img and repaint the WHOLE image.
+    if (intent === 'edit' && !maskFilename) {
+      setError('Paint a mask first — open the mask editor and mark the area to change.')
+      return
+    }
     if (!isRemoveBg && !activeModel) {
       setError(mode === 'image'
         ? 'No image model selected. Add checkpoints or FLUX models to ComfyUI.'

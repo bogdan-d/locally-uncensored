@@ -386,6 +386,17 @@ export async function buildDynamicWorkflow(
     throw new WorkflowUnavailableError(reason, strategy, installHint)
   }
 
+  // Local Edit (mask inpaint) runs on the SDXL/SD1.5 checkpoint pipeline only.
+  // Reject other strategies explicitly instead of silently dropping the mask —
+  // the pre-2.5.7 behavior was exactly that: a masked edit fell through to
+  // plain img2img and repainted the WHOLE image.
+  if (!isVideo && gp.inputImage && gp.maskImage && strategy !== 'checkpoint') {
+    throw new WorkflowUnavailableError(
+      'Local image editing needs an SD 1.5 / SDXL checkpoint. Pick a checkpoint model for Edit — FLUX and video models are not wired for local inpaint.',
+      strategy,
+    )
+  }
+
   const seed = params.seed === -1 ? Math.floor(Math.random() * 2147483647) : params.seed
 
   // ─── Wrapper Strategies (custom node pipelines — completely different node chains) ───
@@ -672,8 +683,13 @@ export async function buildDynamicWorkflow(
   }
 
   // ─── Phase 3: Latent Initialization ───
+  // Inpaint mode (local Edit): source + painted mask on the checkpoint path.
+  // Takes precedence over plain I2I — a mask means "repaint THIS area", never
+  // "repaint everything". Ported 1:1 from the web app's tested builder
+  // (create-workflows.ts): same node classes, same defaults.
+  const isInpaint = !isVideo && !!gp.inputImage && !!gp.maskImage && strategy === 'checkpoint'
   // I2I mode: LoadImage → VAEEncode instead of empty latent
-  const isI2I = !isVideo && params.inputImage && (params.denoise ?? 1.0) < 1.0
+  const isI2I = !isVideo && !isInpaint && params.inputImage && (params.denoise ?? 1.0) < 1.0
 
   const latentId = String(n++)
 
@@ -754,8 +770,12 @@ export async function buildDynamicWorkflow(
     }
   }
 
+  // The sampler consumes these refs; the I2I/inpaint overrides re-point them.
+  let latentRef: [string, number] = [latentId, 0]
+  let positiveRef: [string, number] = [posId, 0]
+  let negativeRef: [string, number] = [negId, 0]
+
   // I2I override: replace empty latent with LoadImage → VAEEncode
-  let latentSourceId = latentId
   if (isI2I) {
     const loadImageId = String(n++)
     const vaeEncodeId = String(n++)
@@ -767,8 +787,52 @@ export async function buildDynamicWorkflow(
       class_type: 'VAEEncode',
       inputs: { pixels: [loadImageId, 0], vae: [vaeSourceId, vaeOutputSlot] },
     }
-    latentSourceId = vaeEncodeId
+    latentRef = [vaeEncodeId, 0]
     // Remove the empty latent node since we're using the encoded image
+    delete workflow[latentId]
+  } else if (isInpaint) {
+    // Inpaint override: LoadImage + LoadImageMask (channel red — the mask
+    // editor exports white-where-painted on black), then:
+    //   Path B (InpaintModelConditioning, FLUX-fill/SD3-style) when the node
+    //   exists — rewrites BOTH conditionings and emits the latent on slot 2.
+    //   Path A (core VAEEncodeForInpaint) — works with any SDXL/SD1.5
+    //   checkpoint; grow_mask_by feathers the mask edge.
+    const loadImageId = String(n++)
+    const loadMaskId = String(n++)
+    workflow[loadImageId] = {
+      class_type: 'LoadImage',
+      inputs: { image: params.inputImage },
+    }
+    workflow[loadMaskId] = {
+      class_type: 'LoadImageMask',
+      inputs: { image: gp.maskImage, channel: 'red' },
+    }
+    if (allNodes['InpaintModelConditioning']) {
+      const condId = String(n++)
+      workflow[condId] = {
+        class_type: 'InpaintModelConditioning',
+        inputs: {
+          positive: positiveRef, negative: negativeRef,
+          vae: [vaeSourceId, vaeOutputSlot],
+          pixels: [loadImageId, 0], mask: [loadMaskId, 0], noise_mask: true,
+        },
+        _meta: { title: 'Inpaint Path B' },
+      }
+      positiveRef = [condId, 0]
+      negativeRef = [condId, 1]
+      latentRef = [condId, 2]
+    } else {
+      const encId = String(n++)
+      workflow[encId] = {
+        class_type: 'VAEEncodeForInpaint',
+        inputs: {
+          pixels: [loadImageId, 0], vae: [vaeSourceId, vaeOutputSlot],
+          mask: [loadMaskId, 0], grow_mask_by: gp.growMaskBy ?? 6,
+        },
+        _meta: { title: 'Inpaint Path A' },
+      }
+      latentRef = [encId, 0]
+    }
     delete workflow[latentId]
   }
 
@@ -780,15 +844,15 @@ export async function buildDynamicWorkflow(
     class_type: 'KSampler',
     inputs: {
       model: [samplerModelId, 0],
-      positive: [posId, 0],
-      negative: [negId, 0],
-      latent_image: [latentSourceId, 0],
+      positive: positiveRef,
+      negative: negativeRef,
+      latent_image: latentRef,
       seed,
       steps: params.steps,
       cfg: params.cfgScale,
       sampler_name: params.sampler,
       scheduler: params.scheduler,
-      denoise: isI2I ? (params.denoise ?? 0.7) : 1.0,
+      denoise: isInpaint ? (params.denoise ?? 0.85) : isI2I ? (params.denoise ?? 0.7) : 1.0,
     },
   }
 

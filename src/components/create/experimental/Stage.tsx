@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle } from 'lucide-react'
+import { UploadCloud, ImagePlus, Scissors, Wand2, Sparkles, X, Loader2, Download, AlertTriangle, Image as ImageIcon, Film } from 'lucide-react'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { INTENT_MAP } from './intents'
@@ -29,12 +29,24 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
   const setPrompt = useCreateStore((s) => s.setPrompt)
   const caps = useCreateStore((s) => s.caps)
   const backend = useCreateStore((s) => s.backend)
+  const imageModelList = useCreateStore((s) => s.imageModelList)
+  const videoModelList = useCreateStore((s) => s.videoModelList)
+  const { connected, modelsLoaded } = useCreateExp()
   // On the cloud backend the utility ops (background removal, …) run on
   // WaveSpeed's hosted endpoints — there's no local ComfyUI node to install,
   // so the capability is always ready. Only the local backend gates on the
   // node probe (which never runs without a local ComfyUI and would strand
   // cloud users on a dead "Open Model Manager" card).
   const capReady = !meta.capability || backend === 'cloud' || !!caps[meta.capability]
+  // Local model files missing for this intent (fresh PC): gate the stage on a
+  // one-click starter-bundle card. connected === false also gates — the same
+  // button installs ComfyUI itself first. connected === null (still probing)
+  // gates nothing, so the card never flashes during startup.
+  const modelsMissing = backend === 'local' && !!meta.requiresModels && (
+    connected === false ||
+    (connected === true && modelsLoaded &&
+      (meta.requiresModels === 'image' ? imageModelList.length === 0 : videoModelList.length === 0))
+  )
 
   // A result counts for the current source only if it was generated after the
   // source was loaded — otherwise an older gallery item would hijack the stage.
@@ -43,6 +55,8 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
   let body: React.ReactNode
   if (isGenerating) {
     body = <GeneratingView />
+  } else if (modelsMissing) {
+    body = <ModelInstallCard kind={meta.requiresModels!} />
   } else if (meta.capability && !capReady) {
     body = <CapabilityCard cap={meta.capability} />
   } else if (meta.needsSource && !source) {
@@ -279,17 +293,60 @@ function ChangeImageButton({ onChange }: { onChange: (r: Awaited<ReturnType<type
   )
 }
 
+// ── Shared install-card chrome: spinner + streamed status + dismissible error ──
+function InstallCardBody({ run, installing, status, err, onDismiss }: {
+  run: () => void; installing: boolean; status: string; err: string | null; onDismiss: () => void
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2.5 pt-1">
+      {installing ? (
+        <div className="t-control text-gray-400 flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin shrink-0" />
+          <span>{status || 'Installing…'}</span>
+        </div>
+      ) : (
+        <Button variant="primary" icon={Download} onClick={run}>Download &amp; install</Button>
+      )}
+      {err && (
+        <div className="relative t-control text-gray-300 bg-white/[0.03] rounded-[var(--radius-control)] px-2.5 py-2 pr-7 max-w-sm text-left">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={13} className="text-gray-400 shrink-0 mt-px" />
+            <span className="min-w-0 break-words">{err}</span>
+          </div>
+          <button onClick={onDismiss} className="absolute top-1.5 right-1.5 text-gray-500 hover:text-gray-300 transition-colors" title="Dismiss" aria-label="Dismiss">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Capability missing → one-click install right here ──
-function CapabilityCard({ cap }: { cap: 'rmbg' }) {
+const CAP_COPY = {
+  rmbg: {
+    icon: Scissors,
+    title: 'Background removal needs a one-time download',
+    description: 'The AI cutout runs fully locally (ComfyUI-RMBG). This installs the node now — the ~300 MB cutout model downloads automatically on your first cutout.',
+  },
+  'inpaint-nodes': {
+    icon: Wand2,
+    title: 'Image editing needs ComfyUI up and running',
+    description: 'Local Edit repaints the masked area with ComfyUI’s built-in inpaint nodes. This starts ComfyUI (installing it first if needed) and verifies the nodes.',
+  },
+} as const
+
+function CapabilityCard({ cap }: { cap: 'rmbg' | 'inpaint-nodes' }) {
   const { installCapability } = useCreateExp()
   const [installing, setInstalling] = useState(false)
   const [status, setStatus] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const copy = CAP_COPY[cap]
 
   const run = async () => {
     setInstalling(true); setErr(null); setStatus('Starting…')
     try {
-      // On success caps.rmbg flips true and Stage swaps this card for the input slot.
+      // On success the capability flips true and Stage swaps this card for the input slot.
       await installCapability(cap, setStatus)
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -299,33 +356,48 @@ function CapabilityCard({ cap }: { cap: 'rmbg' }) {
   }
 
   return (
-    <EmptyState
-      icon={Scissors}
-      tone="accent"
-      title="Background removal needs a one-time download"
-      description="The AI cutout runs fully locally (ComfyUI-RMBG). This installs the node now — the ~300 MB cutout model downloads automatically on your first cutout."
-    >
-      <div className="flex flex-col items-center gap-2.5 pt-1">
-        {installing ? (
-          <div className="t-control text-gray-400 flex items-center gap-2">
-            <Loader2 size={14} className="animate-spin shrink-0" />
-            <span>{status || 'Installing…'}</span>
-          </div>
-        ) : (
-          <Button variant="primary" icon={Download} onClick={run}>Download &amp; install</Button>
-        )}
-        {err && (
-          <div className="relative t-control text-gray-300 bg-white/[0.03] rounded-[var(--radius-control)] px-2.5 py-2 pr-7 max-w-sm text-left">
-            <div className="flex items-start gap-2">
-              <AlertTriangle size={13} className="text-gray-400 shrink-0 mt-px" />
-              <span className="min-w-0 break-words">{err}</span>
-            </div>
-            <button onClick={() => setErr(null)} className="absolute top-1.5 right-1.5 text-gray-500 hover:text-gray-300 transition-colors" title="Dismiss" aria-label="Dismiss">
-              <X size={12} />
-            </button>
-          </div>
-        )}
-      </div>
+    <EmptyState icon={copy.icon} tone="accent" title={copy.title} description={copy.description}>
+      <InstallCardBody run={run} installing={installing} status={status} err={err} onDismiss={() => setErr(null)} />
+    </EmptyState>
+  )
+}
+
+// ── Local model files missing → one-click starter bundle (fresh-PC path) ──
+const BUNDLE_COPY = {
+  image: {
+    icon: ImageIcon,
+    title: 'Local image generation needs a one-time download',
+    description: 'This sets up everything for a fully local run: ComfyUI itself if it’s missing, plus the Juggernaut XL starter checkpoint (~6.5 GB) — the same model also powers the local Edit tab.',
+  },
+  video: {
+    icon: Film,
+    title: 'Local video generation needs a one-time download',
+    description: 'This sets up everything for a fully local run: ComfyUI itself if it’s missing, plus the Wan 2.1 starter model files (~9.2 GB, 480p, light on VRAM).',
+  },
+} as const
+
+function ModelInstallCard({ kind }: { kind: 'image' | 'video' }) {
+  const { installModelBundle } = useCreateExp()
+  const [installing, setInstalling] = useState(false)
+  const [status, setStatus] = useState('')
+  const [err, setErr] = useState<string | null>(null)
+  const copy = BUNDLE_COPY[kind]
+
+  const run = async () => {
+    setInstalling(true); setErr(null); setStatus('Starting…')
+    try {
+      // On success the model lists refill and Stage swaps this card away.
+      await installModelBundle(kind, setStatus)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  return (
+    <EmptyState icon={copy.icon} tone="accent" title={copy.title} description={copy.description}>
+      <InstallCardBody run={run} installing={installing} status={status} err={err} onDismiss={() => setErr(null)} />
     </EmptyState>
   )
 }

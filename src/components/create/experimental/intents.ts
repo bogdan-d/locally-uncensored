@@ -12,10 +12,12 @@ export interface IntentMeta {
   needsPrompt: boolean
   allowsMask: boolean
   isVideo: boolean
-  /** Capability id (custom-node bundle) this intent depends on, if any. */
-  capability?: 'rmbg'
+  /** Capability id (node probe) this intent depends on, if any. */
+  capability?: 'rmbg' | 'inpaint-nodes'
   /** Single-purpose hosted endpoints — only offered on the cloud backend. */
   cloudOnly?: true
+  /** Local model files this intent needs (gates the Download & install card). */
+  requiresModels?: 'image' | 'video'
   examples: string[]
 }
 
@@ -24,6 +26,7 @@ export const INTENTS: IntentMeta[] = [
     id: 'image', label: 'Image', short: 'Image', icon: ImageIcon,
     placeholder: 'Describe your image…',
     needsSource: false, needsPrompt: true, allowsMask: false, isVideo: false,
+    requiresModels: 'image',
     examples: [
       'a lighthouse at dusk, dramatic storm clouds, cinematic',
       'a neon-lit alley in the rain, reflections, moody',
@@ -31,10 +34,13 @@ export const INTENTS: IntentMeta[] = [
     ],
   },
   {
+    // Local lane since 2.5.7: mask inpaint on the SDXL/SD1.5 checkpoint path
+    // (VAEEncodeForInpaint / InpaintModelConditioning) — the 4th local tab.
+    // Cloud keeps its hosted edit endpoint; both share the MaskEditor.
     id: 'edit', label: 'Edit Image', short: 'Edit', icon: Wand2,
     placeholder: 'Describe the edit — what should change in the painted area…',
     needsSource: true, needsPrompt: true, allowsMask: true, isVideo: false,
-    cloudOnly: true,
+    capability: 'inpaint-nodes', requiresModels: 'image',
     examples: ['replace the sky with a starry night', 'add a leather jacket', 'remove the person on the left'],
   },
   {
@@ -62,6 +68,7 @@ export const INTENTS: IntentMeta[] = [
     id: 'video', label: 'Video', short: 'Video', icon: Video,
     placeholder: 'Describe the motion and the scene…',
     needsSource: false, needsPrompt: true, allowsMask: false, isVideo: true,
+    requiresModels: 'video',
     examples: ['a slow-motion wave breaking on rocks, cinematic', 'timelapse of clouds over a mountain range'],
   },
   {
