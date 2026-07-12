@@ -92,19 +92,28 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
   }
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={intent + (isGenerating ? ':gen' : '')}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.12 }}
-          className="flex-1 min-h-0 flex flex-col"
-        >
-          {body}
-        </motion.div>
-      </AnimatePresence>
+    // The viewer canvas: ONE fixed, centred frame that is identical on every tab
+    // (Image / Edit / Cutout / Video) — same height and width — so switching
+    // modes no longer resizes or shifts the stage. It shares the Gallery bubble's
+    // surface + radius so the two read as a matched pair, and it sits in the same
+    // row as the Gallery (see CreateExperimental) so both are always equal height.
+    // Whatever the mode renders (empty state, dropzone, result, install card) is
+    // centred inside this frame.
+    <div className="flex-1 min-w-0 min-h-0 flex overflow-hidden p-2">
+      <div className="flex-1 min-w-0 rounded-xl bg-gray-50 dark:bg-[#1e1e1e] ring-1 ring-black/[0.04] dark:ring-white/[0.05] flex flex-col overflow-hidden relative">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={intent + (isGenerating ? ':gen' : '')}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.12 }}
+            className="flex-1 min-h-0 flex flex-col"
+          >
+            {body}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </div>
   )
 }
@@ -188,8 +197,10 @@ function InputSlot() {
             drag ? 'border-blue-400 bg-blue-500/10' : 'border-white/10 bg-white/[0.02] hover:border-white/20',
           )}
         >
-          {loading ? <Loader2 className="animate-spin text-gray-400" size={28} /> : (
-            meta.id === 'removebg' ? <Scissors className="text-gray-500" size={28} strokeWidth={1.5} /> : <UploadCloud className="text-gray-500" size={28} strokeWidth={1.5} />
+          {loading ? <Loader2 className="animate-spin text-lu-accent" size={30} /> : (
+            meta.id === 'removebg'
+              ? <Scissors className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={1.5} />
+              : <UploadCloud className="text-lu-accent drop-shadow-[0_0_7px_var(--color-lu-accent-ring)]" size={30} strokeWidth={1.5} />
           )}
           <div className="text-center">
             <div className="t-title text-gray-300">{meta.id === 'removebg' ? 'Drop an image to cut out' : meta.id === 'animate' ? 'Drop an image to animate' : 'Drop an image to edit'}</div>

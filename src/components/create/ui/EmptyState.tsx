@@ -1,7 +1,6 @@
 
 import { motion } from 'framer-motion'
 import type { LucideIcon } from 'lucide-react'
-import { cn } from './cn'
 import { Button } from './Button'
 
 interface Action {
@@ -35,11 +34,19 @@ export function EmptyState({ icon: Icon, logoSrc, title, description, action, se
         {logoSrc ? (
           <img src={logoSrc} alt="" className="mx-auto h-14 w-14 object-contain opacity-90 select-none" draggable={false} />
         ) : (
-          <div className={cn(
-            'mx-auto w-14 h-14 rounded-2xl flex items-center justify-center',
-            tone === 'accent' ? 'bg-white/[0.06] text-gray-300' : 'bg-white/[0.04] text-gray-500',
-          )}>
-            <Icon size={24} strokeWidth={1.5} />
+          // David 2026-07-13: no gray bubble behind the icon — the SVG stands on
+          // its own, lifted only by a soft purple accent glow (a gentle, slow
+          // breathe so it reads as intentional, not a hard animation).
+          <div className="relative mx-auto w-16 h-16 flex items-center justify-center">
+            <motion.span
+              aria-hidden
+              className="absolute rounded-full bg-lu-accent blur-2xl"
+              style={{ width: '3.5rem', height: '3.5rem' }}
+              initial={{ opacity: 0.28, scale: 0.9 }}
+              animate={{ opacity: [0.28, tone === 'accent' ? 0.6 : 0.42, 0.28], scale: [0.9, 1.06, 0.9] }}
+              transition={{ duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+            />
+            <Icon size={36} strokeWidth={1.5} className="relative text-lu-accent drop-shadow-[0_0_8px_var(--color-lu-accent-ring)]" />
           </div>
         )}
         <div className="space-y-1.5">

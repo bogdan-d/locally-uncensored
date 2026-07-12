@@ -91,7 +91,7 @@ function CreateExperimentalInner() {
   }, [intent])
 
   return (
-    <div className="h-full w-full flex flex-col bg-white dark:bg-[#141414] text-gray-200 overflow-hidden">
+    <div className="relative h-full w-full flex flex-col bg-white dark:bg-[#141414] text-gray-200 overflow-hidden">
       <IntentBar />
 
       <AnimatePresence>
@@ -129,24 +129,25 @@ function CreateExperimentalInner() {
         </div>
       )}
 
-      {/* Stage+Composer on the left, the Gallery bubble as a right rail —
-          matched 1:1 with the web companion (the old bottom strip is gone). */}
+      {/* The viewer (Stage) and the Gallery bubble share ONE row, so they're
+          always the exact same height; the prompt window spans the full width
+          beneath them. (Previously the Gallery ran full-height alongside both the
+          viewer AND the composer, so it was taller than the viewer.) */}
       <div className="flex-1 min-h-0 flex overflow-hidden">
-        <div className="flex-1 min-w-0 relative flex flex-col">
-          <Stage
-            displayed={displayed}
-            onOpenMaskEditor={() => setMaskOpen(true)}
-            onEditResult={(it) => { void editResultWithMask(it) }}
-            onFullscreen={(it) => setLightbox(it)}
-          />
-          <Composer onOpenAdvanced={() => setAdvancedOpen(true)} />
-
-          <AdvancedDrawer open={advancedOpen} onClose={() => setAdvancedOpen(false)} />
-          <MaskEditor open={maskOpen} onClose={() => setMaskOpen(false)} />
-        </div>
-
+        <Stage
+          displayed={displayed}
+          onOpenMaskEditor={() => setMaskOpen(true)}
+          onEditResult={(it) => { void editResultWithMask(it) }}
+          onFullscreen={(it) => setLightbox(it)}
+        />
         <CreatePanel open={panelOpen} onOpenChange={setPanelOpen} activeId={shownId} onSelect={openGalleryItem} />
       </div>
+
+      {/* Prompt window — full width, beneath the viewer + gallery. */}
+      <Composer onOpenAdvanced={() => setAdvancedOpen(true)} />
+
+      <AdvancedDrawer open={advancedOpen} onClose={() => setAdvancedOpen(false)} />
+      <MaskEditor open={maskOpen} onClose={() => setMaskOpen(false)} />
 
       <Lightbox item={lightbox} onClose={() => setLightbox(null)} />
       <VhsInstallModal />

@@ -93,7 +93,11 @@ export function Composer({ onOpenAdvanced }: Props) {
     creditsOk
 
   return (
-    <div className="shrink-0 px-4 pb-4 pt-2">
+    // A stable min-height (bottom-anchored) so the prompt window occupies the
+    // same vertical space on every tab — utility modes (no QuickControls / no
+    // prompt) don't shrink it. That keeps the viewer + gallery row above it the
+    // exact SAME height across all tabs, not just within one.
+    <div className="shrink-0 px-4 pb-4 pt-2 min-h-[192px] flex flex-col justify-end">
       <div className="mx-auto w-full max-w-[760px] space-y-2.5">
         {!isUtility && <QuickControls />}
 
