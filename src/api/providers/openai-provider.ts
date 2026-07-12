@@ -138,6 +138,14 @@ function guessContextFromName(model: string): number {
 export class OpenAIProvider implements ProviderClient {
   readonly id = 'openai' as const
 
+  // Real context windows from the provider's /models catalogue (LU Cloud
+  // sends context_length per model). The name heuristic underestimates new
+  // cloud models badly (Qwen3.6-35B-A3B → 32k guess vs 262k real), which
+  // shrinks the applyMaxTokens headroom toward the 256 floor on long chats
+  // and truncates answers. Filled by listModels; instances are cached in the
+  // registry, so the catalogue survives across requests.
+  private catalogContext = new Map<string, number>()
+
   constructor(private config: ProviderConfig) {}
 
   private get baseUrl(): string {
@@ -257,12 +265,14 @@ export class OpenAIProvider implements ProviderClient {
     const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map()
     let promptTokens = 0
     let completionTokens = 0
-    const doneChunk = (): ChatStreamChunk => {
+    let finishReason: string | undefined
+    const doneChunk = (fallbackReason: string): ChatStreamChunk => {
       const toolCalls = this.flushToolCalls(toolCallAccum)
       return {
         content: '',
         toolCalls: toolCalls.length ? toolCalls : undefined,
         done: true,
+        finishReason: finishReason ?? fallbackReason,
         promptEvalCount: promptTokens || undefined,
         evalCount: completionTokens || undefined,
       }
@@ -270,7 +280,7 @@ export class OpenAIProvider implements ProviderClient {
 
     for await (const event of parseSSEStream(res)) {
       if (event.data === '[DONE]') {
-        yield doneChunk()
+        yield doneChunk('stop')
         return
       }
 
@@ -304,6 +314,13 @@ export class OpenAIProvider implements ProviderClient {
 
       const choice = chunk.choices?.[0]
       if (!choice) continue
+
+      // Capture WHY the model stopped ('stop', 'length', 'content_filter').
+      // 'length' with zero content is the reasoning-loop failure mode: the
+      // whole token budget went into thinking and no answer was ever written
+      // (David, cloud Qwen3.6, 2026-07-12) — the chat layer needs the reason
+      // to explain the empty bubble.
+      if (choice.finish_reason) finishReason = choice.finish_reason
 
       const content = choice.delta?.content || ''
 
@@ -342,8 +359,13 @@ export class OpenAIProvider implements ProviderClient {
       // chunk, which now carries the captured usage.
     }
 
-    // Stream ended without an explicit [DONE] sentinel.
-    yield doneChunk()
+    // Stream ended without an explicit [DONE] sentinel. If the server also
+    // never sent a finish_reason, the connection was cut mid-generation
+    // (proxy idle-timeout, upstream drop) — a clean FIN ends parseSSEStream
+    // without any error, which used to masquerade as a normal completion and
+    // leave the user a silent empty bubble. Tag it 'disconnect' so the chat
+    // layer can say so.
+    yield doneChunk('disconnect')
   }
 
   async chatWithTools(
@@ -448,16 +470,24 @@ export class OpenAIProvider implements ProviderClient {
       })))
     }
 
-    return models.map(m => ({
-      id: m.id,
-      name: m.name ?? m.id,
-      provider: 'openai' as const,
-      providerName: this.config.name,
-      contextLength: m.context_length ?? KNOWN_CONTEXT[m.id] ?? guessContextFromName(m.id),
-      supportsTools: true,
-      supportsVision: m.input_modalities?.includes('image') || undefined,
-      thinkMode: m.think,
-    }))
+    return models.map(m => {
+      // Remember the server-declared window for applyMaxTokens (see
+      // catalogContext). Server value beats every heuristic — it reflects
+      // what THIS deployment actually serves.
+      if (m.context_length && m.context_length > 0) {
+        this.catalogContext.set(m.id, m.context_length)
+      }
+      return {
+        id: m.id,
+        name: m.name ?? m.id,
+        provider: 'openai' as const,
+        providerName: this.config.name,
+        contextLength: m.context_length ?? KNOWN_CONTEXT[m.id] ?? guessContextFromName(m.id),
+        supportsTools: true,
+        supportsVision: m.input_modalities?.includes('image') || undefined,
+        thinkMode: m.think,
+      }
+    })
   }
 
   async checkConnection(): Promise<boolean> {
@@ -531,10 +561,14 @@ export class OpenAIProvider implements ProviderClient {
 
   async getContextLength(model: string): Promise<number> {
     // Cascade:
-    //   1. KNOWN_CONTEXT lookup (kein Network, instant)
-    //   2. probeContextFromServer (LM Studio enhanced + generic /v1/models/<id>)
-    //   3. Heuristik aus dem Modell-Namen
-    //   4. Konservativer 8192er-Fallback (in guessContextFromName)
+    //   1. Server-declared context_length from the /models catalogue (LU
+    //      Cloud) — authoritative for the deployment, beats every heuristic
+    //   2. KNOWN_CONTEXT lookup (kein Network, instant)
+    //   3. probeContextFromServer (LM Studio enhanced + generic /v1/models/<id>)
+    //   4. Heuristik aus dem Modell-Namen
+    //   5. Konservativer 8192er-Fallback (in guessContextFromName)
+    const catalog = this.catalogContext.get(model)
+    if (catalog && catalog > 0) return catalog
     if (KNOWN_CONTEXT[model]) return KNOWN_CONTEXT[model]
     const probed = await this.probeContextFromServer(model)
     if (probed) return probed

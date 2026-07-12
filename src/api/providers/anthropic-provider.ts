@@ -164,23 +164,33 @@ export class AnthropicProvider implements ProviderClient {
         }
 
         case 'message_delta': {
-          // End of message — flush tool calls
+          // End of message — flush tool calls. Map Anthropic's stop_reason
+          // onto the unified finishReason ('max_tokens' → 'length', the key
+          // the chat layer uses to explain thought-only/truncated turns).
+          const stopReason = (data.delta as any)?.stop_reason as string | undefined
           const toolCalls = this.flushToolUseBlocks(toolUseBlocks)
-          yield { content: '', toolCalls: toolCalls.length ? toolCalls : undefined, done: true }
+          yield {
+            content: '',
+            toolCalls: toolCalls.length ? toolCalls : undefined,
+            done: true,
+            finishReason: stopReason === 'max_tokens' ? 'length' : (stopReason || 'stop'),
+          }
           return
         }
 
         case 'message_stop': {
           const toolCalls2 = this.flushToolUseBlocks(toolUseBlocks)
-          yield { content: '', toolCalls: toolCalls2.length ? toolCalls2 : undefined, done: true }
+          yield { content: '', toolCalls: toolCalls2.length ? toolCalls2 : undefined, done: true, finishReason: 'stop' }
           return
         }
       }
     }
 
-    // If stream ended without explicit message_stop
+    // Stream ended without an explicit message_delta/message_stop — the
+    // connection was cut mid-generation (same semantics as the OpenAI
+    // provider's missing-[DONE] path).
     const toolCalls = this.flushToolUseBlocks(toolUseBlocks)
-    yield { content: '', toolCalls: toolCalls.length ? toolCalls : undefined, done: true }
+    yield { content: '', toolCalls: toolCalls.length ? toolCalls : undefined, done: true, finishReason: 'disconnect' }
   }
 
   async chatWithTools(

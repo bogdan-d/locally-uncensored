@@ -144,6 +144,21 @@ const THINKING_COMPATIBLE = [
   'qwen3-coder',
   'gemma3',      // Gemma 3+ supports thinking via Ollama
   'gemma4',
+  // Families below all take Ollama's `think` param (they shipped after the
+  // list above was written and the Think toggle stayed wrongly grayed out —
+  // David 2026-07-12: "guck, dass jedes Schema von den Models gedeckt ist").
+  // A false positive is caught by the retry-without-think fallback in
+  // useChat, so listing errs on the side of enabling the toggle.
+  'gpt-oss',            // OpenAI gpt-oss 20b/120b — thinking levels
+  'magistral',          // Mistral's reasoning line
+  'deepseek-v3.1',      // hybrid think/non-think
+  'deepseek-v3.2',
+  'exaone-deep',
+  'phi4-reasoning',     // covers phi-4-reasoning(+plus) after dash-collapse
+  'phi4-mini-reasoning',
+  'glm4.5', 'glm4.6', 'glm4.7',  // GLM hybrid reasoning (NOT plain glm4:9b)
+  'kimi-k2-thinking',
+  'minimax-m2',
 ]
 
 /**

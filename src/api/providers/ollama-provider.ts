@@ -19,6 +19,8 @@ import { repairToolCallArgs, extractToolCallsFromContent } from '../../lib/tool-
 interface OllamaChatChunk {
   message?: { content: string; thinking?: string; tool_calls?: { function: { name: string; arguments: Record<string, any> } }[] }
   done?: boolean
+  // Why generation ended ('stop' | 'length' | 'load' | …), final chunk only.
+  done_reason?: string
   // Server-reported timing in the final done:true chunk (Bug M v2.4.7).
   // Ollama returns nanoseconds; we convert to ms before yielding upstream.
   eval_count?: number          // tokens the model produced
@@ -159,6 +161,7 @@ export class OllamaProvider implements ProviderClient {
         thinking: chunk.message?.thinking || undefined,
         toolCalls: toolCalls?.length ? toolCalls : undefined,
         done: chunk.done || false,
+        finishReason: chunk.done_reason || undefined,
         // Bug M v2.4.7 — pass through server-side generation metrics so the
         // benchmark can report Ollama's own measurement instead of trusting
         // client-side TTFT, which WebView2 release-mode buffers into

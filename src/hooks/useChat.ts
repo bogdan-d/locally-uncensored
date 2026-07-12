@@ -195,17 +195,24 @@ export function useChat() {
       // Memory injection is non-critical
     }
 
-    // For non-Ollama providers, inject thinking via system prompt — but only
-    // for models where the Think toggle actually applies. Server-declared
-    // think capability (LU Cloud models carry thinkMode from /models) wins
-    // over the local name-heuristic: 'always' reasoners use their native
-    // channel untouched, 'never' instruct models get nothing (the blanket
-    // injection made them burn billed tokens on reasoning we then discard).
+    // For non-Ollama providers, inject thinking via system prompt — but ONLY
+    // for endpoints that declared nothing about think capability (generic
+    // OpenAI-compat: LM Studio, vLLM, …). Models with a server-declared
+    // thinkMode (LU Cloud /models carries `think`) must NOT get the tag
+    // injection on top of reasoning_effort: the upstream already runs its
+    // native reasoning template/parser (reasoning_content channel), and a
+    // second, conflicting "write <think> tags, answer outside them"
+    // instruction can trap the model in a reasoning loop until the budget is
+    // gone — David's cloud Qwen3.6 burned 40k chars of thinking on "6×9" and
+    // never answered (2026-07-12). 'always' reasoners use their native
+    // channel untouched; 'never' instruct models get nothing (the blanket
+    // injection made them burn billed tokens on reasoning we then discard);
+    // 'toggle' models get reasoning_effort only.
     const providerId = getProviderIdFromModel(activeModel)
     const activeMeta = useModelStore.getState().models.find((m) => m.name === activeModel)
     const thinkMode = activeMeta && 'thinkMode' in activeMeta ? activeMeta.thinkMode : undefined
     const canThink = thinkMode ? thinkMode === 'toggle' : isThinkingCompatible(activeModel)
-    if (settings.thinkingEnabled && providerId !== 'ollama' && canThink) {
+    if (settings.thinkingEnabled && providerId !== 'ollama' && canThink && thinkMode === undefined) {
       systemPrompt = (systemPrompt || '') + '\n\nBefore answering, reason through your thinking inside <think></think> tags. Your thinking will be hidden from the user. After thinking, provide your answer outside the tags.'
     }
 
@@ -338,6 +345,9 @@ export function useChat() {
       // can still explain itself instead of rendering as a silent empty
       // bubble (live find 2026-06-11: gemma4 + remembered tool results).
       let hiddenThinking = ""
+      // Why the backend said generation ended ('length', 'disconnect', …) —
+      // drives the honest empty-reply explanation below.
+      let finishReason: string | undefined
 
       for await (const chunk of stream) {
         // Abort fast-path: if the user hit Stop while a thinking-heavy model
@@ -419,6 +429,7 @@ export function useChat() {
         }
 
         if (chunk.done) {
+          if (chunk.finishReason) finishReason = chunk.finishReason
           // Final safety pass — catches any orphan tags that leaked through
           // mid-stream (partial chunks, provider restarts, etc.).
           contentRef.current = finalStripThinkingTags(contentRef.current, keepThinking)
@@ -456,12 +467,30 @@ export function useChat() {
       // leaving the user staring at silent dead air forever.
       if (!abort.signal.aborted && contentRef.current.trim() === "") {
         const captured = (thinkingRef.current || finalStripThinkingTags(hiddenThinking, false)).trim()
+        // Honest, reason-specific note for the empty bubble. Before this, a
+        // thought-only turn with Thinking ON stored the reasoning but left
+        // content EMPTY — the user saw a collapsed Thinking pill and nothing
+        // else, which reads as a hang/crash (David, cloud Qwen3.6 2026-07-12:
+        // 40k chars of looped reasoning, token budget gone, zero answer).
+        const explanation =
+          finishReason === 'length'
+            ? (captured
+                ? 'The model spent its entire token budget thinking and never wrote the answer. Try again — reasoning is not deterministic — or turn Thinking off for this question.'
+                : 'The model hit its token limit before writing an answer. Try again, or raise Max Tokens in Settings.')
+            : finishReason === 'disconnect'
+              ? 'The connection dropped before the model finished its answer. Check your network and try again.'
+              : captured && keepThinking
+                ? 'The model finished thinking but never wrote an answer. Try again — or turn Thinking off for this question.'
+                : "I didn't return a visible answer that time — please try again."
         if (captured && keepThinking) {
-          // Thinking ON: surface the reasoning so the empty bubble explains
-          // itself (MessageBubble renders it + a nudge) instead of dead air.
+          // Thinking ON: surface the reasoning AND say why there's no answer
+          // (the collapsed thinking pill alone reads as dead air).
           useChatStore
             .getState()
             .updateMessageThinking(convId!, assistantMessage.id, captured)
+          useChatStore
+            .getState()
+            .updateMessageContent(convId!, assistantMessage.id, explanation)
         } else if (captured) {
           // Thinking OFF but the model still reasoned (Gemma keeps reasoning when
           // we pass `think:undefined`) and produced no visible answer. David
@@ -471,11 +500,14 @@ export function useChat() {
           // won't reach here; this covers a plain Q&A that thought itself out.)
           useChatStore
             .getState()
-            .updateMessageContent(
-              convId!,
-              assistantMessage.id,
-              "I didn't return a visible answer that time — please try again.",
-            )
+            .updateMessageContent(convId!, assistantMessage.id, explanation)
+        } else if (finishReason === 'length' || finishReason === 'disconnect') {
+          // No reasoning captured either — the turn produced literally
+          // nothing because the budget ran out / the stream was cut. Still
+          // explain instead of leaving dead air.
+          useChatStore
+            .getState()
+            .updateMessageContent(convId!, assistantMessage.id, explanation)
         }
       }
     } catch (err) {

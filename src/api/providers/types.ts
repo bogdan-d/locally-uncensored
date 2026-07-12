@@ -130,6 +130,12 @@ export interface ChatStreamChunk {
   thinking?: string    // Model reasoning (Ollama thinking field, <think> tags)
   toolCalls?: ToolCall[]
   done: boolean
+  // Why generation ended, on the final done:true chunk. 'stop' | 'length'
+  // (token budget exhausted — e.g. the whole budget went into reasoning) |
+  // 'disconnect' (the stream closed without any completion signal: proxy
+  // timeout, upstream cut). Lets the chat layer explain an empty reply
+  // instead of rendering silent dead air.
+  finishReason?: string
   // Server-reported generation metrics (Bug M v2.4.7 — Ollama only). Released
   // in the final done:true chunk. Authoritative tok/s = evalCount /
   // (evalDurationMs / 1000). Prefer these over client-side JS timing whenever
