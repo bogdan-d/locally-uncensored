@@ -13,8 +13,9 @@
  *
  * Run: npx vitest run src/api/__tests__/provider-finish-reason.test.ts
  */
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { OpenAIProvider } from '../providers/openai-provider'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { OpenAIProvider, __clearContextCatalogForTests } from '../providers/openai-provider'
+import { AnthropicProvider } from '../providers/anthropic-provider'
 import type { ProviderConfig, ChatStreamChunk } from '../providers/types'
 import { isThinkingCompatible } from '../../lib/model-compatibility'
 
@@ -103,6 +104,8 @@ describe('chatStream finishReason', () => {
 })
 
 describe('getContextLength — server catalogue beats name heuristic', () => {
+  beforeEach(() => __clearContextCatalogForTests())
+
   it('uses context_length from /models for cloud models after listModels ran', async () => {
     const provider = new OpenAIProvider(makeConfig())
     // Name heuristic alone would say 32768 for a qwen3.x name.
@@ -120,6 +123,76 @@ describe('getContextLength — server catalogue beats name heuristic', () => {
     // The catalogue value must now win — otherwise applyMaxTokens computes
     // headroom against 32k and starves long chats down to the 256 floor.
     expect(await provider.getContextLength('Qwen/Qwen3.6-35B-A3B')).toBe(262144)
+  })
+
+  it('survives across provider instances (lu-cloud builds a fresh delegate per call)', async () => {
+    // LuCloudProvider constructs a NEW OpenAIProvider for every call because
+    // the Supabase bearer rotates. listModels runs through one delegate,
+    // chatStream/applyMaxTokens through another — the catalogue must be
+    // shared per endpoint, not per instance, or the fix never engages.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: [{ id: 'Qwen/Qwen3.6-35B-A3B', object: 'model', context_length: 262144 }],
+    }), { status: 200 }))
+    await new OpenAIProvider(makeConfig({ apiKey: 'token-1' })).listModels()
+
+    const second = new OpenAIProvider(makeConfig({ apiKey: 'token-2' }))
+    expect(await second.getContextLength('Qwen/Qwen3.6-35B-A3B')).toBe(262144)
+
+    // Different endpoint, same model id → must NOT inherit the value.
+    const other = new OpenAIProvider(makeConfig({ baseUrl: 'https://other.test.com/v1' }))
+    expect(await other.getContextLength('Qwen/Qwen3.6-35B-A3B')).toBe(32768)
+  })
+})
+
+describe('stream_options include_usage — real usage on every backend', () => {
+  it('sends stream_options for cloud endpoints and surfaces usage on the done chunk', async () => {
+    const provider = new OpenAIProvider(makeConfig())
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse([
+      '{"choices":[{"delta":{"content":"4"}}]}',
+      '{"choices":[{"delta":{},"finish_reason":"stop"}]}',
+      '{"choices":[],"usage":{"prompt_tokens":85,"completion_tokens":3}}',
+      '[DONE]',
+    ]))
+
+    const chunks = await collect(provider.chatStream('m', [{ role: 'user', content: '2+2' }]))
+    const body = JSON.parse((spy.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.stream_options).toEqual({ include_usage: true })
+
+    const done = chunks.find(c => c.done)
+    expect(done?.promptEvalCount).toBe(85)
+    expect(done?.evalCount).toBe(3)
+  })
+
+  it('drops stream_options on a 422 retry (endpoint rejects unknown params)', async () => {
+    const provider = new OpenAIProvider(makeConfig())
+    const spy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response('{"error":"unknown param"}', { status: 422 }))
+      .mockResolvedValueOnce(sseResponse([
+        '{"choices":[{"delta":{"content":"ok"}}]}',
+        '[DONE]',
+      ]))
+
+    const chunks = await collect(provider.chatStream('m', [{ role: 'user', content: 'hi' }]))
+    expect(chunks.some(c => c.content === 'ok')).toBe(true)
+    const retryBody = JSON.parse((spy.mock.calls[1][1] as RequestInit).body as string)
+    expect('stream_options' in retryBody).toBe(false)
+  })
+})
+
+describe('anthropic stream — real usage on the done chunk', () => {
+  it('surfaces message_start input_tokens + message_delta output_tokens', async () => {
+    const provider = new AnthropicProvider(makeConfig({ id: 'anthropic', baseUrl: 'https://api.anthropic.com' } as never) as never)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(sseResponse([
+      '{"type":"message_start","message":{"id":"m1","usage":{"input_tokens":85,"output_tokens":1}}}',
+      '{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"7"}}',
+      '{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}',
+    ]))
+
+    const chunks = await collect(provider.chatStream('claude-sonnet-5', [{ role: 'user', content: '3+4' }]))
+    const done = chunks.find(c => c.done)
+    expect(done?.promptEvalCount).toBe(85)
+    expect(done?.evalCount).toBe(3)
+    expect(done?.finishReason).toBe('end_turn')
   })
 })
 

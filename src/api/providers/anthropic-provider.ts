@@ -132,11 +132,22 @@ export class AnthropicProvider implements ProviderClient {
 
     // Track tool use blocks being built
     const toolUseBlocks: Map<number, { id: string; name: string; input: string }> = new Map()
+    // Real token usage: message_start carries input_tokens, message_delta the
+    // cumulative output_tokens. Surfaced on the done chunk exactly like the
+    // OpenAI provider so the TokenCounter gets a real anchor on every backend.
+    let inputTokens = 0
+    let outputTokens = 0
 
     for await (const { data } of parseSSEWithEvents<AnthropicStreamEvent>(res)) {
       if (options?.signal?.aborted) break
 
       switch (data.type) {
+        case 'message_start': {
+          const u = data.message?.usage
+          if (u?.input_tokens) inputTokens = u.input_tokens
+          break
+        }
+
         case 'content_block_start': {
           if (data.content_block?.type === 'tool_use') {
             toolUseBlocks.set(data.index!, {
@@ -168,19 +179,25 @@ export class AnthropicProvider implements ProviderClient {
           // onto the unified finishReason ('max_tokens' → 'length', the key
           // the chat layer uses to explain thought-only/truncated turns).
           const stopReason = (data.delta as any)?.stop_reason as string | undefined
+          if (data.usage?.output_tokens) outputTokens = data.usage.output_tokens
           const toolCalls = this.flushToolUseBlocks(toolUseBlocks)
           yield {
             content: '',
             toolCalls: toolCalls.length ? toolCalls : undefined,
             done: true,
             finishReason: stopReason === 'max_tokens' ? 'length' : (stopReason || 'stop'),
+            promptEvalCount: inputTokens || undefined,
+            evalCount: outputTokens || undefined,
           }
           return
         }
 
         case 'message_stop': {
           const toolCalls2 = this.flushToolUseBlocks(toolUseBlocks)
-          yield { content: '', toolCalls: toolCalls2.length ? toolCalls2 : undefined, done: true, finishReason: 'stop' }
+          yield {
+            content: '', toolCalls: toolCalls2.length ? toolCalls2 : undefined, done: true, finishReason: 'stop',
+            promptEvalCount: inputTokens || undefined, evalCount: outputTokens || undefined,
+          }
           return
         }
       }
@@ -190,7 +207,10 @@ export class AnthropicProvider implements ProviderClient {
     // connection was cut mid-generation (same semantics as the OpenAI
     // provider's missing-[DONE] path).
     const toolCalls = this.flushToolUseBlocks(toolUseBlocks)
-    yield { content: '', toolCalls: toolCalls.length ? toolCalls : undefined, done: true, finishReason: 'disconnect' }
+    yield {
+      content: '', toolCalls: toolCalls.length ? toolCalls : undefined, done: true, finishReason: 'disconnect',
+      promptEvalCount: inputTokens || undefined, evalCount: outputTokens || undefined,
+    }
   }
 
   async chatWithTools(

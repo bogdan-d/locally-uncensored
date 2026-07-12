@@ -133,20 +133,32 @@ function guessContextFromName(model: string): number {
   return 8192
 }
 
+// Real context windows from the provider's /models catalogue (LU Cloud sends
+// context_length per model). The name heuristic underestimates new cloud
+// models badly (Qwen3.6-35B-A3B → 32k guess vs 262k real), which shrinks the
+// applyMaxTokens headroom toward the 256 floor on long chats and truncates
+// answers. Module-level and keyed by endpoint — NOT an instance field: the
+// lu-cloud provider builds a FRESH OpenAIProvider delegate on every call (its
+// bearer token rotates), so an instance map is always empty exactly where it
+// matters. listModels fills it through one delegate; chatStream's
+// applyMaxTokens and getContextLength read it through another.
+const catalogContext = new Map<string, number>()
+
+/** Test-only: reset the endpoint catalogue between test cases. */
+export function __clearContextCatalogForTests(): void {
+  catalogContext.clear()
+}
+
 // ── Provider Implementation ────────────────────────────────────
 
 export class OpenAIProvider implements ProviderClient {
   readonly id = 'openai' as const
 
-  // Real context windows from the provider's /models catalogue (LU Cloud
-  // sends context_length per model). The name heuristic underestimates new
-  // cloud models badly (Qwen3.6-35B-A3B → 32k guess vs 262k real), which
-  // shrinks the applyMaxTokens headroom toward the 256 floor on long chats
-  // and truncates answers. Filled by listModels; instances are cached in the
-  // registry, so the catalogue survives across requests.
-  private catalogContext = new Map<string, number>()
-
   constructor(private config: ProviderConfig) {}
+
+  private catalogKey(model: string): string {
+    return `${this.baseUrl}|${model}`
+  }
 
   private get baseUrl(): string {
     return this.config.baseUrl.replace(/\/+$/, '')
@@ -230,9 +242,12 @@ export class OpenAIProvider implements ProviderClient {
     // it — we handle that with a retry below.
     if (options?.thinking === true) body.reasoning_effort = 'high'
     else if (options?.thinking === false) body.reasoning_effort = 'minimal'
-    // Ask LM Studio / local openai-compat servers for REAL token usage in a
-    // final stream chunk (choices:[] + usage:{...}). Dropped on 400 below.
-    if (this.useLocalProxy) body.stream_options = { include_usage: true }
+    // Ask the server for REAL token usage in a final stream chunk
+    // (choices:[] + usage:{...}). OpenAI, DeepInfra (LU Cloud), Groq, vLLM and
+    // LM Studio all honor stream_options; an endpoint that rejects unknown
+    // params 400/422s and the retry below drops it. Real usage is what keeps
+    // the TokenCounter honest — a char/4 estimate can't see the system prompt.
+    body.stream_options = { include_usage: true }
 
     if (this.useLocalProxy) await ensureProxyAllowsHost(this.baseUrl)
     const fetcher = this.useLocalProxy ? localFetchStream : fetch
@@ -475,7 +490,7 @@ export class OpenAIProvider implements ProviderClient {
       // catalogContext). Server value beats every heuristic — it reflects
       // what THIS deployment actually serves.
       if (m.context_length && m.context_length > 0) {
-        this.catalogContext.set(m.id, m.context_length)
+        catalogContext.set(this.catalogKey(m.id), m.context_length)
       }
       return {
         id: m.id,
@@ -567,7 +582,7 @@ export class OpenAIProvider implements ProviderClient {
     //   3. probeContextFromServer (LM Studio enhanced + generic /v1/models/<id>)
     //   4. Heuristik aus dem Modell-Namen
     //   5. Konservativer 8192er-Fallback (in guessContextFromName)
-    const catalog = this.catalogContext.get(model)
+    const catalog = catalogContext.get(this.catalogKey(model))
     if (catalog && catalog > 0) return catalog
     if (KNOWN_CONTEXT[model]) return KNOWN_CONTEXT[model]
     const probed = await this.probeContextFromServer(model)
