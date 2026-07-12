@@ -23,6 +23,8 @@ interface AnthropicStreamEvent {
   content_block?: { type: string; id?: string; name?: string; input?: any; text?: string }
   delta?: { type: string; text?: string; partial_json?: string; thinking?: string }
   message?: { id: string; usage?: { input_tokens: number; output_tokens: number } }
+  // message_delta events carry cumulative output usage at the event top level.
+  usage?: { input_tokens?: number; output_tokens?: number }
 }
 
 interface AnthropicResponse {
