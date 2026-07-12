@@ -873,9 +873,15 @@ function buildRemoveBgWorkflow(params: GenerateParams, rmbgMeta: any): Record<st
   const workflow: Record<string, any> = {}
   workflow['1'] = { class_type: 'LoadImage', inputs: { image: params.inputImage } }
 
+  // Fill BOTH required AND optional widgets from the live schema. ComfyUI-RMBG
+  // declares process_res / sensitivity / mask_blur / mask_offset as "optional"
+  // in INPUT_TYPES but its Python reads them as plain kwargs, so omitting them
+  // throws "Error in batch processing: 'process_res' (RMBG)". Defaulting every
+  // widget from object_info keeps the graph valid across RMBG versions.
   const required: Record<string, any> = rmbgMeta?.input?.required ?? {}
+  const optional: Record<string, any> = rmbgMeta?.input?.optional ?? {}
   const rmbgInputs: Record<string, any> = { image: ['1', 0] }
-  for (const [name, spec] of Object.entries(required)) {
+  for (const [name, spec] of Object.entries({ ...required, ...optional })) {
     if (name === 'image') continue
     const d = rmbgWidgetDefault(name, spec)
     if (d.set) rmbgInputs[name] = d.value
@@ -908,7 +914,7 @@ function rmbgWidgetDefault(name: string, spec: any): { set: boolean; value?: any
   }
   if (t === 'BOOLEAN') return { set: true, value: cfg?.default ?? false }
   if (t === 'INT' || t === 'FLOAT') return { set: true, value: cfg?.default ?? 0 }
-  if (t === 'STRING') return { set: true, value: cfg?.default ?? '' }
+  if (t === 'STRING' || t === 'COLORCODE') return { set: true, value: cfg?.default ?? '' }
   return { set: false }
 }
 

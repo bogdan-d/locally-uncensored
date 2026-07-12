@@ -27,10 +27,16 @@ const RMBG_NODES = {
       required: {
         image: ['IMAGE'],
         model: [['RMBG-2.0', 'INSPYRENET', 'BEN2', 'BiRefNet-general'], { default: 'RMBG-2.0' }],
+      },
+      // ComfyUI-RMBG declares these OPTIONAL in INPUT_TYPES, but its Python reads
+      // them as plain kwargs — omitting any throws "'process_res' (RMBG)". The
+      // graph must default every widget, required AND optional, from the schema.
+      optional: {
         sensitivity: ['FLOAT', { default: 1.0, min: 0, max: 1, step: 0.01 }],
         process_res: ['INT', { default: 1024, min: 256, max: 2048, step: 128 }],
         mask_blur: ['INT', { default: 0, min: 0, max: 64 }],
         background: [['Alpha', 'black', 'white', 'green'], { default: 'Alpha' }],
+        background_color: ['COLORCODE', { default: '#222222' }],
         invert_output: ['BOOLEAN', { default: false }],
       },
     },
@@ -73,6 +79,7 @@ describe('buildDynamicWorkflow — local background removal (RMBG cutout)', () =
     expect(rmbg.inputs.process_res).toBe(1024)     // INT default
     expect(rmbg.inputs.invert_output).toBe(false)  // BOOLEAN default
     expect(rmbg.inputs.background).toBe('Alpha')   // nudged to transparent
+    expect(rmbg.inputs.background_color).toBe('#222222') // COLORCODE default (optional widget)
     // SaveImage takes RMBG's IMAGE output (slot 0) → transparent PNG.
     expect(save.inputs.images).toEqual([rmbgId, 0])
   })
