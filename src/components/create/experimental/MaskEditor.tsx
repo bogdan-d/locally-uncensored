@@ -212,7 +212,7 @@ function MaskEditorInner({ onClose }: { onClose: () => void }) {
     <motion.div
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       role="dialog" aria-modal="true" aria-labelledby="mask-editor-title"
-      className="fixed inset-0 z-[90] bg-[#141414] flex flex-col"
+      className="fixed inset-0 z-[90] bg-white dark:bg-[#141414] flex flex-col"
     >
       {/* top bar */}
       <div className="flex items-center justify-between px-4 h-12 border-b border-white/[0.06] shrink-0">

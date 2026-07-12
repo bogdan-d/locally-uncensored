@@ -60,7 +60,7 @@ export function Drawer({ open, onClose, title, width = 320, children, footer }: 
             style={{ width }}
             className={cn(
               'absolute top-0 right-0 bottom-0 z-50 flex flex-col',
-              'bg-[#1e1e1e] border-l border-white/[0.08] shadow-[var(--shadow-xl)]',
+              'bg-white dark:bg-[#1e1e1e] border-l border-white/[0.08] shadow-[var(--shadow-xl)]',
             )}
           >
             <div className="flex items-center justify-between px-4 h-12 border-b border-white/[0.06] shrink-0">

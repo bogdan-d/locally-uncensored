@@ -154,44 +154,54 @@ function InputSlot() {
   }
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6">
-      <div
-        onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
-        className={cn(
-          'w-full max-w-sm aspect-[5/4] min-h-[220px] max-h-[44vh] rounded-[var(--radius-panel)] border-2 border-dashed flex flex-col items-center justify-center gap-3 cursor-pointer transition-colors',
-          drag ? 'border-blue-400 bg-blue-500/10' : 'border-white/10 bg-white/[0.02] hover:border-white/20',
-        )}
-      >
-        {loading ? <Loader2 className="animate-spin text-gray-400" size={28} /> : (
-          meta.id === 'removebg' ? <Scissors className="text-gray-500" size={28} strokeWidth={1.5} /> : <UploadCloud className="text-gray-500" size={28} strokeWidth={1.5} />
-        )}
-        <div className="text-center">
-          <div className="t-title text-gray-300">{meta.id === 'removebg' ? 'Drop an image to cut out' : meta.id === 'animate' ? 'Drop an image to animate' : 'Drop an image to edit'}</div>
-          <div className="t-body text-gray-600">or click to browse · PNG, JPG, WebP</div>
-        </div>
-        <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
-      </div>
-      {galleryImages.length > 0 && (
-        <div className="mt-4 w-full max-w-sm">
-          <div className="t-label text-gray-600 mb-2 text-center">or pick from your gallery</div>
-          <div className="flex justify-center gap-1.5 overflow-x-auto pb-1">
-            {galleryImages.map((g) => (
-              <button
-                key={g.id}
-                onClick={() => { if (!loading) void adoptFromGallery(g) }}
-                className="shrink-0 w-12 h-12 rounded-md overflow-hidden border border-white/10 hover:border-white/30 transition-colors"
-                title="Use this image as the source"
-                aria-label="Use this gallery image as the source"
-              >
-                <img src={galleryItemUrl(g)} alt="" className="w-full h-full object-cover" onError={() => recoverGalleryUrl(g)} />
-              </button>
-            ))}
+    // Scroll-safe centering: `m-auto` centres the column when there's room and
+    // collapses to a scroll when the dropzone + gallery strip exceed a short
+    // window (e.g. a 1366×768 laptop) — previously the parent's overflow-hidden
+    // clipped the "or pick from your gallery" strip.
+    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col">
+      <div className="m-auto w-full max-w-sm flex flex-col items-center p-6">
+        <div
+          onClick={() => inputRef.current?.click()}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true) }}
+          onDragLeave={() => setDrag(false)}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
+          className={cn(
+            // max-h trimmed 44vh→36vh so the "or pick from your gallery" strip
+            // below stays visible without scrolling at typical window heights
+            // (the 44vh drop target scaled with the window and always shoved the
+            // strip just past the fold). Still scrolls gracefully on tiny windows.
+            'w-full aspect-[5/4] min-h-[200px] max-h-[36vh] rounded-[var(--radius-panel)] border-2 border-dashed flex flex-col items-center justify-center gap-3 cursor-pointer transition-colors',
+            drag ? 'border-blue-400 bg-blue-500/10' : 'border-white/10 bg-white/[0.02] hover:border-white/20',
+          )}
+        >
+          {loading ? <Loader2 className="animate-spin text-gray-400" size={28} /> : (
+            meta.id === 'removebg' ? <Scissors className="text-gray-500" size={28} strokeWidth={1.5} /> : <UploadCloud className="text-gray-500" size={28} strokeWidth={1.5} />
+          )}
+          <div className="text-center">
+            <div className="t-title text-gray-300">{meta.id === 'removebg' ? 'Drop an image to cut out' : meta.id === 'animate' ? 'Drop an image to animate' : 'Drop an image to edit'}</div>
+            <div className="t-body text-gray-600">or click to browse · PNG, JPG, WebP</div>
           </div>
+          <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
         </div>
-      )}
+        {galleryImages.length > 0 && (
+          <div className="mt-4 w-full">
+            <div className="t-label text-gray-600 mb-2 text-center">or pick from your gallery</div>
+            <div className="flex justify-center gap-1.5 overflow-x-auto pb-1">
+              {galleryImages.map((g) => (
+                <button
+                  key={g.id}
+                  onClick={() => { if (!loading) void adoptFromGallery(g) }}
+                  className="shrink-0 w-12 h-12 rounded-md overflow-hidden border border-white/10 hover:border-white/30 transition-colors"
+                  title="Use this image as the source"
+                  aria-label="Use this gallery image as the source"
+                >
+                  <img src={galleryItemUrl(g)} alt="" className="w-full h-full object-cover" onError={() => recoverGalleryUrl(g)} />
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -210,33 +220,35 @@ function SourcePreview({ onOpenMaskEditor }: { onOpenMaskEditor: () => void }) {
   if (!source) return null
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6">
-      <div className="relative">
-        <img src={source.url} alt="source" className={cn('max-h-[52vh] max-w-full object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', intent === 'removebg' && 'lu-checker')} />
-        {mask && (
-          <div className="absolute top-2 left-2 t-label text-gray-300 bg-black/50 px-2 py-1 rounded-md">mask painted</div>
-        )}
-        <button
-          onClick={() => { setSource(null); setMask(null) }}
-          className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-lg bg-black/50 text-gray-300 hover:text-white"
-          title="Remove image"
-        >
-          <X size={14} />
-        </button>
+    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col">
+      <div className="m-auto flex flex-col items-center p-6">
+        <div className="relative">
+          <img src={source.url} alt="source" className={cn('max-h-[52vh] max-w-full object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', intent === 'removebg' && 'lu-checker')} />
+          {mask && (
+            <div className="absolute top-2 left-2 t-label text-gray-300 bg-black/50 px-2 py-1 rounded-md">mask painted</div>
+          )}
+          <button
+            onClick={() => { setSource(null); setMask(null) }}
+            className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-lg bg-black/50 text-gray-300 hover:text-white"
+            title="Remove image"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="flex items-center gap-2 mt-4">
+          {meta.allowsMask && (
+            <Button variant="secondary" icon={Wand2} onClick={onOpenMaskEditor}>{mask ? 'Edit mask' : 'Paint mask'}</Button>
+          )}
+          <ChangeImageButton onChange={(r) => setSource(r)} />
+        </div>
+        <p className="t-body text-gray-600 mt-3 text-center max-w-sm">
+          {meta.id === 'removebg' ? 'Hit Create to cut out the subject and export a transparent PNG.'
+            : meta.id === 'upscale' ? 'Hit Create to upscale the image.'
+            : meta.id === 'eraser' ? 'Paint a mask over the object to remove, then hit Create.'
+            : meta.allowsMask ? 'Paint a mask over what should change, write the edit prompt below, then Create.'
+            : 'Describe the motion below, then Create.'}
+        </p>
       </div>
-      <div className="flex items-center gap-2 mt-4">
-        {meta.allowsMask && (
-          <Button variant="secondary" icon={Wand2} onClick={onOpenMaskEditor}>{mask ? 'Edit mask' : 'Paint mask'}</Button>
-        )}
-        <ChangeImageButton onChange={(r) => setSource(r)} />
-      </div>
-      <p className="t-body text-gray-600 mt-3 text-center max-w-sm">
-        {meta.id === 'removebg' ? 'Hit Create to cut out the subject and export a transparent PNG.'
-          : meta.id === 'upscale' ? 'Hit Create to upscale the image.'
-          : meta.id === 'eraser' ? 'Paint a mask over the object to remove, then hit Create.'
-          : meta.allowsMask ? 'Paint a mask over what should change, write the edit prompt below, then Create.'
-          : 'Describe the motion below, then Create.'}
-      </p>
     </div>
   )
 }

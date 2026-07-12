@@ -130,7 +130,8 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
   const download = () => void downloadGalleryItem(item)
   const isVideo = item.type === 'video'
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 min-h-0">
+    <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col">
+     <div className="m-auto flex flex-col items-center p-6">
       <div className="relative group max-w-full max-h-full">
         {isVideo ? (
           <video
@@ -179,6 +180,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
         <span>·</span>
         <span className="truncate max-w-[280px]">{prettyModel(item.model)}</span>
       </div>
+     </div>
     </div>
   )
 }

@@ -91,7 +91,7 @@ function CreateExperimentalInner() {
   }, [intent])
 
   return (
-    <div className="h-full w-full flex flex-col bg-[#141414] text-gray-200 overflow-hidden">
+    <div className="h-full w-full flex flex-col bg-white dark:bg-[#141414] text-gray-200 overflow-hidden">
       <IntentBar />
 
       <AnimatePresence>

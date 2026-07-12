@@ -32,6 +32,47 @@
   --shadow-lg: 0 8px 24px -6px rgba(0, 0, 0, 0.6), 0 2px 6px -2px rgba(0, 0, 0, 0.4);
   --shadow-xl: 0 16px 48px -12px rgba(0, 0, 0, 0.7), 0 4px 12px -4px rgba(0, 0, 0, 0.5);
   --shadow-2xl: 0 24px 64px -16px rgba(0, 0, 0, 0.8);
+
+  /* ── Create surface accent — the disciplined violet promoted from the
+     progress-bar rgb(160,148,248). Ported from the lu-labs create tokens
+     (apps/web/app/globals.css). The desktop Create port referenced
+     `bg-lu-accent` / `text-lu-accent` but never defined the colour, so the
+     progress fill and accents resolved to nothing. ── */
+  --color-lu-accent: #a094f8;
+  --color-lu-accent-hover: #b1a6ff;
+  --color-lu-accent-soft: rgba(160, 148, 248, 0.14);
+  --color-lu-accent-ring: rgba(160, 148, 248, 0.55);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Create design tokens — ported verbatim from the lu-labs web companion
+   (apps/web/app/globals.css). The Create surface was ported WITHOUT these
+   definitions, so every `t-*` typography class fell back to the raw 18.4px
+   root (≈33% oversized vs Chat) and every `h-[var(--control-h-*)]` became an
+   invalid/auto height — which is what oversized the Create tab relative to
+   Chat and clipped the banner title / gallery / drop-zone. Chat is unaffected
+   because it sizes with rem-based `text-*` utilities. These values are rem-
+   based, so Create now scales off the same 18.4px root as Chat.
+   ───────────────────────────────────────────────────────────────────── */
+:root {
+  /* Typography scale (rem-based → rides the 18.4px root exactly like Chat) */
+  --text-display: 1.25rem;   --text-display-lh: 1.2;   --text-display-fw: 600;
+  --text-title:   0.95rem;   --text-title-lh:   1.3;   --text-title-fw:   600;
+  --text-body:    0.8rem;    --text-body-lh:    1.5;   --text-body-fw:    400;
+  --text-control: 0.72rem;   --text-control-lh: 1;     --text-control-fw: 500;
+  --text-label:   0.62rem;   --text-label-lh:   1;     --text-label-fw:   600;
+  --text-mono:    0.7rem;
+
+  /* Control heights + spacing rhythm */
+  --space-unit: 4px;
+  --control-h-sm: 26px;
+  --control-h-md: 32px;   /* default control height */
+  --control-h-lg: 40px;   /* primary Create button */
+
+  /* Radii */
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-pill: 999px;
 }
 
 html {
@@ -305,6 +346,8 @@ input[type="range"]::-webkit-slider-thumb {
    ───────────────────────────────────────────────────────────────────── */
 
 /* Light mode: too-dim greys turn invisible on white. Darken them. */
+.light .text-gray-100 { color: rgb(31 41 55); }   /* → gray-800 (primary/heading text — the Create surface, ported dark-first, uses bare gray-100/200 for its t-title/body) */
+.light .text-gray-200 { color: rgb(31 41 55); }   /* → gray-800 */
 .light .text-gray-300 { color: rgb(75 85 99); }   /* → gray-600 */
 .light .text-gray-400 { color: rgb(55 65 81); }   /* → gray-700 */
 .light .text-gray-500 { color: rgb(55 65 81); }   /* → gray-700 — same so 500 isn't dimmer than 400 */
@@ -365,3 +408,37 @@ input[type="range"]::-webkit-slider-thumb {
 
 .light .placeholder-gray-500::placeholder,
 .light .placeholder-gray-600::placeholder { color: rgb(75 85 99); }
+
+/* ─────────────────────────────────────────────────────────────────────
+   Create typography + surface helpers — the classes the Create components
+   apply instead of `text-[Npx]`. Ported from lu-labs globals.css. Without
+   these every Create label/button/prompt rendered at the raw root size and
+   the control-height vars above were undefined. See the token block near the
+   top of this file for the full rationale.
+   ───────────────────────────────────────────────────────────────────── */
+.t-display { font-size: var(--text-display); line-height: var(--text-display-lh); font-weight: var(--text-display-fw); }
+.t-title   { font-size: var(--text-title);   line-height: var(--text-title-lh);   font-weight: var(--text-title-fw); }
+.t-body    { font-size: var(--text-body);    line-height: var(--text-body-lh);    font-weight: var(--text-body-fw); }
+.t-control { font-size: var(--text-control); line-height: var(--text-control-lh); font-weight: var(--text-control-fw); }
+.t-label   { font-size: var(--text-label);   line-height: var(--text-label-lh);   font-weight: var(--text-label-fw); letter-spacing: 0.08em; text-transform: uppercase; }
+.t-mono    { font-size: var(--text-mono); font-variant-numeric: tabular-nums; font-family: ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace; }
+
+/* Focus affordance for Create controls that opt in via `.lu-focus-ring`
+   (buttons/anchors already get the global ring above; this also covers
+   div/role-based controls). Matches the global focus outline exactly. */
+.lu-focus-ring:focus-visible {
+  outline: 1px solid rgba(96, 165, 250, 0.6);
+  outline-offset: 1px;
+}
+
+/* Checkerboard backing so transparent (background-removed) PNGs don't read
+   as solid black in the Stage / gallery. */
+.lu-checker {
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, 0.06) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255, 255, 255, 0.06) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255, 255, 255, 0.06) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255, 255, 255, 0.06) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
