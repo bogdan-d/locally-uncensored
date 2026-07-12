@@ -125,6 +125,19 @@ async function downloadGalleryItem(item: GalleryItem): Promise<void> {
   }
 }
 
+// The stored width/height are the generation *request* dims (the sliders).
+// Utility ops (upscale/removebg/eraser) and edit ignore those — their real
+// output is whatever the engine produced (an upscale of a 848×480 source lands
+// at 5444×3082, not the slider size). Once the media has decoded we know the
+// true pixel dims, so correct the stored values in place. No-ops when they
+// already match (which also breaks any re-render loop) or the item was since
+// removed. Self-heals older gallery items the first time they're viewed.
+function reconcileDims(item: GalleryItem, w: number, h: number) {
+  if (w > 0 && h > 0 && (w !== item.width || h !== item.height)) {
+    useCreateStore.getState().updateGalleryItem(item.id, { width: w, height: h })
+  }
+}
+
 export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) {
   const url = galleryItemUrl(item)
   const download = () => void downloadGalleryItem(item)
@@ -141,7 +154,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
             autoPlay
             muted
             onError={() => recoverGalleryUrl(item)}
-            onLoadedData={() => markGalleryItemAvailable(item)}
+            onLoadedData={(e) => { markGalleryItemAvailable(item); reconcileDims(item, e.currentTarget.videoWidth, e.currentTarget.videoHeight) }}
             className="max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]"
           />
         ) : (
@@ -149,7 +162,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
             src={url}
             alt={item.prompt}
             onError={() => recoverGalleryUrl(item)}
-            onLoad={() => markGalleryItemAvailable(item)}
+            onLoad={(e) => { markGalleryItemAvailable(item); reconcileDims(item, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight) }}
             className={cn('max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', item.intent === 'removebg' && 'lu-checker')}
           />
         )}
