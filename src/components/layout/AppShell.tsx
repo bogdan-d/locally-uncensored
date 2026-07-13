@@ -29,6 +29,7 @@ import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { useCreateStore } from '../../stores/createStore'
 import { CloudGateModal } from '../cloud/CloudGateModal'
+import { CloudIntroPopup } from '../cloud/CloudIntroPopup'
 import { CloudOnboardingModal } from '../cloud/CloudOnboardingModal'
 import { ShortcutsModal } from './ShortcutsModal'
 import { Titlebar } from './Titlebar'
@@ -138,10 +139,10 @@ export function AppShell() {
     'locally-uncensored-agent-workflows', 'locally-uncensored-agent',
     'locally-uncensored-voice', 'lu-benchmark-store', 'lu-update-checker-v2',
     'rag-store', 'workflow-store', 'lu-cloud-catalog',
-    // v2.5.0 launch teasers — back these up so an auto-updater who clicked
-    // "Don't show me again" / dismissed the image-tool noti keeps that choice
-    // across the NSIS update (which wipes WebView2 localStorage).
-    'lu_cloud_teaser', 'lu_image_tool_noti',
+    // One-shot notices — back these up so "seen it once" survives an NSIS
+    // update that wipes WebView2 localStorage (2.5.7: the cloud intro popup
+    // replaced the pre-launch lu_cloud_teaser waitlist badge).
+    'lu_cloud_intro_seen', 'lu_image_tool_noti',
   ]
   const STORE_KEYS_SET = new Set(STORE_KEYS)
   // These two persist via idbStorage (IndexedDB) since v2.5.0 — the backup
@@ -792,6 +793,8 @@ export function AppShell() {
       <CloudGateModal />
       {/* One-time cloud onboarding — first successful switch flip. */}
       <CloudOnboardingModal />
+      {/* Once-ever "LU Cloud is live" hello on the first 2.5.7 launch. */}
+      <CloudIntroPopup />
       <ShortcutsModal />
     </div>
   )

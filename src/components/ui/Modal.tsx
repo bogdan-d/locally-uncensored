@@ -12,13 +12,17 @@ interface Props {
   hideHeader?: boolean
   /** Tailwind max-width of the panel. Default `max-w-lg`. */
   maxWidth?: string
+  /** Panel corner radius (default `rounded-2xl`). Override for a more angular look. */
+  panelRadius?: string
+  /** Panel padding (default `p-6`). Override for a tighter dialog. */
+  panelPad?: string
 }
 
 // A modal is a real dialog, so it needs an OPAQUE, elevated surface — not the
 // transparent `.glass-card` (which is `background: transparent` for inline
 // panels). Without this the dialog read straight through to whatever tab was
 // behind it and the white title vanished on a light surface.
-export function Modal({ open, onClose, title, children, hideHeader, maxWidth = 'max-w-lg' }: Props) {
+export function Modal({ open, onClose, title, children, hideHeader, maxWidth = 'max-w-lg', panelRadius = 'rounded-2xl', panelPad = 'p-6' }: Props) {
   return (
     <AnimatePresence>
       {open && (
@@ -31,7 +35,7 @@ export function Modal({ open, onClose, title, children, hideHeader, maxWidth = '
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
           <motion.div
             className={
-              'relative z-10 w-full rounded-2xl p-6 border border-gray-200 dark:border-white/10 ' +
+              `relative z-10 w-full ${panelRadius} ${panelPad} border border-gray-200 dark:border-white/10 ` +
               'bg-white dark:bg-[#161719] shadow-2xl shadow-black/30 ' + maxWidth
             }
             initial={{ scale: 0.9, opacity: 0 }}

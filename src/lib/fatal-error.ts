@@ -31,7 +31,7 @@ export const SETTINGS_STORAGE_KEYS = [
   'workflow-store',
   'lu-update-checker-v2',
   'lu-benchmark-store',
-  'lu_cloud_teaser',
+  'lu_cloud_intro_seen',
   'lu_image_tool_noti',
 ]
 

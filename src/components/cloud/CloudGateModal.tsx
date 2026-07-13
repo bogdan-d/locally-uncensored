@@ -10,7 +10,7 @@
 // the first flip). Payment stays on lu-labs.ai — the app never touches Stripe.
 
 import { useEffect, useRef, useState } from 'react'
-import { Cloud, ExternalLink, HardDrive, RefreshCw, ArrowLeft, ArrowRight } from 'lucide-react'
+import { ExternalLink, HardDrive, RefreshCw, ArrowLeft, ArrowRight } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
@@ -57,13 +57,20 @@ function StayLocalButton({ onLocal }: { onLocal: () => void }) {
   )
 }
 
-/** The purple cloud emblem that headlines every step. */
+/** The LU monogram that headlines every step (David 2026-07-13: the stock
+ *  cloud glyph is gone from this flow — the black/white mark stands on its
+ *  own, matching the one-time intro popup). */
 function CloudHero({ subtitle }: { subtitle?: string }) {
   return (
     <div className="flex flex-col items-center text-center gap-2">
-      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#7c3aed]/10 text-[#7c3aed] dark:text-[#a78bfa]">
-        <Cloud size={24} />
-      </span>
+      <img
+        src="/LU-monogram-bw.png"
+        alt=""
+        width={40}
+        height={40}
+        className="dark:invert-0 invert opacity-90 select-none"
+        draggable={false}
+      />
       <h2 className="text-xl font-semibold text-gray-900 dark:text-white">LU Cloud</h2>
       {subtitle && (
         <p className="text-[0.75rem] leading-relaxed text-gray-600 dark:text-gray-400 max-w-xs">{subtitle}</p>
@@ -132,7 +139,7 @@ export function CloudGateModal() {
       {signedOut ? (
         step === 'intro' ? (
           <div className="space-y-5 pt-2">
-            <CloudHero subtitle="Run chat, image and video on LU's hosted GPU fleet with your lu-labs.ai account — the full cloud catalog, no downloads, no VRAM limits. Local mode stays free and never needs an account." />
+            <CloudHero subtitle="Image, video, chat, code. On LU's hosted GPUs." />
             <div className="space-y-2 max-w-xs mx-auto">
               <button onClick={() => setStep('plans')} className={primaryBtn}>
                 Get LU Cloud <ArrowRight size={13} />
@@ -142,7 +149,7 @@ export function CloudGateModal() {
           </div>
         ) : step === 'plans' ? (
           <div className="space-y-5 pt-2">
-            <CloudHero subtitle="Pick a plan on lu-labs.ai — payment stays in the browser." />
+            <CloudHero subtitle="Pick a plan on lu-labs.ai. Payment stays in the browser." />
             <div className="space-y-3 max-w-xs mx-auto">
               <PlanGrid />
               <StayLocalButton onLocal={stayLocal} />
@@ -189,7 +196,7 @@ export function CloudGateModal() {
           <div className="space-y-3 max-w-xs mx-auto">
             <p className="text-[0.72rem] text-center text-gray-600 dark:text-gray-400">
               LU Cloud is in a closed beta right now (Max plan only). Your plan is
-              active, but the beta hasn't opened for it yet — you'll get in the
+              active, but the beta hasn't opened for it yet. You'll get in the
               moment it does, nothing to reinstall.
             </p>
             <StayLocalButton onLocal={stayLocal} />
@@ -217,7 +224,7 @@ export function CloudGateModal() {
           <CloudHero />
           <div className="space-y-3 max-w-xs mx-auto">
             <p className="text-[0.72rem] text-center text-gray-600 dark:text-gray-400">
-              Your plan is active, but it doesn't include a hosted-compute credit
+              Your plan is active, but it doesn't include a hosted compute credit
               budget, so there's nothing for Cloud mode to run on. Plans with
               cloud credits are on lu-labs.ai.
             </p>
