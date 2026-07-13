@@ -1382,8 +1382,13 @@ fn lmstudio_lms_path() -> Option<PathBuf> {
     }
 
     // Last resort: PATH lookup. Catches non-standard installs (Chocolatey,
-    // user-relocated install dir, etc.).
-    if let Ok(out) = Command::new("where").arg("lms").output() {
+    // user-relocated install dir, etc.). CREATE_NO_WINDOW so this `where` probe
+    // never flashes a console window at the end user.
+    let mut where_cmd = Command::new("where");
+    where_cmd.arg("lms");
+    #[cfg(target_os = "windows")]
+    where_cmd.creation_flags(CREATE_NO_WINDOW);
+    if let Ok(out) = where_cmd.output() {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout);
             if let Some(line) = s.lines().next() {

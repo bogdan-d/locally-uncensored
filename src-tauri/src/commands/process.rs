@@ -95,8 +95,13 @@ pub fn needs_cpu_fallback() -> bool {
 
 /// Is an NVIDIA driver present (nvidia-smi exits 0)?
 fn nvidia_present() -> bool {
-    Command::new("nvidia-smi")
-        .output()
+    // CREATE_NO_WINDOW: this probe runs on every ComfyUI start — without it an
+    // NVIDIA Windows box flashes a console window each time. End users must
+    // never see a terminal pop up.
+    let mut cmd = Command::new("nvidia-smi");
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd.output()
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
