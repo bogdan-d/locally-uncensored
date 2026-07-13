@@ -64,12 +64,16 @@
       "entitlements": "./Entitlements.plist"
     },
     "windows": {
+      "wix": {
+        "upgradeCode": "a32db5c6-2c3c-5e92-a20a-2464954554f9"
+      },
       "nsis": {
         "installMode": "both",
         "displayLanguageSelector": true,
         "installerIcon": "icons/icon.ico",
         "headerImage": "icons/nsis-header.bmp",
-        "sidebarImage": "icons/nsis-sidebar.bmp"
+        "sidebarImage": "icons/nsis-sidebar.bmp",
+        "installerHooks": "./windows/installer-hooks.nsh"
       }
     },
     "linux": {

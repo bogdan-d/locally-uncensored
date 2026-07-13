@@ -24,8 +24,17 @@ function callFn(fn: string, ...args: string[]): { code: number; out: string } {
 describe('build-llama.sh', () => {
   it('exists and is executable', () => {
     expect(existsSync(SCRIPT)).toBe(true)
-    // owner-executable bit set
-    expect(statSync(SCRIPT).mode & 0o100).toBeTruthy()
+    // owner-executable bit set - checked via the git index on Windows, where
+    // NTFS has no unix mode bits (node only synthesizes X for .exe/.bat/.cmd)
+    if (process.platform === 'win32') {
+      const mode = execFileSync('git', ['ls-files', '-s', 'scripts/build-llama.sh'], {
+        cwd: resolve(__dirname, '../../..'),
+        encoding: 'utf8',
+      }).split(' ')[0]
+      expect(mode).toBe('100755')
+    } else {
+      expect(statSync(SCRIPT).mode & 0o100).toBeTruthy()
+    }
   })
 
   it('emits Metal + embedded-library flags for both mac triples', () => {
