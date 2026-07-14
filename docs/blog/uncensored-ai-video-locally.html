@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Uncensored AI Video, Locally: Free Text-to-Video &amp; Image-to-Video (2026) | Locally Uncensored</title>
+<meta name="description" content="Generate uncensored AI video for free on your own GPU: text-to-video and image-to-video with Wan, HunyuanVideo, LTX and FramePack. No cloud filters, no per-clip fees, no uploads.">
+<meta name="keywords" content="uncensored ai video free, free uncensored image to video, uncensored ai video generator, wan nsfw, wan video nsfw, local ai video">
+<meta property="og:title" content="Uncensored AI Video, Locally: Free Text-to-Video and Image-to-Video">
+<meta property="og:description" content="Run open video models on your own hardware: no content filters, no metering. Free text-to-video and image-to-video with Wan, HunyuanVideo, LTX and FramePack.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/uncensored-ai-video-locally.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-07-14">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="AI Video">
+<meta property="article:tag" content="Wan">
+<meta property="article:tag" content="Image to Video">
+<meta property="article:tag" content="ComfyUI">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Uncensored AI Video, Locally: Free Text-to-Video and Image-to-Video">
+<meta name="twitter:description" content="Free, uncensored AI video on your own GPU: text-to-video and image-to-video, no cloud filters, no per-clip fees.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/uncensored-ai-video-locally.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<!-- Privacy: No external fonts loaded. Using system fonts. -->
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Uncensored AI Video, Locally: Free Text-to-Video and Image-to-Video","description":"A practical guide to generating uncensored AI video for free on your own hardware. Covers the best free local text-to-video and image-to-video models (Wan 2.1/2.2, HunyuanVideo 1.5, LTX 2.3, CogVideoX, FramePack F1 and SVD) with honest VRAM guidance and a one-click ComfyUI setup.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-07-14","dateModified":"2026-07-14","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/uncensored-ai-video-locally.html"},"keywords":"uncensored ai video free, free uncensored image to video, uncensored ai video generator, wan nsfw, local ai video"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is uncensored AI video generation free?","acceptedAnswer":{"@type":"Answer","text":"Yes. The models (Wan, HunyuanVideo, LTX, CogVideoX, FramePack) are open-weight and free to download. Locally Uncensored, the app that runs them, is open source under AGPL-3.0. There is no subscription, no API key, and no per-clip charge. Your only cost is the electricity and the GPU you already own."}},{"@type":"Question","name":"What does \"uncensored\" mean for local video?","acceptedAnswer":{"@type":"Answer","text":"It means there is no cloud content filter sitting between your prompt and the model. Hosted services like Runway, Kling, Sora and Pika screen prompts and outputs and reject anything their policy flags. When the model runs on your own hardware, nothing is uploaded and no prompt filter is applied. You are responsible for keeping your outputs lawful."}},{"@type":"Question","name":"Can I do free image-to-video locally?","acceptedAnswer":{"@type":"Answer","text":"Yes. Drop an image into the Create tab and pick an image-to-video model. FramePack F1 is the standout for low-VRAM machines: it uses next-frame prediction and runs on just 6 GB of VRAM. CogVideoX and Stable Video Diffusion (SVD) are the other free image-to-video options, though they want more VRAM."}},{"@type":"Question","name":"How much VRAM do I need for local AI video?","acceptedAnswer":{"@type":"Answer","text":"For text-to-video, Wan 2.1 1.3B and LTX run on roughly 8 GB, and 10-12 GB is comfortable for most models. The 14B version of Wan wants 12 GB or more. The low-end entry point is FramePack F1 image-to-video, which fits in 6 GB. Chat and image generation are much lighter than video."}},{"@type":"Question","name":"Do I have to learn ComfyUI node graphs?","acceptedAnswer":{"@type":"Answer","text":"No. ComfyUI is the backend that runs the models, but Locally Uncensored installs it one-click from the Create tab and builds the workflow for you. You pick a model, type a prompt or drop an image, and generate. There are no nodes to wire up."}},{"@type":"Question","name":"Which operating systems are supported?","acceptedAnswer":{"@type":"Answer","text":"Locally Uncensored runs on Windows and Linux today. macOS is not supported yet. For local video you want an NVIDIA GPU (or an AMD GPU with ROCm on Linux); ComfyUI has no practical CPU-only video path."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">847&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">300+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Guide</span>
+    <span>July 14, 2026</span>
+    <span>·</span>
+    <span>9 min read</span>
+  </div>
+
+  <article>
+    <h1>Uncensored AI Video, Locally: Free Text-to-Video and Image-to-Video</h1>
+
+    <p>Search for an "uncensored AI video generator" and you land on the same wall every time. The hosted services (Runway, Kling, Sora, Pika) screen your prompt before the model ever sees it, reject anything their policy flags, and meter you by the second on top of that. A few clips into a good idea and you're either blocked or out of credits.</p>
+
+    <p>There's a cleaner path. You can generate <strong>uncensored AI video for free</strong> on your own GPU (both <strong>text-to-video</strong> and <strong>image-to-video</strong>) with open-weight models that never send a frame to the cloud. No prompt filter, no per-clip fee, no upload. This guide covers which models to run, the honest hardware you need, and the one-click setup that makes it work.</p>
+
+    <p>The stack runs through <a href="https://locallyuncensored.com/">Locally Uncensored</a>, an open-source desktop app that wraps ComfyUI so you never touch a node graph. If you want the deeper mechanics of the video pipeline afterward, the companion <a href="how-to-generate-ai-videos-locally.html">guide to generating AI videos locally</a> goes further on prompt craft and VRAM tuning.</p>
+
+    <h2>What "Uncensored" Actually Means Here</h2>
+
+    <p>Let's be precise, because the word gets abused. "Uncensored" here does not mean a special model trained to produce anything on command. It means there is <strong>no cloud content filter</strong> standing between your prompt and the model. Hosted generators run every request through a moderation layer; a local model has none, because there's no server in the loop. You type a prompt, your GPU renders frames, and the result stays on your disk.</p>
+
+    <p>That distinction matters for far more than adult content. Fiction with dark themes, security and forensics work, medical or documentary scenes, art that a blunt classifier misreads: all of it gets caught by the same filters. Running the model yourself removes the filter entirely. In exchange, you own the responsibility for what you make; more on that at the end.</p>
+
+    <h2>What You Need</h2>
+
+    <p>Everything runs inside <a href="https://github.com/PurpleDoubleD/locally-uncensored">Locally Uncensored</a>, a free desktop app licensed under AGPL-3.0. It's available for <strong>Windows and Linux</strong> today. macOS isn't supported yet. Video is a GPU job: you want an NVIDIA card (or an AMD card with ROCm on Linux), since ComfyUI has no practical CPU-only path for video.</p>
+
+    <p>The video models themselves run on <strong>ComfyUI</strong>, which the app installs for you. There's no node-graph editing and no workflow files to hunt down: you open the <strong>Create</strong> tab, click <strong>Install ComfyUI</strong> once, and the app configures the backend automatically. If you're brand new to any of this, the <a href="comfyui-beginners-guide.html">ComfyUI beginners guide</a> explains the foundation, and <a href="run-uncensored-ai-locally.html">running uncensored AI locally</a> covers the chat and image side of the same app.</p>
+
+    <h2>The Best Free Local Video Models</h2>
+
+    <p>These are the open-weight models worth running today, split between text-to-video (T2V) and image-to-video (I2V). Every one is a free download; none needs an API key.</p>
+
+    <table>
+      <thead><tr><th>Model</th><th>VRAM</th><th>Type</th><th>Best for</th></tr></thead>
+      <tbody>
+        <tr><td>Wan 2.1</td><td>8 GB (1.3B) / 12+ GB (14B)</td><td>T2V</td><td>The accessible default; 1.3B is fast on modest GPUs, 14B raises quality</td></tr>
+        <tr><td>Wan 2.2</td><td>12+ GB</td><td>T2V</td><td>Newer Wan generation with improved motion and prompt following</td></tr>
+        <tr><td>HunyuanVideo 1.5</td><td>12+ GB</td><td>T2V</td><td>The quality leader: cinematic motion, more VRAM and time</td></tr>
+        <tr><td>LTX 2.3</td><td>~8 GB</td><td>T2V</td><td>Fast text-to-video on modest hardware; quick iteration</td></tr>
+        <tr><td>CogVideoX</td><td>10-12 GB</td><td>T2V &amp; I2V</td><td>Solid all-rounder that does both text- and image-to-video</td></tr>
+        <tr><td>FramePack F1</td><td>6 GB</td><td>I2V</td><td>Low-end entry for image-to-video via next-frame prediction</td></tr>
+        <tr><td>Stable Video Diffusion (SVD)</td><td>10-12 GB</td><td>I2V</td><td>Well-established image-to-video with broad tooling support</td></tr>
+      </tbody>
+    </table>
+
+    <p>For <strong>free text-to-video</strong>, start with Wan 2.1 1.3B or LTX 2.3 if your card is on the smaller side, then move up to Wan 2.2 or HunyuanVideo 1.5 when you have the VRAM and patience for higher quality. For <strong>free image-to-video</strong>, FramePack F1 is the headline: its next-frame-prediction approach fits into just 6 GB of VRAM, which puts animating a still image within reach of entry-level GPUs. CogVideoX and SVD are the roomier image-to-video options.</p>
+
+    <h2>Step by Step: From Zero to First Clip</h2>
+
+    <p>The whole flow is the same whether you're doing text-to-video or image-to-video. Only the input changes.</p>
+
+    <h3>Step 1: Install the App</h3>
+    <p>Grab the latest Windows or Linux build from the <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest">releases page</a>, or clone and run it from source:</p>
+    <pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+# Windows: setup.bat | Linux: ./setup.sh</code></pre>
+
+    <h3>Step 2: Install ComfyUI (One Click)</h3>
+    <p>Open the <strong>Create</strong> tab and click <strong>Install ComfyUI</strong>. The app downloads and wires up the backend for you: no nodes, no manual dependency chasing. This is a one-time step.</p>
+
+    <h3>Step 3: Pick a Video Model</h3>
+    <p>Choose a model from the dropdown based on your VRAM and what you're making. Wan 2.1 1.3B or LTX for a light, fast start; HunyuanVideo 1.5 when you want the best-looking result; FramePack F1 if you're animating an image on a 6 GB card.</p>
+
+    <h3>Step 4a: Text-to-Video</h3>
+    <p>Type a prompt that describes <em>motion</em>, not just a still scene: "a woman walks toward the camera, city street at dusk" beats "a woman on a street." Video models need something to move. Then hit Generate.</p>
+
+    <h3>Step 4b: Image-to-Video</h3>
+    <p>Drop an image into the Create tab, select an image-to-video model (FramePack F1, CogVideoX, or SVD), and describe how the scene should move. The model animates your still frame outward from there.</p>
+
+    <h3>Step 5: Generate</h3>
+    <p>The app builds the correct ComfyUI workflow behind the scenes, submits it, polls until the clip is done, and shows the result with its generation time. Keep your first prompt simple to confirm the pipeline works, then get ambitious.</p>
+
+    <h2>Why Local Beats "Free Uncensored AI Video" Websites</h2>
+
+    <p>A search for free uncensored video sites turns up plenty of them. Running the models yourself wins on every axis that matters:</p>
+
+    <ul>
+      <li><strong>Privacy.</strong> Nothing is uploaded. Your prompts, your reference images, and your output never leave your machine. A website sees all three.</li>
+      <li><strong>No per-clip cost.</strong> Once the weights are on disk, generation is free forever. No credits, no "you've used your daily renders" wall.</li>
+      <li><strong>No prompt filtering.</strong> There's no moderation layer between you and the model, because there's no server. The model renders what you describe.</li>
+      <li><strong>Unlimited generations.</strong> Iterate as many times as you want, overnight if you like. The only limit is your GPU's schedule, not a quota.</li>
+    </ul>
+
+    <h2>Hardware Realism</h2>
+
+    <p>Here's the honest part: <strong>video is VRAM-heavy</strong>, far more so than chat or image generation. It's the most demanding local AI task because the model has to keep many frames coherent at once.</p>
+
+    <p>A realistic picture: <strong>10-12 GB of VRAM is comfortable</strong> for most text-to-video models and gives you room to work without constant out-of-memory errors. The lighter models (Wan 2.1 1.3B and LTX 2.3) squeeze into roughly 8 GB. The <strong>low-end entry point is FramePack F1 image-to-video at 6 GB</strong>, which is the single most accessible way to get moving pictures out of a modest card. The 14B Wan and HunyuanVideo 1.5 want 12 GB or more and reward patience with better motion.</p>
+
+    <p>Budget system RAM too: 32 GB is a sensible floor for video, since the models need working memory beyond the GPU. And remember that video sits at the top of the difficulty curve: if your machine is on the smaller side, the chat and image features of the same app run comfortably where video would strain, and image-to-video via FramePack is your gentlest way into motion.</p>
+
+    <h2>Legal and Responsibility</h2>
+
+    <p>Running open-weight AI models on your own hardware is legal. The models here (Wan, HunyuanVideo, LTX, CogVideoX, FramePack, SVD) are released under licenses that permit local use, and generating video with them on your own GPU breaks no law by itself.</p>
+
+    <p>What removing the cloud filter does is move responsibility to you. You own your outputs, and you're accountable for keeping them lawful: no depiction of real people without consent, nothing involving minors, nothing that violates the law where you live. "Uncensored" means no automated gatekeeper, not no rules. Use the freedom the way you'd want it used.</p>
+
+    <h2>FAQ</h2>
+
+    <h3>Is uncensored AI video generation free?</h3>
+    <p>Yes. The models (Wan, HunyuanVideo, LTX, CogVideoX, FramePack) are open-weight and free to download. Locally Uncensored, the app that runs them, is open source under AGPL-3.0. There's no subscription, no API key, and no per-clip charge. Your only cost is the electricity and the GPU you already own.</p>
+
+    <h3>What does "uncensored" mean for local video?</h3>
+    <p>It means there is no cloud content filter sitting between your prompt and the model. Hosted services like Runway, Kling, Sora and Pika screen prompts and outputs and reject anything their policy flags. When the model runs on your own hardware, nothing is uploaded and no prompt filter is applied. You're responsible for keeping your outputs lawful.</p>
+
+    <h3>Can I do free image-to-video locally?</h3>
+    <p>Yes. Drop an image into the Create tab and pick an image-to-video model. FramePack F1 is the standout for low-VRAM machines: it uses next-frame prediction and runs on just 6 GB of VRAM. CogVideoX and Stable Video Diffusion (SVD) are the other free image-to-video options, though they want more VRAM.</p>
+
+    <h3>How much VRAM do I need for local AI video?</h3>
+    <p>For text-to-video, Wan 2.1 1.3B and LTX run on roughly 8 GB, and 10-12 GB is comfortable for most models. The 14B version of Wan wants 12 GB or more. The low-end entry point is FramePack F1 image-to-video, which fits in 6 GB. Chat and image generation are much lighter than video.</p>
+
+    <h3>Do I have to learn ComfyUI node graphs?</h3>
+    <p>No. ComfyUI is the backend that runs the models, but Locally Uncensored installs it one-click from the Create tab and builds the workflow for you. You pick a model, type a prompt or drop an image, and generate. There are no nodes to wire up.</p>
+
+    <h3>Which operating systems are supported?</h3>
+    <p>Locally Uncensored runs on Windows and Linux today. macOS is not supported yet. For local video you want an NVIDIA GPU (or an AMD GPU with ROCm on Linux); ComfyUI has no practical CPU-only video path.</p>
+
+    <h2>Getting Started</h2>
+
+    <p>The fastest path from zero to <strong>free, uncensored, local AI video</strong>:</p>
+
+    <pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+# Windows: setup.bat | Linux: ./setup.sh</code></pre>
+
+    <p>Open the Create tab, install ComfyUI, pick a video model, and generate. For the full pipeline walkthrough see <a href="how-to-generate-ai-videos-locally.html">how to generate AI videos locally</a>, or head to the <a href="https://locallyuncensored.com/">landing page</a> for screenshots and the <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub repo</a> to browse the source.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed and free to use. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Ready to generate uncensored AI video on your own machine?</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Get Started on GitHub
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>
