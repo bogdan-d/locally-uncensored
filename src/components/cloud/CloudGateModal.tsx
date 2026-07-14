@@ -9,7 +9,7 @@
 // deriveCloudAvailable passes, the mode flips (via the one-time onboarding on
 // the first flip). Payment stays on lu-labs.ai — the app never touches Stripe.
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ExternalLink, HardDrive, RefreshCw, ArrowLeft, ArrowRight } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { useUIStore } from '../../stores/uiStore'
@@ -21,12 +21,14 @@ import { CLOUD_BASE } from '../../api/cloud/config'
 import { openExternal } from '../../api/backend'
 
 const PLANS = [
-  { anchor: 'hosted', name: 'Hosted' },
-  { anchor: 'pro', name: 'Pro' },
-  { anchor: 'max', name: 'Max' },
+  { anchor: 'hosted', name: 'Hosted', price: '€19' },
+  { anchor: 'pro', name: 'Pro', price: '€49' },
+  { anchor: 'max', name: 'Max', price: '€99' },
 ] as const
 
-/** Three plan buttons → pricing in the browser. */
+/** Three plan buttons → pricing in the browser. Price shown up front (monthly,
+ *  EUR — mirrors lib/pricing on lu-labs.ai); the click still leaves for the
+ *  browser to actually subscribe. */
 function PlanGrid() {
   return (
     <div className="grid grid-cols-3 gap-2">
@@ -37,8 +39,8 @@ function PlanGrid() {
           className="flex flex-col items-center gap-0.5 px-2 py-3 rounded-lg border border-[#7c3aed]/40 bg-[#7c3aed]/5 hover:bg-[#7c3aed]/15 transition-colors"
         >
           <span className="text-[0.8rem] font-semibold text-[#7c3aed] dark:text-[#a78bfa]">{p.name}</span>
-          <span className="flex items-center gap-1 text-[0.55rem] text-gray-500">
-            <ExternalLink size={8} /> lu-labs.ai
+          <span className="text-[0.62rem] font-medium text-gray-500 dark:text-gray-400">
+            {p.price}<span className="text-gray-400 dark:text-gray-500">/mo</span>
           </span>
         </button>
       ))}
@@ -101,18 +103,23 @@ export function CloudGateModal() {
   const [step, setStep] = useState<Step>('intro')
   useEffect(() => { if (open) setStep('intro') }, [open])
 
-  // The moment the account clears every gate (fresh login, re-check after
-  // subscribing), flip the global switch and get out of the way — via the
-  // one-time cloud onboarding when this is the first successful flip.
-  const wasOpen = useRef(false)
-  useEffect(() => { wasOpen.current = open }, [open])
+  // The moment the account clears every gate — already provisioned when the
+  // gate opens, a fresh login, or a re-check after subscribing — flip the
+  // global switch and get out of the way, via the one-time cloud onboarding on
+  // the first successful flip. `open` MUST be a dependency (not the old wasOpen
+  // ref): the one-time intro popup's "Check out the Cloud" can open this gate
+  // for a signed-in, fully provisioned user who's still in local mode. In that
+  // case `available` was already true before the gate opened, so an effect
+  // keyed only on `available` never re-runs — and the gate hangs forever on the
+  // terminal "Checking your account…" state. Keying on `open` fires the flip
+  // the instant the gate opens on an already-available account.
   useEffect(() => {
-    if (wasOpen.current && available) {
+    if (open && available) {
       setOpen(false)
       if (!cloudOnboardingSeen) setCloudOnboardingOpen(true)
       else updateSettings({ appMode: 'cloud' })
     }
-  }, [available, cloudOnboardingSeen, setCloudOnboardingOpen, setOpen, updateSettings])
+  }, [open, available, cloudOnboardingSeen, setCloudOnboardingOpen, setOpen, updateSettings])
 
   const stayLocal = () => {
     updateSettings({ appMode: 'local' })
