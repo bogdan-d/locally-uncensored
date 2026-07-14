@@ -131,6 +131,17 @@ jobs:
 
       - name: Build llama-server sidecar
         shell: bash
+        env:
+          # Cap parallelism: bare `-j` (unlimited) OOM-kills the Linux runner mid
+          # llama.cpp.o compile (SIGTERM 143). 2 fits every hosted runner's RAM.
+          BUILD_JOBS: 2
+          # Windows only: the vulkan-shaders-gen ExternalProject nests build paths
+          # ~250 chars deep under the workspace, tripping MSBuild FileTracker
+          # (FTK1011, MAX_PATH) so the CMake compiler check "is broken". Relocate
+          # the llama build to a short root ('D:/lb') so the deepest TryCompile
+          # .tlog path stays under 260. Empty elsewhere -> the script falls back
+          # to ./.llama-build (which the sidecar cache step handles).
+          LLAMA_BUILD_CACHE: ${{ matrix.platform == 'windows-latest' && 'D:/lb' || '' }}
         run: bash scripts/build-llama.sh ${{ matrix.sidecar_triple }}
 
       - name: Assert sidecar exists

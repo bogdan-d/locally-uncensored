@@ -109,7 +109,10 @@ build_triple() {
   # shellcheck disable=SC2086
   cmake -S "$SRC_DIR" -B "$build_dir" $flags
   log "building llama-server for $triple"
-  cmake --build "$build_dir" --config Release --target llama-server -j
+  # Bare `-j` (no count) lets Make fork a compile per ready target and OOM-kills
+  # CI runners mid llama.cpp.o (SIGTERM 143). Cap to a finite, memory-safe count;
+  # CI lowers it further via BUILD_JOBS=2.
+  cmake --build "$build_dir" --config Release --target llama-server -j "${BUILD_JOBS:-4}"
   # Locate the produced binary (path differs by generator/platform).
   local built
   built="$(find "$build_dir" -type f \( -name 'llama-server' -o -name 'llama-server.exe' \) -print -quit)"
