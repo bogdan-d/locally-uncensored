@@ -43,13 +43,9 @@ jobs:
             args: ''
             rust_targets: ''
             sidecar_triple: x86_64-pc-windows-msvc
-          # macOS lane (new in 2.5.7 — earlier releases shipped no mac assets
-          # on this endpoint). Unsigned/ad-hoc until Apple Developer ID creds
-          # land as secrets; the updater artifacts are still minisign-signed.
-          - platform: macos-14
-            args: '--target aarch64-apple-darwin'
-            rust_targets: 'aarch64-apple-darwin'
-            sidecar_triple: aarch64-apple-darwin
+          # No macOS lane: LU ships Windows + Linux only (the 2.5.7 mac assets
+          # were unsigned/ad-hoc and pulled post-release). Re-add a macos-14
+          # entry here once Apple Developer ID signing creds land as secrets.
 
     runs-on: ${{ matrix.platform }}
 
@@ -170,8 +166,6 @@ jobs:
             ## Download
 
             **Windows:** Download the `.exe` installer. During setup, choose "Install for current user only" for a portable/no-install experience. Or use the `.msi` for system-wide installation.
-
-            **macOS:** Download the `.dmg` and drag the app to any folder.
 
             **Linux:** Download the `.AppImage`, make it executable (`chmod +x`), and run. No installation needed.
 
