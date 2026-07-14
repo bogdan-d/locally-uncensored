@@ -1,4 +1,6 @@
 # Bundled llama.cpp sidecar binaries are build artifacts, never committed.
-# Produced by scripts/build-llama.sh into llama-server-<target-triple>[.exe].
+# Produced by scripts/build-llama.sh into llama-server-<target-triple>[.exe]
+# plus the ggml/llama/mtmd/omp runtime DLLs it links against on Windows.
 llama-server-*
+*.dll
 !.gitignore
