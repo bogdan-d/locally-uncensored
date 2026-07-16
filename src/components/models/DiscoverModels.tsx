@@ -772,6 +772,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                           <Loader2 size={14} className="animate-spin" />
                         </span>
                       ) : hasBundleErrors(bundle) ? (
+                        <>
                         <button
                           onClick={() => {
                             // Retry only the files that are NOT complete
@@ -795,6 +796,25 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                           <RefreshCw size={12} />
                           <span>Retry</span>
                         </button>
+                        {/* Clear (the_mr_pickles): a bundle whose download keeps
+                            failing (bad URL, model pulled) was stuck on Retry with
+                            no escape — the user couldn't get it out of the error
+                            state to try another model. Dismiss ALL of the bundle's
+                            entries (not just errored — a partial-complete otherwise
+                            keeps hasBundleErrors true) so it resets to Install. */}
+                        <button
+                          onClick={() => {
+                            for (const f of bundle.files) {
+                              if (f.filename) dlStore.getState().dismiss(f.filename)
+                            }
+                          }}
+                          className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 transition-all text-xs"
+                          title="Clear this failed download so you can start over or pick another model"
+                        >
+                          <X size={12} />
+                          <span>Clear</span>
+                        </button>
+                        </>
                       ) : (
                         <button
                           onClick={() => handleBundleInstall(bundle)}
