@@ -48,6 +48,10 @@ interface ChatState {
   updateMessageAgentBlocks: (conversationId: string, messageId: string, blocks: AgentBlock[]) => void
   updateMessageArtifacts: (conversationId: string, messageId: string, artifacts: ChatArtifact[]) => void
   deleteMessagesAfter: (conversationId: string, messageId: string) => void
+  /** Remove a single message by id (D#81). Leaves the rest of the thread intact,
+   *  so the user can prune one line from the model's context without nuking the
+   *  whole chat or truncating everything after it. */
+  deleteMessage: (conversationId: string, messageId: string) => void
   getActiveConversation: () => Conversation | undefined
   searchConversations: (query: string) => Conversation[]
   /** Bulk-import conversations from an exported backup (konata 2026-06-28: the
@@ -242,6 +246,19 @@ export const useChatStore = create<ChatState>()(
             if (idx < 0) return c
             return { ...c, messages: c.messages.slice(0, idx), updatedAt: Date.now() }
           }),
+        })),
+
+      deleteMessage: (conversationId, messageId) =>
+        set((state) => ({
+          conversations: state.conversations.map((c) =>
+            c.id === conversationId
+              ? {
+                ...c,
+                messages: c.messages.filter((m) => m.id !== messageId),
+                updatedAt: Date.now(),
+              }
+              : c
+          ),
         })),
 
       getActiveConversation: () => {

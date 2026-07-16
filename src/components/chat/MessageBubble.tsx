@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { User, Copy, Check, Pencil, RefreshCw, X, Wrench } from 'lucide-react'
+import { User, Copy, Check, Pencil, RefreshCw, X, Wrench, Trash2 } from 'lucide-react'
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { MarkdownRenderer } from './MarkdownRenderer'
 import { ThinkingBlock } from './ThinkingBlock'
@@ -35,6 +35,7 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editContent, setEditContent] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const editRef = useRef<HTMLTextAreaElement>(null)
   const isUser = message.role === 'user'
 
@@ -43,6 +44,7 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
   // agent mode on. Detect the JSON pattern and show a one-click "Enable
   // agent" banner instead of leaving the user staring at a JSON dump.
   const activeConversationId = useChatStore((s) => s.activeConversationId)
+  const deleteMessage = useChatStore((s) => s.deleteMessage)
   const isAgentActive = useAgentModeStore((s) =>
     activeConversationId ? s.agentModeActive[activeConversationId] ?? false : false
   )
@@ -113,6 +115,19 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
   const cancelEdit = () => {
     setIsEditing(false)
     setEditContent('')
+  }
+
+  // Two-step delete (D#81): first click arms (icon turns red), second within 3s
+  // removes the single message. Guards against an accidental one-click nuke of a
+  // line the user meant to keep.
+  const handleDelete = () => {
+    if (!activeConversationId) return
+    if (!confirmDelete) {
+      setConfirmDelete(true)
+      setTimeout(() => setConfirmDelete(false), 3000)
+      return
+    }
+    deleteMessage(activeConversationId, message.id)
   }
 
   return (
@@ -335,6 +350,9 @@ export function MessageBubble({ message, onRegenerate, onEdit, pendingApprovalId
               {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
             </button>
             {!isUser && <SpeakerButton text={message.content} />}
+            <button onClick={handleDelete} className={'p-1 rounded-md transition-colors hover:bg-gray-100 dark:hover:bg-white/10 ' + (confirmDelete ? 'text-red-500' : 'text-gray-400 dark:text-gray-500 hover:text-red-500')} aria-label="Delete message" title={confirmDelete ? 'Click again to delete' : 'Delete message'}>
+              <Trash2 size={12} />
+            </button>
           </div>
         )}
 
