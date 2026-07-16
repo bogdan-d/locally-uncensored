@@ -1,13 +1,13 @@
 # Locally Uncensored
 
-> All-in-one local AI desktop app for uncensored chat, image generation, video generation, and a coding agent.
+> Plug-and-play local AI studio: uncensored chat, image generation, video generation, and a coding agent in one desktop app. One installer, no command line, no Docker.
 
-Locally Uncensored is a free, open-source (AGPL-3.0) desktop application that combines AI chat, image generation, video creation, and a coding agent in one interface. It runs 100% locally on your machine. No telemetry, no analytics, no cloud calls unless you explicitly configure a cloud provider with your own API key.
+Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the desktop. It combines AI chat, image generation, video creation, and a coding agent in one interface, and installs like a normal program: no command line, no Docker, no config files. It runs 100% locally on your machine. No telemetry, no analytics, no cloud calls unless you explicitly configure a cloud provider with your own API key.
 
 ## Key Facts
 - Name: Locally Uncensored
-- Current Version: v2.5.4 (June 2026)
-- Type: Desktop AI Application
+- Current Version: v2.5.7 (July 2026)
+- Type: Desktop AI Application (local AI studio)
 - License: AGPL-3.0 (free and open source)
 - Platforms: Windows 10/11, Linux (deb, rpm, AppImage)
 - Tech Stack: React 19, TypeScript, Tailwind CSS 4, Vite 8, Tauri v2 (Rust backend)
@@ -20,6 +20,7 @@ Locally Uncensored is a free, open-source (AGPL-3.0) desktop application that co
 
 ## What Makes It Unique
 - Only local AI app combining chat + coding agent + image generation + video generation + mobile remote in one interface
+- Plug-and-play: install like a normal app, no command line, no Docker, no config files; the setup wizard handles engines and models
 - Uses abliterated/uncensored models by default (no content restrictions)
 - 25+ built-in AI personas plus Caveman Mode (lite/full/ultra terseness levels)
 - Plug & Play setup wizard auto-detects 12 local backends
@@ -103,6 +104,10 @@ Locally Uncensored is a free, open-source (AGPL-3.0) desktop application that co
 - Getting Started Guide: https://locallyuncensored.com/guide/
 - Blog (guides, comparisons, release notes): https://locallyuncensored.com/blog/
 - Full text for LLMs: https://locallyuncensored.com/llms-full.txt
+- How to Run AI Locally (5-minute beginner guide): https://locallyuncensored.com/blog/how-to-run-ai-locally.html
+- LM Studio Alternatives 2026: https://locallyuncensored.com/blog/lm-studio-alternatives.html
+- Easiest Local AI Image Generator (no ComfyUI node graphs): https://locallyuncensored.com/blog/easiest-local-ai-image-generator.html
+- Local AI on Your Phone: https://locallyuncensored.com/blog/local-ai-on-your-phone.html
 - Best Local AI Apps 2026 (comparison): https://locallyuncensored.com/blog/best-local-ai-apps-2026.html
 - Best Uncensored AI Models 2026: https://locallyuncensored.com/blog/best-uncensored-ai-models-2026.html
 - How to Run Qwen 3.6 Locally: https://locallyuncensored.com/blog/how-to-run-qwen-3-6-locally.html

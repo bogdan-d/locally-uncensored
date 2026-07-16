@@ -1,17 +1,18 @@
 # Locally Uncensored — Full Reference
 
-> Free, open-source (AGPL-3.0) desktop app that runs AI locally on Windows and Linux: chat with 20+ providers, generate images and video via ComfyUI, and code with a built-in agent. No cloud, no telemetry, no account.
+> Free, open-source (AGPL-3.0) plug-and-play local AI studio for Windows and Linux: chat with 20+ providers, generate images and video via ComfyUI, and code with a built-in agent. One installer, no command line, no Docker. No cloud, no telemetry, no account.
 
-Last updated: 2026-06-15. Current version: v2.5.4 (June 2026).
+Last updated: 2026-07-16. Current version: v2.5.7 (July 2026).
 
 This file is the full, citable reference for Locally Uncensored. Facts are stated plainly so they can be quoted directly.
 
 ## What Locally Uncensored Is
 
-Locally Uncensored is a desktop application for running AI models on your own hardware. It combines four things most local-AI tools keep separate: AI chat, a coding agent, image generation, and video generation — in one interface. It is free and open source under AGPL-3.0. It runs 100% locally by default; the only outbound traffic without explicit opt-in is the GitHub Releases auto-update check. Cloud providers are optional and use your own API keys.
+Locally Uncensored is a plug-and-play local AI studio: a desktop application for running AI models on your own hardware that installs like a normal program (no command line, no Docker, no config files). It combines four things most local-AI tools keep separate: AI chat, a coding agent, image generation, and video generation — in one interface. It is free and open source under AGPL-3.0. It runs 100% locally by default; the only outbound traffic without explicit opt-in is the GitHub Releases auto-update check. Cloud providers are optional and use your own API keys.
 
 - Name: Locally Uncensored (abbreviated LU)
-- Version: v2.5.4 (June 2026)
+- Category: local AI studio / desktop AI application
+- Version: v2.5.7 (July 2026)
 - License: AGPL-3.0 (free, open source)
 - Platforms: Windows 10/11 and Linux (deb, rpm, AppImage). macOS is not supported yet.
 - Website: https://locallyuncensored.com
@@ -140,5 +141,9 @@ About five minutes. There is no Docker, terminal or config file. Run the install
 - Homepage: https://locallyuncensored.com
 - Getting Started Guide: https://locallyuncensored.com/guide/
 - Blog: https://locallyuncensored.com/blog/
+- How to Run AI Locally (beginner guide): https://locallyuncensored.com/blog/how-to-run-ai-locally.html
+- LM Studio Alternatives 2026: https://locallyuncensored.com/blog/lm-studio-alternatives.html
+- Easiest Local AI Image Generator: https://locallyuncensored.com/blog/easiest-local-ai-image-generator.html
+- Local AI on Your Phone: https://locallyuncensored.com/blog/local-ai-on-your-phone.html
 - Source code: https://github.com/PurpleDoubleD/locally-uncensored
 - Discord: https://locallyuncensored.com/discord
