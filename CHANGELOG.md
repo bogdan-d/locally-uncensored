@@ -4,6 +4,60 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [Unreleased]
 
+## [2.5.8] - 2026-07-16
+
+Community fix release: works through every open GitHub issue plus the actionable Discord reports since 2.5.7. (Releases 2.5.1–2.5.7 were documented in their GitHub release notes and are not backfilled here.)
+
+### Fixed — Voice: whisper/piper state detection, venv installs, PEP 668 (#77, #78 ElBiggus; joerack Discord)
+
+- **Whisper badge no longer resets to "not installed" after every relaunch.** `whisper_status` only reported a *running* server process; after a restart the process is gone, so the UI showed red even though the install was fine. It now also probes the installed `faster_whisper` package on disk.
+- **Transcription lazy-start now uses the same Python that the installer targeted.** `transcribe` spawned `state.python_bin` (system Python) while `install_whisper` had installed into the LU-resolved interpreter — on setups where those differ, a completed install was invisible at runtime.
+- **TTS status now recognises any downloaded piper voice**, not just the default `en_US-lessac-medium`. Users who picked a different voice were silently dropped to the OS fallback voice because `tts_status` reported piper "not ready".
+- **Voice picker no longer bricks the selection when a voice download fails** — the new voice is only committed after the download succeeds.
+- **Read-aloud on WebView2 no longer stops after the first sentence.** `speakStreaming` queued one utterance per sentence; WebView2's speech synthesis regularly stalled at the chain's first hand-off. Speech now uses a single utterance plus a `resume()` keep-alive interval.
+- **Linux PEP 668 (Arch, Debian 12+, Fedora 38+): whisper/piper installs no longer die with `externally-managed-environment`.** The voice installers now detect the marker and pass `--break-system-packages --user`, matching platform reality on distros that lock the system Python. No-op on Windows/macOS/venvs.
+
+### New — Auto-read responses, off by default
+
+- Settings → Voice gains **"Auto-read new responses"** (visible once read-aloud is enabled). Completed assistant turns are spoken automatically. This intentionally returns a feature removed on 2026-06-07 — back then it fired unconditionally; now it's an explicit opt-in that defaults to OFF, and the main toggle is relabelled "Enable read-aloud" to stop implying it auto-reads.
+
+### Fixed — Agent workspace jail rejected `\\?\`-prefixed roots (#79 DarkLordCmd; thecakeisnaoh)
+
+- On Windows, a workspace whose stored root carried the `\\?\` verbatim prefix (common when a path came from a native picker or long-path handling) failed every file operation with "path escapes the workspace". The jail normalised the *candidate* path but compared it against the *raw* root — the asymmetry made the root never match itself. Both sides now go through one normaliser (case-fold, slash-fold, verbatim/UNC strip); the error message now includes both the workspace root and the requested path so future reports are diagnosable. Four new regression tests cover the `\\?\` cases.
+
+### Fixed — ComfyUI 0.19+ blocks LU's progress + media unless you pass a CORS flag (#75 cinemazverev)
+
+- ComfyUI 0.19.0 (April 2026) added an origin-check middleware that returns 403 for every cross-site request — including the desktop WebView's requests from `http://tauri.localhost` to a **user-managed** ComfyUI (LU-spawned ComfyUI always passed `--enable-cors-header`, so it was never affected). Control-plane HTTP already went through the Rust proxy and kept working; what broke was the live progress WebSocket and direct `<img>`/`<video>` gallery loads.
+- **Live progress now flows through a Rust-side WebSocket proxy** (`comfy_ws_connect`) whose client handshake carries no browser Origin, so it passes the middleware on any ComfyUI. The web build keeps the raw WebSocket.
+- **Gallery/lightbox media that fails to load direct now falls back to fetching the bytes through the Rust proxy** and displays a blob. Trade-off stated plainly: the fallback holds the whole file in memory and video loses HTTP-Range seeking — fine for short clips, noted in code.
+- **When the fallback engages, the Create tab shows a dismissible banner** with the actual fix for the user's own ComfyUI: add `--enable-cors-header http://tauri.localhost` to the launch script. (Community threads suggested `--allow-origin` — that flag does not exist — or `--listen 0.0.0.0`, which needlessly exposes ComfyUI to the LAN.)
+
+### Fixed — Create-tab LoRA picker was a silent no-op (game-master0, Discord #80)
+
+- The Create UI collected selected LoRAs into a `loras` param that **no code ever read** — the workflow builder expects `lora`/`loraStrength`. Selections now reach the builder, for images and video.
+- **Video LoRA support**: the LoRA stack is no longer hidden for every video model — it shows for families whose graphs support model-only LoRA loading (WAN, WAN 2.2, Hunyuan, LTX, Mochi, Cosmos). WAN 2.2's dedicated builder gains a guarded `LoraLoaderModelOnly` chain; a plain WAN 2.2 run without LoRAs produces a byte-identical graph to before.
+
+### New — Delete individual chat messages (Discord #81)
+
+- Every message's action bar gains a delete button (two-click confirm within 3 s, works for both user and assistant messages). Pairs with the existing edit/regenerate actions.
+
+### New — LiteLLM provider preset (PR #64, thanks @RheagalFire)
+
+- One-click provider preset pointing at a local LiteLLM proxy (`http://localhost:4000/v1`, OpenAI protocol) — fronts 100+ upstream providers from one endpoint.
+
+### Fixed — Errored bundle downloads can now be cleared (the_mr_pickles, Discord)
+
+- A failed bundle download left the card stuck on "Retry" with no way to dismiss the error state. A new **Clear** button resets the bundle back to installable.
+
+### Fixed — Flash-Attention parity on auto-start (#74 follow-up)
+
+- `--use-flash-attention` was only applied when ComfyUI was started manually from the UI; the boot auto-start path ignored the (positive) flash-attn probe. Both paths now behave identically. The orphaned `check_flash_attention` command (its UI nudge was removed in 2.5.7) is deleted.
+
+### Stability
+
+- `vitest`: **3300 tests** green. `cargo test`: **192 passed**. `cargo check`: clean (3 pre-existing dead-code warnings only). Frontend production build: clean.
+- New settings field `autoReadAloud` defaults to `false`; store migrations are additive — no breaking changes.
+
 ## [2.5.0] - 2026-05-28
 
 Minor release. 30+ changes — the headline Codex / Agent sprint (Sprint A / B / C ported from the companion repo `uselu`), eight reporter-facing fixes (B1–B3 + AA + Y + Z), two new pieces of UI (BB — GPU picker, CC — chatbot-export importer), production hardening (B4 / B5), and the autonomy-ceiling bump that turns scaffold→install→fix→verify into a single turn. Bundles all v2.4.9 contents.
