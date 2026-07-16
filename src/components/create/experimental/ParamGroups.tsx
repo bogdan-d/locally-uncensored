@@ -2,6 +2,7 @@ import { Gauge, Boxes, FlaskConical, RotateCcw, HelpCircle } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { cloudModelById, defaultCloudModel } from '../../../stores/cloudCatalogStore'
+import { classifyModel } from '../../../api/comfyui'
 import { INTENT_MAP } from './intents'
 import { SAMPLERS as SAMPLERS_FALLBACK, SCHEDULERS as SCHEDULERS_FALLBACK } from './badges'
 import { Section } from '../ui/Section'
@@ -11,6 +12,13 @@ import { NumberField } from '../ui/NumberField'
 import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { cn } from '../ui/cn'
+
+// Video families whose dynamic-workflow strategy actually wires a LoRA node:
+// the generic UNET path (wan/hunyuan/ltx/mochi/cosmos) plus Wan 2.2's dedicated
+// builder (LoraLoaderModelOnly insert). The remaining families (cogvideo/svd/
+// framepack/pyramidflow/allegro) use wrapper nodes with no LoRA seam, so we hide
+// the stack for them rather than offer a control that silently does nothing.
+const VIDEO_LORA_FAMILIES = new Set(['wan', 'wan22', 'hunyuan', 'ltx', 'mochi', 'cosmos'])
 
 // The full param surface, reorganized into 3 frequency-ranked Sections.
 // Sampler/scheduler/LoRA/VAE lists come live from ComfyUI via CreateContext,
@@ -22,6 +30,9 @@ export function ParamGroups() {
   const isVideo = meta.isVideo
   const isEdit = meta.id === 'edit'
   const isCloud = s.backend === 'cloud'
+  // LoRA is a local-only knob; for video it's offered only on families whose
+  // builder actually applies it (see VIDEO_LORA_FAMILIES). Image always qualifies.
+  const loraSupported = !isCloud && (!isVideo || VIDEO_LORA_FAMILIES.has(classifyModel(s.videoModel)))
 
   // On cloud the worker only honours steps for images and guidance_scale for
   // the flux family — hide the sliders elsewhere rather than show a dead
@@ -87,7 +98,7 @@ export function ParamGroups() {
           <Slider label="Mask edge feather" min={0} max={64} step={1} value={s.growMaskBy} onChange={s.setGrowMaskBy} unit="px" />
         )}
 
-        {!isCloud && !isVideo && loraList.length > 0 && (
+        {loraSupported && loraList.length > 0 && (
           <div className="space-y-1.5">
             <div className="t-control text-gray-400">LoRA stack {s.selectedLoras.length > 0 && <span className="t-mono text-gray-600">· {s.selectedLoras.length} active</span>}</div>
             <div className="space-y-1 max-h-44 overflow-y-auto scrollbar-thin">

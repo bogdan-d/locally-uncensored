@@ -1121,10 +1121,27 @@ function buildWan22Workflow(params: VideoParams, seed: number, nodes: Categorize
   workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { text: params.prompt, clip: [clipId, 0] } }
   workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { text: params.negativePrompt || '', clip: [clipId, 0] } }
 
+  // Optional LoRA chain (D#80, game-master0): video LoRAs are model-only, so
+  // patch the UNET with LoraLoaderModelOnly (no clip side) before the sampling
+  // shift. Guarded on params.lora — a plain Wan 2.2 gen stays byte-identical.
+  let wanModelSrc = unetId
+  const wanLoras = normalizeLoraList(params.lora)
+  if (wanLoras.length > 0) {
+    const wanStrengths = normalizeLoraStrengths(params.loraStrength, wanLoras.length)
+    wanLoras.forEach((loraName, i) => {
+      const loraId = String(n++)
+      workflow[loraId] = {
+        class_type: 'LoraLoaderModelOnly',
+        inputs: { lora_name: loraName, strength_model: wanStrengths[i], model: [wanModelSrc, 0] },
+      }
+      wanModelSrc = loraId
+    })
+  }
+
   // Wan's recommended sampling shift. ModelSamplingSD3 is a core node (ships since
   // SD3), so the sampler reads from it to match the official 5B workflow's motion.
   const shiftId = String(n++)
-  workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [unetId, 0], shift: 8.0 } }
+  workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [wanModelSrc, 0], shift: 8.0 } }
 
   // Unified latent: a start_image is attached ONLY for an I2V request.
   const latentInputs: Record<string, any> = { vae: [vaeId, 0], width, height, length, batch_size: 1 }

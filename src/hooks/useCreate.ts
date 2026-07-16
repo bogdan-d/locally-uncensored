@@ -316,8 +316,13 @@ export function useCreate() {
         ...(isRemoveBg && effInputImage ? { removebg: true, inputImage: effInputImage } : {}),
         ...(isI2I && !isRemoveBg && effInputImage ? { inputImage: effInputImage, denoise } : {}),
         ...(!isRemoveBg && maskFilename ? { maskImage: maskFilename, growMaskBy } : {}),
-        // Advanced image adjustments (builder ignores these for video).
-        ...(selectedLoras.length ? { loras: selectedLoras } : {}),
+        // Advanced adjustments. LoRA feeds the builder's `lora`/`loraStrength`
+        // contract (string[] + number[]); the old `loras` key was read by nobody,
+        // so LoRA selection was a silent no-op for image too (D#80). VAE/clip-skip
+        // stay image-only (the builder ignores them for video).
+        ...(selectedLoras.length
+          ? { lora: selectedLoras.map((l) => l.name), loraStrength: selectedLoras.map((l) => l.strength) }
+          : {}),
         ...(selectedVae && selectedVae !== 'auto' ? { vae: selectedVae } : {}),
         ...(clipSkip > 0 ? { clipSkip } : {}),
       }
