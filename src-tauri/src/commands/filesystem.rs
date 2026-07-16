@@ -61,10 +61,12 @@ pub(crate) fn contain_within(root: &Path, candidate: &Path) -> Result<PathBuf, S
         #[cfg(windows)]
         {
             // Windows paths are case-insensitive; compare lowercased with a
-            // component boundary so `…/foo` can't match `…/foobar`.
-            let r = nroot.to_string_lossy().to_lowercase().replace('\\', "/");
-            let r = r.trim_end_matches('/');
-            let c = ncand.to_string_lossy().to_lowercase().replace('\\', "/");
+            // component boundary so `…/foo` can't match `…/foobar`. Both sides
+            // go through the SAME key builder (which strips any `\\?\` verbatim
+            // prefix) so an extended-length root and a plain candidate — or vice
+            // versa — still compare equal.
+            let r = win_compare_key(&nroot);
+            let c = win_compare_key(&ncand);
             c == r || c.starts_with(&format!("{}/", r))
         }
         #[cfg(not(windows))]
@@ -73,8 +75,33 @@ pub(crate) fn contain_within(root: &Path, candidate: &Path) -> Result<PathBuf, S
     if within {
         Ok(ncand)
     } else {
-        Err(format!("Path escapes the allowed workspace: {}", candidate.display()))
+        // Surface BOTH sides: the #1 support question on this error is "which
+        // folder does it think the workspace is?" — the raw root answers it.
+        Err(format!(
+            "Path escapes the allowed workspace.\n  workspace root: {}\n  requested path: {}",
+            root.display(),
+            candidate.display()
+        ))
     }
+}
+
+/// Windows containment-comparison key: lowercase, forward-slashed, `\\?\`
+/// verbatim prefix stripped, trailing slash trimmed. rfd's folder picker returns
+/// extended-length (`\\?\C:\…`, `\\?\UNC\srv\share`) paths for selections past
+/// MAX_PATH, but `workspace_root` stores the raw string — without normalizing
+/// both sides identically here, a legitimately-picked folder fails containment
+/// with "Path escapes the allowed workspace" (#79, DarkLordCmd / thecakeisnaoh).
+#[cfg(windows)]
+fn win_compare_key(p: &Path) -> String {
+    let s = p.to_string_lossy().to_lowercase().replace('\\', "/");
+    let s = if let Some(rest) = s.strip_prefix("//?/unc/") {
+        format!("//{}", rest) // verbatim UNC → plain UNC (\\srv\share)
+    } else if let Some(rest) = s.strip_prefix("//?/") {
+        rest.to_string() // verbatim disk → plain (C:\…)
+    } else {
+        s
+    };
+    s.trim_end_matches('/').to_string()
 }
 
 /// The jail root for a file op: a configured folder workspace `working_dir`
@@ -473,5 +500,46 @@ mod tests {
     #[test]
     fn dotdot_traversal_out_of_working_dir_is_rejected() {
         assert!(resolve_path("../../secret.txt", Some("c"), Some("D:/Projects/site")).is_err());
+    }
+
+    // ── #79: rfd's folder picker hands back extended-length (`\\?\`) roots for
+    // selections past MAX_PATH. The root then carries the verbatim prefix while
+    // the candidate is stripped of it — before the symmetric win_compare_key
+    // fix, a legitimately-picked folder failed containment. ────────────────
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_prefixed_root_allows_browsing_itself() {
+        // FileTree browse passes path == workingDirectory == the picked folder.
+        let got = resolve_path(r"\\?\D:\Projects\site", Some("c"), Some(r"\\?\D:\Projects\site"))
+            .expect("verbatim root must contain itself");
+        let s = got.to_string_lossy().to_lowercase().replace('\\', "/");
+        assert!(s.ends_with("d:/projects/site"), "got: {}", s);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn relative_path_under_verbatim_root_is_allowed() {
+        let got = resolve_path("src/main.rs", Some("c"), Some(r"\\?\D:\Projects\site"))
+            .expect("relative op under a verbatim root must resolve");
+        let s = got.to_string_lossy().to_lowercase().replace('\\', "/");
+        assert!(s.ends_with("d:/projects/site/src/main.rs"), "got: {}", s);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn absolute_op_under_verbatim_root_is_allowed() {
+        // The agent addresses files with plain absolute paths; the root is verbatim.
+        let got = resolve_path(r"D:\Projects\site\README.md", Some("c"), Some(r"\\?\D:\Projects\site"))
+            .expect("plain absolute inside a verbatim root must be allowed");
+        let s = got.to_string_lossy().to_lowercase().replace('\\', "/");
+        assert!(s.ends_with("d:/projects/site/readme.md"), "got: {}", s);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_root_still_rejects_escape() {
+        // Normalizing the prefix must not weaken the jail.
+        assert!(resolve_path(r"..\..\secret.txt", Some("c"), Some(r"\\?\D:\Projects\site")).is_err());
+        assert!(resolve_path(r"C:\Windows\System32\x.txt", Some("c"), Some(r"\\?\D:\Projects\site")).is_err());
     }
 }
