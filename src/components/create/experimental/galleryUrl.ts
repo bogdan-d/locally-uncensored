@@ -1,5 +1,6 @@
 import { getImageUrl } from '../../../api/comfyui'
 import { refreshResultUrl } from '../../../api/cloud/jobs'
+import { fetchLocalhostBytes, isTauri } from '../../../api/backend'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 
 /** Resolve a gallery item's display URL. Priority mirrors MediaViewer/Gallery:
@@ -46,6 +47,40 @@ export function recoverGalleryUrl(item: GalleryItem): void {
 /** Clear a tile's offline flag once its media actually loads (onLoad). */
 export function markGalleryItemAvailable(item: GalleryItem): void {
   if (item.unavailable) useCreateStore.getState().updateGalleryItem(item.id, { unavailable: undefined })
+}
+
+function guessMime(filename: string): string {
+  const ext = filename.toLowerCase().split('.').pop() || ''
+  if (ext === 'mp4') return 'video/mp4'
+  if (ext === 'webm') return 'video/webm'
+  if (ext === 'gif') return 'image/gif'
+  if (ext === 'webp') return 'image/webp'
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+  return 'image/png'
+}
+
+/**
+ * ComfyUI 0.19+ (portable, user-managed) blocks the WebView's cross-origin
+ * `<video>`/`<img>` /view load with a Sec-Fetch-Site 403, while download +
+ * history keep working because those ride the Rust proxy (no Origin header).
+ * The user sees "can't view the result" even though the render exists (#75,
+ * cinemazverev). Re-fetch the bytes THROUGH the proxy (no Origin → not blocked)
+ * and hand back a blob: URL the element can display. Local items only — cloud
+ * media has its own re-sign path (recoverGalleryUrl). Returns null when the
+ * fallback doesn't apply or the proxy fetch fails.
+ *
+ * Tradeoff: a blob loads the whole clip into memory (no native Range/seek), so
+ * this is a recovery path, not the default — the fast direct <video> stays in
+ * use whenever ComfyUI allows the origin.
+ */
+export async function proxiedComfyBlobUrl(item: GalleryItem): Promise<string | null> {
+  if (!isTauri() || item.jobId || item.remoteUrl || item.dataUrl) return null
+  try {
+    const bytes = await fetchLocalhostBytes(getImageUrl(item.filename, item.subfolder))
+    return URL.createObjectURL(new Blob([bytes], { type: guessMime(item.filename) }))
+  } catch {
+    return null
+  }
 }
 
 /** Fetch a gallery item's media bytes for adoption as an op source.

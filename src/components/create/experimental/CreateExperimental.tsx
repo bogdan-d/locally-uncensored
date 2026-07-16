@@ -29,6 +29,8 @@ function CreateExperimentalInner() {
   const error = useCreateStore((s) => s.error)
   const setError = useCreateStore((s) => s.setError)
   const backend = useCreateStore((s) => s.backend)
+  const comfyCorsBlocked = useCreateStore((s) => s.comfyCorsBlocked)
+  const setComfyCorsBlocked = useCreateStore((s) => s.setComfyCorsBlocked)
   const { modelLoadError, connected, comfyOnCpu } = useCreateExp()
 
   const [shownId, setShownId] = useState<string | null>(null)
@@ -126,6 +128,25 @@ function CreateExperimentalInner() {
             ComfyUI is running on the CPU (no usable GPU detected) — generation will be extremely slow and may time out.
             AMD GPU? Point LU at a ROCm/ZLUDA ComfyUI and set Settings → Hardware → ComfyUI GPU to force GPU.
           </span>
+        </div>
+      )}
+
+      {/* Cross-origin block (#75, cinemazverev): a user-managed ComfyUI 0.19+
+          answers the WebView's media/WS requests with a Sec-Fetch 403, so results
+          couldn't be viewed. LU now proxies the bytes so they still display, but
+          the live progress bar + native video seeking degrade — point the user at
+          the one-line launch fix. Local only, dismissible. */}
+      {backend === 'local' && comfyCorsBlocked && (
+        <div className="flex items-start gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
+          <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+          <span className="flex-1 min-w-0">
+            Your ComfyUI blocks cross-origin apps (v0.19+), so LU is showing results through a fallback. To restore fast preview and the live progress bar, add{' '}
+            <code className="px-1 rounded bg-white/10">--enable-cors-header http://tauri.localhost</code>{' '}
+            to ComfyUI's launch (its run .bat / .sh), then restart ComfyUI.
+          </span>
+          <button onClick={() => setComfyCorsBlocked(false)} className="shrink-0 text-yellow-300/70 hover:text-yellow-100" title="Dismiss">
+            <X size={14} />
+          </button>
         </div>
       )}
 

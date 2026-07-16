@@ -97,7 +97,6 @@ fn main() {
             // Process management
             commands::process::start_ollama,
             commands::process::start_comfyui,
-            commands::process::check_flash_attention,
             commands::process::stop_comfyui,
             commands::process::comfyui_status,
             commands::process::find_comfyui,
@@ -110,6 +109,9 @@ fn main() {
             commands::process::set_ollama_host,
             commands::process::get_ollama_host,
             commands::process::offload_local_models,
+            // ComfyUI progress WebSocket via Rust (0.19+ origin-check bypass)
+            commands::comfy_ws::comfy_ws_connect,
+            commands::comfy_ws::comfy_ws_disconnect,
             // Installation
             commands::install::install_comfyui,
             commands::install::install_comfyui_status,

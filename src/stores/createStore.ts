@@ -184,6 +184,11 @@ interface CreateState {
   caps: Record<'rmbg' | 'inpaint-nodes', boolean>
 
   isGenerating: boolean
+  /** Runtime-only: the user-managed ComfyUI (0.19+) blocked the WebView's
+   *  cross-origin media/WS with a Sec-Fetch 403. Set when the proxy blob
+   *  fallback rescues a /view that the direct <video>/<img> couldn't load, so
+   *  the Create tab can show the exact --enable-cors-header fix (#75). */
+  comfyCorsBlocked: boolean
   progress: number
   progressText: string
   progressPhase: ProgressPhase
@@ -247,6 +252,7 @@ interface CreateState {
   resetParamsToModelDefaults: () => void
 
   setIsGenerating: (generating: boolean) => void
+  setComfyCorsBlocked: (blocked: boolean) => void
   setProgress: (progress: number, text?: string) => void
   setProgressPhase: (phase: ProgressPhase) => void
   setCurrentPromptId: (id: string | null) => void
@@ -319,6 +325,7 @@ export const useCreateStore = create<CreateState>()(
       caps: { rmbg: false, 'inpaint-nodes': false } as Record<'rmbg' | 'inpaint-nodes', boolean>,
 
       isGenerating: false,
+      comfyCorsBlocked: false,
       progress: 0,
       progressText: '',
       progressPhase: 'idle' as ProgressPhase,
@@ -471,6 +478,7 @@ export const useCreateStore = create<CreateState>()(
       },
 
       setIsGenerating: (generating) => set({ isGenerating: generating, ...(generating ? {} : { progressPhase: 'idle' as ProgressPhase }) }),
+      setComfyCorsBlocked: (blocked) => set({ comfyCorsBlocked: blocked }),
       setProgress: (progress, text) => set({ progress, progressText: text ?? '' }),
       setProgressPhase: (phase) => set({ progressPhase: phase }),
       setCurrentPromptId: (id) => set({ currentPromptId: id }),
@@ -534,7 +542,7 @@ export const useCreateStore = create<CreateState>()(
         // not flip the backend axis or inject a stale source/mask), backfill
         // missing keys from defaults, and fix up legacy pre-version blobs
         // ('i2i' mode from the v2.3.0 refactor).
-        const { backend, source, mask, caps, isGenerating, ...safe } =
+        const { backend, source, mask, caps, isGenerating, comfyCorsBlocked, ...safe } =
           persisted ?? {}
         const merged = { ...current, ...safe }
         if (merged.mode === 'i2i') {

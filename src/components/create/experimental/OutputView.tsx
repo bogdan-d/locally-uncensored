@@ -3,7 +3,8 @@ import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff } from
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
 import { downloadComfyFile, isTauri } from '../../../api/backend'
 import { refreshResultUrl } from '../../../api/cloud/jobs'
-import { galleryItemUrl, markGalleryItemAvailable, recoverGalleryUrl } from './galleryUrl'
+import { markGalleryItemAvailable } from './galleryUrl'
+import { useComfyMedia } from './useComfyMedia'
 import { cn } from '../ui/cn'
 
 function phaseIcon(phase: ProgressPhase) {
@@ -139,7 +140,7 @@ function reconcileDims(item: GalleryItem, w: number, h: number) {
 }
 
 export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) {
-  const url = galleryItemUrl(item)
+  const { src: url, onError } = useComfyMedia(item)
   const download = () => void downloadGalleryItem(item)
   const isVideo = item.type === 'video'
   return (
@@ -153,7 +154,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
             loop
             autoPlay
             muted
-            onError={() => recoverGalleryUrl(item)}
+            onError={onError}
             onLoadedData={(e) => { markGalleryItemAvailable(item); reconcileDims(item, e.currentTarget.videoWidth, e.currentTarget.videoHeight) }}
             className="max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]"
           />
@@ -161,7 +162,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
           <img
             src={url}
             alt={item.prompt}
-            onError={() => recoverGalleryUrl(item)}
+            onError={onError}
             onLoad={(e) => { markGalleryItemAvailable(item); reconcileDims(item, e.currentTarget.naturalWidth, e.currentTarget.naturalHeight) }}
             className={cn('max-w-full max-h-[62vh] object-contain rounded-[var(--radius-panel)] border border-white/[0.06]', item.intent === 'removebg' && 'lu-checker')}
           />

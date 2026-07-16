@@ -9,7 +9,7 @@
 
 import { v4 as uuid } from 'uuid'
 import { log } from '../lib/logger'
-import { comfyuiWsUrl } from './backend'
+import { comfyuiWsUrl, isTauri } from './backend'
 
 export type ComfyWSEvent =
   | { type: 'status'; data: { queue_remaining: number } }
@@ -51,17 +51,84 @@ class ComfyWSClient {
   private maxReconnectDelay = 30000
   private _connected = false
   private connectPromise: Promise<void> | null = null
+  private tauriListenersReady: Promise<void> | null = null
 
   get connected() { return this._connected }
 
-  /** Connect and return a promise that resolves when the WS is open */
+  /**
+   * Connect and return a promise that resolves when the WS is open.
+   *
+   * Desktop (Tauri) connects through the Rust WS proxy instead of a raw
+   * browser WebSocket: ComfyUI 0.19+ rejects the WebView's cross-origin
+   * upgrade from http://tauri.localhost unless the user passes
+   * `--enable-cors-header`, which silently killed the live progress bar.
+   * Rust's client handshake carries no Origin header, so it always passes —
+   * same reason all ComfyUI HTTP already goes through the Rust proxy.
+   * The web build keeps the raw WebSocket (Vite dev proxy / same-origin).
+   */
   connect(timeoutMs = 3000): Promise<void> {
-    if (this._connected && this.ws?.readyState === WebSocket.OPEN) {
+    if (this._connected && (isTauri() || this.ws?.readyState === WebSocket.OPEN)) {
       return Promise.resolve()
     }
     if (this.connectPromise) return this.connectPromise
 
-    this.connectPromise = new Promise<void>((resolve, reject) => {
+    this.connectPromise = isTauri() ? this.connectViaProxy() : this.connectRaw(timeoutMs)
+    return this.connectPromise
+  }
+
+  /** Tauri: open the socket Rust-side; resolve = onopen, reject = onerror. */
+  private async connectViaProxy(): Promise<void> {
+    try {
+      await this.ensureTauriListeners()
+      const { invoke } = await import('@tauri-apps/api/core')
+      // Rust settles within 5s (internal handshake timeout), so no extra
+      // JS-side timer is needed — the promise can never hang (see the
+      // onerror comment below for why settling is critical).
+      await invoke('comfy_ws_connect', { clientId: CLIENT_ID })
+      this._connected = true
+      this.reconnectDelay = 1000
+      log.info('[ComfyWS] Connected (Rust proxy)')
+    } catch (e) {
+      // Raw path gets its retry loop from onclose firing after onerror;
+      // mirror that here so a down ComfyUI keeps the same backoff-retry.
+      this.scheduleReconnect()
+      throw new Error(`WebSocket connection error: ${e}`)
+    } finally {
+      this.connectPromise = null
+    }
+  }
+
+  /** One-time registration of the Tauri event bridge for proxied frames. */
+  private ensureTauriListeners(): Promise<void> {
+    if (this.tauriListenersReady) return this.tauriListenersReady
+    this.tauriListenersReady = (async () => {
+      const { listen } = await import('@tauri-apps/api/event')
+      await listen<string>('comfy-ws-message', (ev) => {
+        try {
+          const msg = JSON.parse(ev.payload)
+          if (msg.type && msg.data) {
+            const event = msg as ComfyWSEvent
+            for (const listener of this.listeners) {
+              listener(event)
+            }
+          }
+        } catch { /* ignore non-JSON messages */ }
+      })
+      await listen('comfy-ws-closed', () => {
+        // Upstream socket died (ComfyUI stopped/restarted) — mirror onclose.
+        if (!this._connected) return
+        this._connected = false
+        this.scheduleReconnect()
+      })
+    })()
+    // If registration itself fails, allow a retry on the next connect()
+    this.tauriListenersReady.catch(() => { this.tauriListenersReady = null })
+    return this.tauriListenersReady
+  }
+
+  /** Web build: raw browser WebSocket (unchanged legacy path). */
+  private connectRaw(timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.connectPromise = null
         reject(new Error('WebSocket connect timeout'))
@@ -122,8 +189,6 @@ class ComfyWSClient {
         reject(new Error('WebSocket creation failed'))
       }
     })
-
-    return this.connectPromise
   }
 
   private scheduleReconnect() {
@@ -145,6 +210,13 @@ class ComfyWSClient {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
+    }
+    if (isTauri()) {
+      // Fire-and-forget: abort the Rust-side socket. Rust emits no close
+      // event for a requested disconnect, so no reconnect gets scheduled.
+      import('@tauri-apps/api/core')
+        .then(({ invoke }) => invoke('comfy_ws_disconnect'))
+        .catch(() => { /* app teardown — nothing to recover */ })
     }
     if (this.ws) {
       this.ws.onclose = null
