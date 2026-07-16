@@ -895,61 +895,14 @@ pub(crate) fn probe_comfy_gpu(python: &str) -> Option<bool> {
     None
 }
 
-/// Same bundled-portable → venv → system resolution order as start_comfyui,
-/// without the logging — used by check_flash_attention so the Create tab
-/// probes the EXACT interpreter that will run ComfyUI.
-fn resolve_comfyui_python(comfy_path: &str, system_python: String) -> String {
-    let portable_python = std::path::Path::new(comfy_path).parent().and_then(|p| {
-        let candidate = p.join("python_embeded").join("python.exe");
-        if candidate.exists() {
-            Some(candidate.to_string_lossy().to_string())
-        } else {
-            None
-        }
-    });
-    let bundled_python = portable_python.or_else(|| {
-        let candidate = std::path::Path::new(comfy_path)
-            .join("python_embeded")
-            .join("python.exe");
-        if candidate.exists() {
-            Some(candidate.to_string_lossy().to_string())
-        } else {
-            None
-        }
-    });
-    let venv_python =
-        crate::python::resolve_comfyui_venv_python(std::path::Path::new(comfy_path));
-    bundled_python.or(venv_python).unwrap_or(system_python)
-}
-
-/// Create-tab check (David 2026-06-11): flash-attn makes WAN-class video
-/// sampling 4-5x faster (measured 27 s/it vs 108-160 s/it on his RTX 3060,
-/// identical workload). The tab shows a minimal hint when it's missing.
-#[tauri::command]
-pub fn check_flash_attention(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    {
-        let host = state.comfy_host.lock().unwrap().clone();
-        if !is_local_host(&host) {
-            return Ok(serde_json::json!({"available": false, "reason": "remote"}));
-        }
-    }
-    let comfy_path = state
-        .comfy_path
-        .lock()
-        .unwrap()
-        .clone()
-        .or_else(find_comfyui_path);
-    let Some(comfy_path) = comfy_path else {
-        return Ok(serde_json::json!({"available": false, "reason": "no_comfyui"}));
-    };
-    let system_python = state.python_bin.lock().unwrap().clone();
-    let python = resolve_comfyui_python(&comfy_path, system_python);
-    if python.is_empty() {
-        return Ok(serde_json::json!({"available": false, "reason": "no_python"}));
-    }
-    let available = flash_attention_cached(&state, &python);
-    Ok(serde_json::json!({"available": available, "python": python}))
-}
+// The `check_flash_attention` Tauri command + its `resolve_comfyui_python`
+// helper were removed in 2.5.8: the 2.5.7 Create redesign dropped the flash-attn
+// hint UI that was their only caller, leaving them orphaned (#74). The probe
+// itself (probe_flash_attention / flash_attention_cached, above) stays — both
+// start_comfyui and the boot auto-start use it to gate `--use-flash-attention`.
+// Note: ComfyUI's flash path is FA2-only (`from flash_attn import ...`); FA3
+// (module `flash_attn_3`) is a different API ComfyUI does not consume, so the
+// FA2 import probe is the correct signal.
 
 #[tauri::command]
 pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
@@ -1637,6 +1590,16 @@ pub fn auto_start_comfyui(state: &AppState) {
             if auto_needs_cpu {
                 comfy_args.push("--cpu");
                 println!("[ComfyUI] Auto-start: no NVIDIA driver — passing --cpu");
+            }
+            // Mirror start_comfyui: auto-enable Flash Attention (FA2) when it
+            // actually imports in this python. Boot auto-start previously never
+            // passed the flag, so auto-started ComfyUI ran WAN video 4-5x slower
+            // than a manual start even with flash-attn installed. The probe is
+            // cached per python; an absent package fails fast, so the rare cost
+            // is one slow first-probe on a cold boot with flash-attn present.
+            if !auto_needs_cpu && flash_attention_cached(state, &python) {
+                comfy_args.push("--use-flash-attention");
+                println!("[ComfyUI] Auto-start: flash-attn detected — enabling Flash Attention");
             }
             let mut cmd = Command::new(&python);
             cmd.args(&comfy_args)
