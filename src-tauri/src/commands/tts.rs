@@ -69,7 +69,19 @@ pub fn tts_status(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<s
         piper_importable = cmd.output().map(|o| o.status.success()).unwrap_or(false);
     }
 
-    let voice_ready = piper_voice_paths(&app, PIPER_VOICE).map(|(onnx, _)| onnx.exists()).unwrap_or(false);
+    // Ready if ANY voice model is present, not just the hardcoded default
+    // (#77, ElBiggus): a user who downloaded a different voice than
+    // en_US-lessac-medium had the badge read "not installed" and every read
+    // fell back to the Windows SAPI voice.
+    let voice_ready = piper_voices_dir(&app)
+        .ok()
+        .and_then(|dir| std::fs::read_dir(&dir).ok())
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().ends_with(".onnx"))
+        })
+        .unwrap_or(false);
 
     Ok(serde_json::json!({
         "available": piper_importable && voice_ready,

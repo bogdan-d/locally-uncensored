@@ -23,6 +23,10 @@ interface VoiceState {
   // Persisted settings
   sttEnabled: boolean;
   ttsEnabled: boolean;
+  /** Read each finished response aloud automatically (#77, ElBiggus). Opt-in,
+   *  default OFF — TTS on only surfaces the manual per-message Speaker button;
+   *  this additionally auto-reads when the turn completes. */
+  autoReadAloud: boolean;
   /** Selected Piper neural voice id (e.g. "en_US-lessac-medium"). */
   piperVoice: string;
   /** Browser SpeechSynthesis voice — only the fallback when neural is off. */
@@ -52,6 +56,7 @@ interface VoiceState {
     settings: Partial<{
       sttEnabled: boolean;
       ttsEnabled: boolean;
+      autoReadAloud: boolean;
       ttsVoice: string;
       ttsRate: number;
       ttsPitch: number;
@@ -82,12 +87,12 @@ export const useVoiceStore = create<VoiceState>()(
 
       // Persisted settings — voice OFF by default (David 2026-06-07:
       // "tts und stt standardmäßig AUS und nicht immer automatisch vorlesen").
-      // STT and TTS are opt-in; nothing reads responses aloud automatically
-      // (the auto-speak on turn-completion was removed in useChat/useAgentChat).
-      // When the user turns TTS on, it only enables the per-message read-aloud
-      // Speaker button — reading happens on click, never automatically.
+      // STT and TTS are opt-in. TTS on surfaces the per-message read-aloud
+      // Speaker button; auto-reading is a SEPARATE opt-in (autoReadAloud, default
+      // OFF) so "always read aloud" stays off unless the user asks for it (#77).
       sttEnabled: false,
       ttsEnabled: false,
+      autoReadAloud: false,
       piperVoice: "en_US-lessac-medium",
       ttsVoice: "",
       ttsRate: 1.0,
@@ -122,6 +127,7 @@ export const useVoiceStore = create<VoiceState>()(
         set({
           sttEnabled: false,
           ttsEnabled: false,
+          autoReadAloud: false,
           piperVoice: "en_US-lessac-medium",
           ttsVoice: "",
           ttsRate: 1.0,
@@ -137,6 +143,7 @@ export const useVoiceStore = create<VoiceState>()(
       partialize: (state) => ({
         sttEnabled: state.sttEnabled,
         ttsEnabled: state.ttsEnabled,
+        autoReadAloud: state.autoReadAloud,
         piperVoice: state.piperVoice,
         ttsVoice: state.ttsVoice,
         ttsRate: state.ttsRate,

@@ -915,11 +915,15 @@ export function SettingsPage() {
     }
   }
 
-  // Pick a Piper voice. If it isn't on disk yet, download it (~63 MB) first,
-  // then re-check the installed list + TTS availability.
+  // Pick a Piper voice. If it isn't on disk yet, download it (~63 MB), then
+  // re-check the installed list + TTS availability. The selection is applied
+  // optimistically (so the dropdown reflects the pick) but REVERTED if the
+  // download fails — otherwise piperVoice pointed at a missing model and every
+  // read fell back to the Windows SAPI voice (#77, ElBiggus).
   const handlePickVoice = async (id: string) => {
-    voiceSettings.setPiperVoice(id)
     setVoiceError(null)
+    const prev = voiceSettings.piperVoice
+    voiceSettings.setPiperVoice(id)
     if (installedVoices.includes(id)) return
     setVoiceBusy(true)
     try {
@@ -927,6 +931,7 @@ export function SettingsPage() {
       await refreshVoices()
       await refreshTts()
     } catch (e) {
+      voiceSettings.setPiperVoice(prev)
       setVoiceError(e instanceof Error ? e.message : String(e))
     } finally {
       setVoiceBusy(false)
@@ -1268,7 +1273,10 @@ export function SettingsPage() {
               <p className="text-[0.55rem] text-gray-500 leading-snug">
                 Cloud mode: dictation and read-aloud run on lu-labs.ai (hosted Whisper speech-to-text + MiniMax text-to-speech) and are metered against your credits. No local installs needed.
               </p>
-              <InlineToggle label="Read responses aloud" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
+              <InlineToggle label="Enable read-aloud" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
+              {voiceSettings.ttsEnabled && (
+                <InlineToggle label="Auto-read new responses" enabled={voiceSettings.autoReadAloud} onChange={() => voiceSettings.updateVoiceSettings({ autoReadAloud: !voiceSettings.autoReadAloud })} icon={<Volume2 size={11} className="text-gray-500" />} />
+              )}
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[0.7rem] text-gray-500">Voice</span>
                 <select
@@ -1348,7 +1356,14 @@ export function SettingsPage() {
               </p>
             )}
 
-            <InlineToggle label="Read responses aloud" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
+            <InlineToggle label="Enable read-aloud" enabled={voiceSettings.ttsEnabled} onChange={() => voiceSettings.updateVoiceSettings({ ttsEnabled: !voiceSettings.ttsEnabled })} icon={<Volume2 size={11} className="text-gray-500" />} />
+            {/* Auto-read is a SEPARATE opt-in (default OFF). The toggle above only
+                surfaces the per-message Speaker button; this one also reads each
+                finished response aloud (#77, ElBiggus — the old single toggle was
+                labelled "Read responses aloud" but never auto-read). */}
+            {voiceSettings.ttsEnabled && (
+              <InlineToggle label="Auto-read new responses" enabled={voiceSettings.autoReadAloud} onChange={() => voiceSettings.updateVoiceSettings({ autoReadAloud: !voiceSettings.autoReadAloud })} icon={<Volume2 size={11} className="text-gray-500" />} />
+            )}
             {/* Neural voice picker (Piper) — replaces the old Microsoft/browser
                 voices (David 2026-06-06). Picking one not yet on disk downloads
                 it (~63 MB). Browser-only rate/pitch knobs dropped — they didn't

@@ -114,9 +114,16 @@ export function speak(
 }
 
 /**
- * Speak text sentence by sentence for streaming-style playback.
- * Each sentence is spoken sequentially, allowing early interruption
- * via stopSpeaking() between sentences.
+ * Speak `text` via the browser SpeechSynthesis fallback.
+ *
+ * Speaks the whole text as ONE utterance. It used to split into per-sentence
+ * utterances and chain them, which hit the well-known Chromium/WebView2 bug
+ * where speak() issued right after cancel() silently no-ops — so onend for the
+ * 2nd sentence never fired and playback died after the FIRST sentence (#77c,
+ * ElBiggus: only "What do you call a fake noodle?" was read, never the punch
+ * line). One utterance removes the chaining entirely; stopSpeaking() (cancel)
+ * still interrupts instantly. A periodic resume() counters Chromium pausing the
+ * synthesizer after ~15 s on a long answer.
  */
 export async function speakStreaming(
   text: string,
@@ -127,34 +134,34 @@ export async function speakStreaming(
   if (!isSpeechSynthesisSupported()) return;
   stopSpeaking();
 
-  // Split into sentences (keeping the punctuation)
-  const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+  const synth = window.speechSynthesis;
+  const trimmed = text.trim();
+  if (!trimmed || !synth) return;
 
-  for (const sentence of sentences) {
-    const trimmed = sentence.trim();
-    if (!trimmed) continue;
+  await new Promise<void>((resolve, reject) => {
+    const utterance = new SpeechSynthesisUtterance(trimmed);
+    if (voice) utterance.voice = voice;
+    if (rate !== undefined) utterance.rate = rate;
+    if (pitch !== undefined) utterance.pitch = pitch;
 
-    // Check if speech was cancelled between sentences
-    if (!window.speechSynthesis) return;
+    const keepAlive = setInterval(() => {
+      try { synth.resume(); } catch { /* engine gone — onend/onerror will settle */ }
+    }, 10000);
+    let settled = false;
+    const cleanup = () => { if (settled) return; settled = true; clearInterval(keepAlive); };
 
-    await new Promise<void>((resolve, reject) => {
-      const utterance = new SpeechSynthesisUtterance(trimmed);
-      if (voice) utterance.voice = voice;
-      if (rate !== undefined) utterance.rate = rate;
-      if (pitch !== undefined) utterance.pitch = pitch;
+    utterance.onend = () => { cleanup(); resolve(); };
+    utterance.onerror = (event) => {
+      cleanup();
+      if (event.error === "canceled" || event.error === "interrupted") {
+        resolve();
+      } else {
+        reject(new Error(`Speech synthesis error: ${event.error}`));
+      }
+    };
 
-      utterance.onend = () => resolve();
-      utterance.onerror = (event) => {
-        if (event.error === "canceled" || event.error === "interrupted") {
-          resolve();
-        } else {
-          reject(new Error(`Speech synthesis error: ${event.error}`));
-        }
-      };
-
-      window.speechSynthesis.speak(utterance);
-    });
-  }
+    synth.speak(utterance);
+  });
 }
 
 export function stopSpeaking(): void {

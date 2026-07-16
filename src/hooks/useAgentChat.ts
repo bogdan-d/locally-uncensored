@@ -27,6 +27,8 @@ import { compactMessages, getModelMaxTokens, estimateTokens } from '../lib/conte
 import { getModelContextCached } from '../api/ollama'
 import { effectiveContextWindow } from '../lib/context-window'
 import { useMemoryStore } from '../stores/memoryStore'
+import { useVoiceStore } from '../stores/voiceStore'
+import { autoSpeak } from '../lib/ttsBridge'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
 import { buildExtractionPrompt, parseExtractionResponse } from '../lib/memory-extraction'
 import { useAgentWorkflowStore } from '../stores/agentWorkflowStore'
@@ -1433,9 +1435,15 @@ export function useAgentChat() {
       approvalQueueRef.current = []
       setPendingApproval(null)
 
-      // No auto-speak. Reading a response aloud is manual-only via the
-      // per-message Speaker button (David 2026-06-07: "nicht immer automatisch
-      // vorlesen"). Enabling TTS only surfaces that button; it never auto-reads.
+      // Auto-read the finished response when the user opted in (#77). Default
+      // OFF, additionally gated on ttsEnabled; getState() so this callback never
+      // subscribes to the voice store's isSpeaking churn during playback.
+      {
+        const voice = useVoiceStore.getState()
+        if (voice.ttsEnabled && voice.autoReadAloud && contentRef.current.trim()) {
+          autoSpeak(contentRef.current)
+        }
+      }
 
       // Auto-extract memories (fire-and-forget, agent mode always qualifies)
       const memSettings = useMemoryStore.getState().settings

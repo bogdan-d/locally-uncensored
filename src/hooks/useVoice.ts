@@ -24,6 +24,7 @@ import {
 import { CloudJobError } from "../api/cloud/client";
 import { isTauri } from "../api/backend";
 import { log } from "../lib/logger";
+import { registerAutoSpeak } from "../lib/ttsBridge";
 
 // Honest, actionable copy for dictation failures. The cloud route's own error
 // strings (403 "your plan does not include cloud voice", 429 "monthly credit
@@ -356,6 +357,13 @@ export function useVoice() {
 
   const speakText = useCallback((text: string) => speakInternal(text, false), [speakInternal]);
   const speakTextStreaming = useCallback((text: string) => speakInternal(text, true), [speakInternal]);
+
+  // Publish the current streaming-speak fn so useChat/useAgentChat can auto-read
+  // finished responses (#77) without subscribing to this store. Re-runs whenever
+  // the fn is re-memoized (i.e. voice settings changed), keeping it fresh.
+  useEffect(() => {
+    registerAutoSpeak(speakTextStreaming);
+  }, [speakTextStreaming]);
 
   // Module-scoped singleton — any instance's Stop halts the global playback.
   const stopSpeaking = useCallback(() => stopSpeechPlayback(), []);

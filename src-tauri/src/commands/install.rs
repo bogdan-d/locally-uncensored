@@ -2398,7 +2398,16 @@ pub fn install_whisper(
 
         update("installing", &format!("Installing faster-whisper via {} (this can take a few minutes)…", target_python));
 
-        let args = build_whisper_pip_args();
+        let mut args = build_whisper_pip_args();
+        // Arch / Debian 12+ / Fedora 38+ system Python is PEP 668 protected, so a
+        // bare `pip install` dies with externally-managed-environment. When that's
+        // the target (no ComfyUI venv absorbed it), install into the user site
+        // with the escape hatch so STT installs there too (joerack, Arch). No-op
+        // on Windows/macOS/venv Pythons (not PEP 668 protected).
+        if is_pep668_protected(&target_python) {
+            args.push("--break-system-packages");
+            args.push("--user");
+        }
         // No cancel flag — this single pip install is short relative to the
         // ComfyUI PyTorch download, so we run it to completion like install_python.
         match pip_install_streaming_with_retry_cancellable(&args, &target_python, 3, &install_state, None) {
@@ -2550,7 +2559,13 @@ pub fn install_tts(
             &format!("Installing piper-tts via {} (this can take a few minutes)…", target_python),
         );
 
-        let args = build_tts_pip_args();
+        let mut args = build_tts_pip_args();
+        // PEP 668 escape hatch (Arch / Debian 12+ / Fedora 38+) — see
+        // install_whisper. No-op on Windows/macOS/venv Pythons.
+        if is_pep668_protected(&target_python) {
+            args.push("--break-system-packages");
+            args.push("--user");
+        }
         match pip_install_streaming_with_retry_cancellable(&args, &target_python, 3, &install_state, None) {
             Ok(()) => {
                 update(

@@ -155,12 +155,55 @@ impl WhisperServer {
 
 #[tauri::command]
 pub fn whisper_status(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let whisper = state.whisper.lock().unwrap();
+    let (running, ready, backend) = {
+        let whisper = state.whisper.lock().unwrap();
+        (whisper.process.is_some(), whisper.ready, whisper.backend.clone())
+    };
+    // Report INSTALLED-on-disk, not merely "server process running". The whisper
+    // server lazy-starts on first mic use and is killed on quit, so keying the
+    // badge on process.is_some() made STT read as uninstalled after every
+    // relaunch — the "reinstall every launch" report (#78, ElBiggus). If the
+    // server is up it's obviously installed; otherwise probe the resolved
+    // interpreter for the faster_whisper package.
+    let available = running || whisper_package_installed(state.inner());
     Ok(serde_json::json!({
-        "available": whisper.process.is_some(),
-        "backend": whisper.backend,
-        "loading": whisper.process.is_some() && !whisper.ready,
+        "available": available,
+        "backend": backend,
+        "loading": running && !ready,
     }))
+}
+
+/// Is `faster_whisper` importable in the interpreter install_whisper targets
+/// (resolve_lu_python: ComfyUI venv if present, else system Python)? Cheap
+/// best-effort probe so the badge reflects a prior install across relaunches
+/// without the server running. Any spawn/timeout failure → "not installed".
+fn whisper_package_installed(state: &AppState) -> bool {
+    let python = crate::commands::install::resolve_lu_python(state);
+    if python.is_empty() {
+        return false;
+    }
+    let mut cmd = Command::new(&python);
+    cmd.args(["-c", "import faster_whisper"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    // An ABSENT package fails in well under a second; a present one loads
+    // ctranslate2 (a few seconds cold). 10 s cap so status never hangs.
+    for _ in 0..100 {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(_) => return false,
+        }
+    }
+    let _ = child.kill();
+    false
 }
 
 #[tauri::command]
@@ -199,7 +242,11 @@ pub fn transcribe(app: AppHandle, audio_base64: String, content_type: String, st
     {
         let needs_start = state.whisper.lock().map(|w| w.process.is_none()).unwrap_or(true);
         if needs_start {
-            let python_bin = state.python_bin.lock().unwrap().clone();
+            // Resolve the SAME interpreter install_whisper used (ComfyUI venv if
+            // present, else system Python). Using state.python_bin here meant a
+            // venv install was invisible at runtime → STT silently dead after
+            // relaunch on boxes with a ComfyUI venv (#78).
+            let python_bin = crate::commands::install::resolve_lu_python(state.inner());
             if python_bin.is_empty() {
                 return Err("Whisper unavailable: no Python runtime detected. Install Python in the setup step, then retry.".to_string());
             }

@@ -5,6 +5,8 @@ import { useModelStore } from "../stores/modelStore"
 import { useSettingsStore } from "../stores/settingsStore"
 import { useRAGStore } from "../stores/ragStore"
 import { useMemoryStore } from "../stores/memoryStore"
+import { useVoiceStore } from "../stores/voiceStore"
+import { autoSpeak } from "../lib/ttsBridge"
 import { retrieveContext } from "../api/rag"
 import { getModelMaxTokens } from "../lib/context-compaction"
 import { getModelContextCached } from "../api/ollama"
@@ -555,9 +557,16 @@ export function useChat() {
       useModelStore.getState().setIsModelLoading(false)
       abortRef.current = null
 
-      // No auto-speak. Reading a response aloud is manual-only via the
-      // per-message Speaker button (David 2026-06-07: "nicht immer automatisch
-      // vorlesen"). Enabling TTS only surfaces that button; it never auto-reads.
+      // Auto-read the finished response when the user opted in (#77, ElBiggus).
+      // Default OFF and additionally gated on ttsEnabled; getState() (not the
+      // hook) so this callback never subscribes to the voice store's isSpeaking
+      // churn during playback.
+      {
+        const voice = useVoiceStore.getState()
+        if (voice.ttsEnabled && voice.autoReadAloud && contentRef.current.trim()) {
+          autoSpeak(contentRef.current)
+        }
+      }
 
       // Auto-extract memories (fire-and-forget)
       const memSettings = useMemoryStore.getState().settings
