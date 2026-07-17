@@ -14,6 +14,7 @@ import {
   buildTxt2ImgWorkflow,
   buildTxt2VidWorkflow,
   classifyModel,
+  isI2VModel,
   extractComfyOutputFiles,
   type ClassifiedModel,
   type ComfyUIOutput,
@@ -298,6 +299,20 @@ export function useCreate() {
         ? 'No image model selected. Add checkpoints or FLUX models to ComfyUI.'
         : 'No video model selected. Install Wan 2.1 or AnimateDiff models.')
       return
+    }
+    // Animate (local I2V, restored 2026-07-17): reject-and-report instead of
+    // feeding a start image to a t2v-only checkpoint — that either errors in
+    // ComfyUI or silently ignores the source. The ModelChip already filters
+    // the picker; this guards a stale store selection reaching submit.
+    if (intent === 'animate') {
+      if (!effI2vImage) {
+        setError('Add the image you want to animate first.')
+        return
+      }
+      if (!isI2VModel(activeModel)) {
+        setError(`${activeModel} is text-to-video only. Pick an i2v-capable model (WAN i2v / WAN 2.2 ti2v / SVD / LTX) to animate an image.`)
+        return
+      }
     }
 
     const isRunning = await checkComfyConnection()

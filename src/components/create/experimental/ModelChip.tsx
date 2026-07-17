@@ -2,6 +2,7 @@ import { useCreateStore } from '../../../stores/createStore'
 import { useCloudCatalogStore, defaultCloudModel } from '../../../stores/cloudCatalogStore'
 import { Select, type SelectOption } from '../ui/Select'
 import { TYPE_BADGE } from './badges'
+import { isI2VModel, isT2VCapable } from '../../../api/comfyui'
 
 const CLOUD_BADGE = { label: 'Cloud', color: 'bg-violet-500/15 text-violet-300' }
 
@@ -60,6 +61,7 @@ function CloudModelChip() {
 
 function LocalModelChip() {
   const mode = useCreateStore((s) => s.mode)
+  const intent = useCreateStore((s) => s.intent())
   const imageModel = useCreateStore((s) => s.imageModel)
   const videoModel = useCreateStore((s) => s.videoModel)
   const imageModelList = useCreateStore((s) => s.imageModelList)
@@ -69,8 +71,19 @@ function LocalModelChip() {
 
   const isVideo = mode === 'video'
 
-  const list = isVideo ? videoModelList : imageModelList
-  const value = isVideo ? videoModel : imageModel
+  // Mirror the cloud picker's op-gating (David 2026-07-17: "only offer models
+  // that can actually do it"): Animate lists i2v-capable local models, Video
+  // lists t2v-capable ones (SVD/FramePack are i2v-only and drop out there).
+  const rawList = isVideo ? videoModelList : imageModelList
+  const list = !isVideo
+    ? rawList
+    : intent === 'animate'
+      ? rawList.filter((m) => isI2VModel(m.name))
+      : rawList.filter((m) => isT2VCapable(m.name))
+  const stored = isVideo ? videoModel : imageModel
+  // Reflect the model the run will really use — a leftover pick the current
+  // op can't perform must not show as "selected".
+  const value = list.some((m) => m.name === stored) ? stored : (list[0]?.name ?? stored)
 
   const options: SelectOption[] = list.map((m) => ({
     value: m.name,

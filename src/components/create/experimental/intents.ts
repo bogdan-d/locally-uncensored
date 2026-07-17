@@ -72,10 +72,15 @@ export const INTENTS: IntentMeta[] = [
     examples: ['a slow-motion wave breaking on rocks, cinematic', 'timelapse of clouds over a mountain range'],
   },
   {
+    // Local lane restored 2026-07-17 (David): the lu-labs port had marked
+    // animate cloudOnly, which silently dropped the local I2V the old Create
+    // tab always had. Local builds route through buildDynamicWorkflow's
+    // family-specific I2V wiring (WAN/WAN2.2/Hunyuan/LTX/Cosmos/SVD/FramePack);
+    // the model picker only offers i2v-capable models here.
     id: 'animate', label: 'Animate Image', short: 'Animate', icon: Film,
     placeholder: 'Describe how the image should move…',
     needsSource: true, needsPrompt: true, allowsMask: false, isVideo: true,
-    cloudOnly: true,
+    requiresModels: 'video',
     examples: ['slow zoom in, subtle parallax', 'hair and clothes moving in the wind'],
   },
 ]

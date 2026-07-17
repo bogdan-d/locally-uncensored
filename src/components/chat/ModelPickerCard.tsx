@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Save, Check, Loader2, Settings2, X } from 'lucide-react'
 import { useModelPickStore, MODEL_PICK_TIMEOUT_MS, type ModelPickKind, type ModelPickRequest } from '../../stores/modelPickStore'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { getImageModels, getVideoModels, isI2VModel } from '../../api/comfyui'
+import { getImageModels, getVideoModels, isI2VModel, isT2VCapable } from '../../api/comfyui'
 import type { AgentToolCall } from '../../types/agent-mode'
 
 /**
@@ -148,9 +148,11 @@ export function ChangeModelInline({ kind }: { kind: ModelPickKind }) {
     ;(async () => {
       try {
         const all = kind === 'image' ? await getImageModels() : await getVideoModels()
+        // T2V uses isT2VCapable, NOT !isI2VModel — dual-capable checkpoints
+        // (Wan 2.2 TI2V, LTX) belong in BOTH lists (mirrors model-pick.ts).
         const eligible = kind === 'image'
           ? all
-          : all.filter((m) => (kind === 'video-i2v' ? isI2VModel(m.name) : !isI2VModel(m.name)))
+          : all.filter((m) => (kind === 'video-i2v' ? isI2VModel(m.name) : isT2VCapable(m.name)))
         if (!cancelled) setModels(eligible.map((m) => m.name))
       } catch {
         if (!cancelled) { setLoadError(true); setModels([]) }

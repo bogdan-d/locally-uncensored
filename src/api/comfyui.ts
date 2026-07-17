@@ -207,26 +207,32 @@ export function isVideoModelType(type: ModelType): boolean {
 
 /**
  * Can this model accept a source still (image-to-video)? True for explicit i2v
- * tags, SVD, FramePack, and Wan 2.2 TI2V (which is dual T2V/I2V). Used to build
- * the I2V picker list and to route an inputImage to the I2V branch.
+ * tags, SVD, FramePack, Wan 2.2 TI2V (dual T2V/I2V), LTX-Video (its base
+ * checkpoints drive both graphs via LTXVImgToVideo), and Cosmos Video2World.
+ * Used to build the Animate picker list and to route an inputImage to the I2V
+ * branch (local lane restored 2026-07-17).
  */
 export function isI2VModel(name: string): boolean {
   const lower = name.toLowerCase()
   return lower.includes('i2v') || lower.includes('svd') || lower.includes('framepack')
     || lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')
+    || lower.includes('ltx') || lower.includes('video2world')
 }
 
 /**
  * Can this model do TEXT-to-video (no source image required)? Everything EXCEPT
  * the I2V-ONLY checkpoints: SVD and FramePack load via image-only/wrapper loaders,
- * and a CogVideoX *I2V* checkpoint needs a still — none can run a T2V graph. Wan 2.2
- * TI2V is dual-capable, so it stays in the T2V list too (the `ti2v`/`wan2.2` guard
- * wins over the generic `i2v` substring). Keeps wan22 selectable for both modes.
+ * a CogVideoX *I2V* checkpoint needs a still, and Cosmos Video2World is the
+ * conditioned variant (Text2World is its t2v sibling) — none can run a T2V graph.
+ * Wan 2.2 TI2V is dual-capable, so it stays in the T2V list too (the
+ * `ti2v`/`wan2.2` guard wins over the generic `i2v` substring), and LTX base
+ * checkpoints stay because they run both graphs.
  */
 export function isT2VCapable(name: string): boolean {
   const lower = name.toLowerCase()
   if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return true
   if (lower.includes('svd') || lower.includes('framepack')) return false
+  if (lower.includes('video2world')) return false
   if (lower.includes('i2v')) return false
   return true
 }

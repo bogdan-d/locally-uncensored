@@ -748,16 +748,19 @@ describe('createStore', () => {
       expect(after.source).not.toBeNull()
     })
 
-    it('clears animate (i2v falls back to t2v)', () => {
+    it('keeps animate — its local I2V lane is back (2026-07-17)', () => {
+      // The lu-labs port cleared i2v on every local flip ("no local lane");
+      // with the lane restored, a cloud → local switch must keep the user's
+      // animate setup (sub-mode AND source) exactly like edit/removebg do.
       const s = useCreateStore.getState()
       s.setBackend('cloud')
       s.setIntent('animate')
       s.setSource(ref)
       useCreateStore.getState().setBackend('local')
       const after = useCreateStore.getState()
-      expect(after.videoSubMode).toBe('t2v')
-      expect(after.source).toBeNull()
-      expect(after.intent()).toBe('video')
+      expect(after.videoSubMode).toBe('i2v')
+      expect(after.source).not.toBeNull()
+      expect(after.intent()).toBe('animate')
     })
 
     it('keeps removebg — it has a local lane via the RMBG node', () => {

@@ -836,6 +836,72 @@ export async function buildDynamicWorkflow(
     delete workflow[latentId]
   }
 
+  // ─── I2V override (Animate — local lane restored, David 2026-07-17) ───
+  // A video request carrying an inputImage swaps the empty latent for the
+  // family's image-to-video conditioning node. Covers every family core
+  // ComfyUI can animate on this main path (WAN i2v, Hunyuan i2v, LTX,
+  // Cosmos); wan22/SVD/FramePack already handle the image in their dedicated
+  // builders above. Wiring is schema-driven — we only feed inputs the live
+  // node declares and map outputs by their declared types — so version drift
+  // in these nodes degrades to a ComfyUI validation error, not a bad graph.
+  const isI2V = isVideo && !!(params as GenerateParams).inputImage
+  if (isI2V && ['unet_video', 'unet_ltx', 'unet_cosmos', 'unet_mochi'].includes(strategy)) {
+    if (strategy === 'unet_mochi') {
+      throw new WorkflowUnavailableError(
+        'Mochi is text-to-video only — pick an i2v-capable model (WAN i2v, WAN 2.2 ti2v, SVD, LTX, Cosmos) to animate an image.',
+        strategy,
+      )
+    }
+    const i2vNode =
+      strategy === 'unet_ltx' ? 'LTXVImgToVideo'
+      : strategy === 'unet_cosmos' ? 'CosmosImageToVideoLatent'
+      : type === 'hunyuan' ? 'HunyuanImageToVideo'
+      : 'WanImageToVideo'
+    const meta = allNodes[i2vNode]
+    if (!meta) {
+      throw new WorkflowUnavailableError(
+        `Animating with this model family needs the ${i2vNode} node, which your ComfyUI doesn't have. Update ComfyUI, then try again.`,
+        strategy,
+      )
+    }
+    const loadId = String(n++)
+    workflow[loadId] = { class_type: 'LoadImage', inputs: { image: (params as GenerateParams).inputImage } }
+    const required = (meta.input?.required ?? {}) as Record<string, any[]>
+    const optional = (meta.input?.optional ?? {}) as Record<string, any[]>
+    const decl = { ...required, ...optional }
+    const inputs: Record<string, any> = {}
+    if (decl.positive) inputs.positive = positiveRef
+    if (decl.negative) inputs.negative = negativeRef
+    if (decl.vae) inputs.vae = [vaeSourceId, vaeOutputSlot]
+    if (decl.width) inputs.width = params.width
+    if (decl.height) inputs.height = params.height
+    if (decl.length) inputs.length = videoParams.frames
+    if (decl.batch_size) inputs.batch_size = 1
+    if (decl.start_image) inputs.start_image = [loadId, 0]
+    else if (decl.image) inputs.image = [loadId, 0]
+    else if (decl.init_image) inputs.init_image = [loadId, 0]
+    // Remaining REQUIRED widgets we don't model: take the schema default
+    // (combo → first option) — same live-schema pattern as the RMBG builder.
+    for (const [key, spec] of Object.entries(required)) {
+      if (inputs[key] !== undefined) continue
+      if (Array.isArray(spec[0])) inputs[key] = spec[0][0]
+      else if (spec[1] && typeof spec[1] === 'object' && 'default' in spec[1]) inputs[key] = spec[1].default
+    }
+    const i2vId = String(n++)
+    workflow[i2vId] = { class_type: i2vNode, inputs, _meta: { title: 'I2V conditioning' } }
+    // Outputs by declared type: 1st CONDITIONING → positive, 2nd → negative
+    // (Hunyuan emits only one — its negative stays on the text encoder),
+    // LATENT → sampler latent. A latent-only node (Cosmos) leaves both
+    // conditionings untouched.
+    const outs: string[] = (meta.output ?? []) as string[]
+    const latSlot = outs.indexOf('LATENT')
+    latentRef = [i2vId, latSlot >= 0 ? latSlot : 0]
+    const condSlots = outs.map((t, i) => (t === 'CONDITIONING' ? i : -1)).filter((i) => i >= 0)
+    if (condSlots.length >= 1) positiveRef = [i2vId, condSlots[0]]
+    if (condSlots.length >= 2) negativeRef = [i2vId, condSlots[1]]
+    delete workflow[latentId]
+  }
+
   // ─── Phase 4: Sampling ───
 
   const samplerId = String(n++)
