@@ -30,7 +30,22 @@ Community fix release: works through every open GitHub issue plus the actionable
 - ComfyUI 0.19.0 (April 2026) added an origin-check middleware that returns 403 for every cross-site request — including the desktop WebView's requests from `http://tauri.localhost` to a **user-managed** ComfyUI (LU-spawned ComfyUI always passed `--enable-cors-header`, so it was never affected). Control-plane HTTP already went through the Rust proxy and kept working; what broke was the live progress WebSocket and direct `<img>`/`<video>` gallery loads.
 - **Live progress now flows through a Rust-side WebSocket proxy** (`comfy_ws_connect`) whose client handshake carries no browser Origin, so it passes the middleware on any ComfyUI. The web build keeps the raw WebSocket.
 - **Gallery/lightbox media that fails to load direct now falls back to fetching the bytes through the Rust proxy** and displays a blob. Trade-off stated plainly: the fallback holds the whole file in memory and video loses HTTP-Range seeking — fine for short clips, noted in code.
-- **When the fallback engages, the Create tab shows a dismissible banner** with the actual fix for the user's own ComfyUI: add `--enable-cors-header http://tauri.localhost` to the launch script. (Community threads suggested `--allow-origin` — that flag does not exist — or `--listen 0.0.0.0`, which needlessly exposes ComfyUI to the LAN.)
+- **When the fallback engages, the Create tab shows a short dismissible banner with a one-click fix.** "Let me do it for you!" restarts the user-managed ComfyUI under LU's management (which always passes the CORS flag), restoring direct loads and native progress — guarded against firing mid-generation. If LU doesn't know the install's folder (or the host is remote), the banner explains the manual route instead: add `--enable-cors-header http://tauri.localhost` to the launch script. (Community threads suggested `--allow-origin` — that flag does not exist — or `--listen 0.0.0.0`, which needlessly exposes ComfyUI to the LAN.)
+
+### Fixed — Remote ComfyUI host: gallery/preview media never displayed (#82 rx422)
+
+- With Settings → ComfyUI **Host** pointed at another machine (LAN/Docker/homelab — an explicitly supported setup), generation worked but every thumbnail/preview showed "the local engine isn't reachable": the WebView's CSP intentionally pins `img-src`/`media-src` to localhost, so direct loads from a remote host are always blocked. The proxied-blob fallback above now covers this case too — media re-fetches through the Rust proxy (which knows the configured host) and displays normally, verified live against a remote host (thumbnails, fullscreen, video, and live progress via the WS proxy).
+- The CORS banner no longer appears for remote hosts — the flag hint would be wrong there (no ComfyUI flag can un-block the WebView's own CSP), the proxied path is simply the normal mode for remote setups.
+
+### Fixed — Local image-to-video (Animate) was missing from the Create tab
+
+- The redesigned Create surface had marked **Animate Image** cloud-only, silently dropping the local I2V lane the old Create tab always had (and clearing its state on every switch to local). The intent is back for the local backend, with the full submit path (source image → ComfyUI upload → workflow) reconnected.
+- **Every video family core ComfyUI can animate is wired**, schema-driven from the live `/object_info`: WAN 2.1 i2v (`WanImageToVideo`), Hunyuan i2v (`HunyuanImageToVideo`), LTX (`LTXVImgToVideo`), Cosmos (`CosmosImageToVideoLatent`) on the main builder path — WAN 2.2 TI2V, SVD and FramePack already animated via their dedicated builders. Mochi (t2v-only) and a ComfyUI missing the family's node reject with an actionable message instead of silently ignoring the source image.
+- **The model picker only offers models that can actually do the op**: Animate lists i2v-capable models (explicit `i2v`/`ti2v` tags, SVD, FramePack, LTX, Cosmos Video2World), Video lists t2v-capable ones — SVD/FramePack drop out there, dual models (WAN 2.2 TI2V, LTX) stay in both. Same gating in the chat model-picker card.
+
+### New — ComfyUI install location is configurable (andy_38747, Discord)
+
+- The Settings → AI Backends → ComfyUI **Path** field now doubles as the install target: put e.g. `D:\ComfyUI` there before pressing **Install ComfyUI** and the multi-GB install (plus all image/video models, which live inside the ComfyUI folder) lands on that drive instead of filling `C:`. Empty field keeps the previous default (home folder). A completed custom-target install is persisted as the active path, so LU finds it after a restart.
 
 ### Fixed — Create-tab LoRA picker was a silent no-op (game-master0, Discord #80)
 
