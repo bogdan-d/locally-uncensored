@@ -1,4 +1,7 @@
+import { Cloud } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
+import { useSettingsStore } from '../../../stores/settingsStore'
+import { useUIStore, type CloudTeaserTarget } from '../../../stores/uiStore'
 import { INTENTS } from './intents'
 import { cn } from '../ui/cn'
 
@@ -9,14 +12,19 @@ import { cn } from '../ui/cn'
 // cross-fades via colour/shadow; neighbours slide on natural flex reflow.
 const EASE = 'ease-[cubic-bezier(0.22,1,0.36,1)]'
 
+type TeaserIntent = Extract<CloudTeaserTarget, { surface: 'intent' }>['intent']
+
 export function IntentBar() {
   const intent = useCreateStore((s) => s.intent())
   const setIntent = useCreateStore((s) => s.setIntent)
   const backend = useCreateStore((s) => s.backend)
-  // Utility intents (upscale/eraser) are hosted-only endpoints — hide them on
-  // the local backend. setIntent's base already clears a stale utilityOp when
-  // the mode flips back and the user picks any normal intent.
-  const intents = INTENTS.filter((m) => !m.cloudOnly || backend === 'cloud')
+  const teasersEnabled = useSettingsStore((s) => s.settings.cloudTeasersEnabled)
+  const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
+  // Hosted-only intents (upscale/eraser + the 2.5.8 categories) are live on
+  // the cloud backend. On local they stay VISIBLE as locked teasers (cloud
+  // glyph, sheet on tap) while the discovery layer is on — never selectable,
+  // never blocking a local flow. Teasers off = the pre-2.5.8 behavior.
+  const intents = INTENTS.filter((m) => !m.cloudOnly || backend === 'cloud' || teasersEnabled)
 
   return (
     <div
@@ -28,27 +36,42 @@ export function IntentBar() {
       style={{ transform: 'scale(0.763)', transformOrigin: 'center' }}
     >
       {intents.map((meta) => {
-        const selected = intent === meta.id
+        const locked = meta.cloudOnly === true && backend !== 'cloud'
+        const selected = !locked && intent === meta.id
         const Icon = meta.icon
         return (
           <button
             key={meta.id}
             role="radio"
             aria-checked={selected}
-            aria-label={meta.label}
-            title={meta.label}
-            onClick={() => setIntent(meta.id)}
+            aria-label={locked ? `${meta.label} — runs on LU Cloud` : meta.label}
+            title={locked ? `${meta.label} — runs on LU Cloud` : meta.label}
+            onClick={() =>
+              locked
+                ? setCloudTeaser({ surface: 'intent', intent: meta.id as TeaserIntent })
+                : setIntent(meta.id)
+            }
             className={cn(
-              'flex items-center h-9 rounded-full border lu-focus-ring transition-[background-color,border-color,box-shadow,color] duration-200',
+              'relative flex items-center h-9 rounded-full border lu-focus-ring transition-[background-color,border-color,box-shadow,color] duration-200',
               EASE,
               selected
                 ? 'bg-white/[0.11] border-white/20 shadow-sm text-white'
-                : 'border-transparent text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]',
+                : locked
+                  ? 'border-transparent text-gray-600 hover:text-gray-400 hover:bg-white/[0.03]'
+                  : 'border-transparent text-gray-500 hover:text-gray-200 hover:bg-white/[0.05]',
             )}
           >
             <span className="grid place-items-center w-9 h-9 shrink-0">
               <Icon size={16} strokeWidth={selected ? 2 : 1.75} />
             </span>
+            {locked && (
+              <Cloud
+                size={9}
+                className="absolute top-1 right-1 text-violet-300/80"
+                strokeWidth={2.2}
+                aria-hidden
+              />
+            )}
             <span
               className={cn(
                 'overflow-hidden whitespace-nowrap min-w-0 t-control transition-[max-width,opacity,padding] duration-200',

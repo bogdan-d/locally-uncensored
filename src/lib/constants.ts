@@ -17,6 +17,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // Global Local/Cloud switch (2.5.7) — local is and stays the default.
   appMode: 'local',
   cloudOnboardingSeen: false,
+  // Cloud teasers in Local mode (2.5.8) — on by default, one-click off.
+  cloudTeasersEnabled: true,
   personasEnabled: true,
   thinkingEnabled: true,
   // Small-Model Mode (v2.5.0) — lean profile for 3B-8B local models.

@@ -35,7 +35,9 @@ import { DEFAULT_SETTINGS, BUILT_IN_PERSONAS } from '../lib/constants'
 // fills the default while preserving every existing value; NVIDIA unaffected.
 // v13 (2.5.7): added settings.cloudOnboardingSeen (one-time Cloud onboarding
 // on the first successful switch flip, default false). Additive merge.
-const STORE_VERSION = 13
+// v14 (2.5.8): added settings.cloudTeasersEnabled (Cloud discovery in Local
+// mode: locked Create tabs + hosted-model picker rows, default true). Additive.
+const STORE_VERSION = 14
 
 interface SettingsState {
   settings: Settings

@@ -29,6 +29,7 @@ import { useCloudAuth } from '../../hooks/useCloudAuth'
 import { useCloudAuthStore, deriveCloudAvailable } from '../../stores/cloudAuthStore'
 import { useCreateStore } from '../../stores/createStore'
 import { CloudGateModal } from '../cloud/CloudGateModal'
+import { CloudTeaserModal } from '../cloud/CloudTeaserModal'
 import { CloudIntroPopup } from '../cloud/CloudIntroPopup'
 import { CloudOnboardingModal } from '../cloud/CloudOnboardingModal'
 import { ShortcutsModal } from './ShortcutsModal'
@@ -808,6 +809,9 @@ export function AppShell() {
       />
       {/* Cloud gate: login → plan → beta wall, opened by the header switch. */}
       <CloudGateModal />
+      {/* Cloud discovery sheet: opened by the Local-mode teaser surfaces
+          (locked Create tabs, hosted model rows). */}
+      <CloudTeaserModal />
       {/* One-time cloud onboarding — first successful switch flip. */}
       <CloudOnboardingModal />
       {/* Once-ever "LU Cloud is live" hello on the first 2.5.7 launch. */}

@@ -27,6 +27,12 @@ export interface Settings {
    *  to Cloud shows a short what-changes walkthrough; after that the switch
    *  flips silently. Persisted so it never re-triggers. */
   cloudOnboardingSeen: boolean
+  /** Cloud discovery inside Local mode (2.5.8): locked Upscale/Erase tabs in
+   *  Create, hosted-model rows in the chat + Create pickers, each opening a
+   *  small "runs on LU Cloud" sheet. Teasers never block a local flow and
+   *  never show in cloud mode. Off = Local mode shows zero Cloud surfaces;
+   *  the sheet's "Hide Cloud features" link and Settings both flip this. */
+  cloudTeasersEnabled: boolean
   /** Master switch for personas. When off, new chats get no persona system
    *  prompt (raw model). Default true. Ported from the uselu web companion. */
   personasEnabled: boolean

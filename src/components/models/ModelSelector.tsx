@@ -1,15 +1,71 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { ChevronDown, Loader2, Power, PlayCircle, X } from 'lucide-react'
+import { ChevronDown, Loader2, Power, PlayCircle, X, Cloud } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useModelStore } from '../../stores/modelStore'
 import { useProviderStore } from '../../stores/providerStore'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { useUIStore } from '../../stores/uiStore'
 import { unloadAllModels, loadModel, unloadModel, listRunningModels } from '../../api/ollama'
 import { displayModelName } from '../../api/providers'
 import { backendCall } from '../../api/backend'
 import { listLoadedLmStudioModels, loadLmStudioModel, unloadLmStudioModel } from '../../api/lmstudio'
 import { isLmStudioProvider } from '../../lib/hf-to-provider'
 import type { AIModel } from '../../types/models'
+
+// ── Local-mode cloud discovery (2.5.8): an "LU Cloud" section at the list's
+// tail. Signed-in accounts show their real hosted chat models (the appMode
+// filter hides them from the selectable list); logged-out shows one generic
+// row. Tapping any row opens the Cloud gate (login → plan → beta) — chat rows
+// skip the teaser sheet, the gate IS the pitch here. Hidden in cloud mode
+// (models are the real list there) and when the discovery layer is off. ──
+function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
+  const appMode = useSettingsStore((s) => s.settings.appMode)
+  const teasersEnabled = useSettingsStore((s) => s.settings.cloudTeasersEnabled)
+  const setCloudGateOpen = useUIStore((s) => s.setCloudGateOpen)
+  const allModels = useModelStore((s) => s.models)
+  if (appMode === 'cloud' || !teasersEnabled) return null
+  const cloudChat = allModels.filter((m) => m.provider === 'lu-cloud' && m.type === 'text').slice(0, 5)
+  const open = () => { onOpen(); setCloudGateOpen(true) }
+  return (
+    <div className="mt-1 border-t border-white/[0.05]">
+      <div className="px-2.5 pt-2 pb-0.5 flex items-center gap-1">
+        <Cloud size={9} className="text-violet-300/80" />
+        <span className="text-[0.55rem] font-medium uppercase tracking-widest text-gray-600">
+          LU Cloud
+        </span>
+      </div>
+      {cloudChat.length > 0 ? (
+        cloudChat.map((m) => (
+          <button
+            key={m.name}
+            onClick={open}
+            className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
+            title="Runs on LU Cloud — tap to see plans"
+          >
+            <Cloud size={10} className="text-violet-300/70 shrink-0" />
+            <span className="text-[0.68rem] text-gray-400 truncate">
+              {('displayName' in m && m.displayName) || displayModelName(m.name)}
+            </span>
+            <span className="ml-auto text-[8px] text-violet-300/70">Cloud</span>
+          </button>
+        ))
+      ) : (
+        <button
+          onClick={open}
+          className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
+          title="Runs on LU Cloud — tap to see plans"
+        >
+          <Cloud size={10} className="text-violet-300/70 shrink-0" />
+          <span className="text-[0.68rem] text-gray-400">
+            Frontier chat models — no GPU needed
+          </span>
+          <span className="ml-auto text-[8px] text-violet-300/70">Cloud</span>
+        </button>
+      )}
+    </div>
+  )
+}
 
 // True when `prev` already holds exactly the names in `next`. Lets the 1.5 s
 // loaded-state poll bail out of a state update (return the SAME Set ref) when
@@ -752,6 +808,8 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
                   })}
                 </div>
               ))}
+
+              <CloudTeaserSection onOpen={() => setOpen(false)} />
             </div>
 
             {/* Sticky footer: Unload */}

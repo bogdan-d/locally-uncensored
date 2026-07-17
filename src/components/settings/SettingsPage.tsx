@@ -985,6 +985,32 @@ export function SettingsPage() {
         {tab === 'general' && (<>
           <Section title="LU Cloud Account" defaultOpen>
             <AccountPanel />
+            {/* Local-mode discovery layer (2.5.8): the locked Create tabs +
+                hosted-model rows. The teaser sheet's "Hide Cloud features"
+                link flips this off; this is the way back on. */}
+            <div className="flex items-center justify-between pt-1">
+              <div className="min-w-0 pr-3">
+                <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Show Cloud features in Local mode</span>
+                <p className="text-[0.6rem] text-gray-500 dark:text-gray-600 leading-snug">
+                  Locked Create tools and hosted models appear as tappable previews. Never blocks a local flow.
+                </p>
+              </div>
+              <button
+                onClick={() => updateSettings({ cloudTeasersEnabled: !settings.cloudTeasersEnabled })}
+                className={`relative w-8 h-[18px] rounded-full transition-colors shrink-0 ${
+                  settings.cloudTeasersEnabled ? 'bg-violet-500/70' : 'bg-gray-300 dark:bg-white/10'
+                }`}
+                role="switch"
+                aria-checked={settings.cloudTeasersEnabled}
+                aria-label="Show Cloud features in Local mode"
+              >
+                <span
+                  className={`absolute top-[2px] w-3.5 h-3.5 rounded-full bg-white shadow transition-all ${
+                    settings.cloudTeasersEnabled ? 'left-[16px]' : 'left-[2px]'
+                  }`}
+                />
+              </button>
+            </div>
           </Section>
           <Section title="Appearance">
             <div className="flex items-center justify-between">
