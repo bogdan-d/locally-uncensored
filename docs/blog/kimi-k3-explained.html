@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kimi K3 Explained: Moonshot's 2.8T Open Weight Flagship (2026) | Locally Uncensored</title>
+<meta name="description" content="Kimi K3 is Moonshot AI's new 2.8 trillion parameter MoE with a 1M token context. Specs, benchmarks, API pricing, the July 27 open weights date, and what it means for local AI.">
+<meta name="keywords" content="kimi k3, kimi k3 release, kimi k3 specs, kimi k3 api, kimi k3 open source, kimi k3 open weights, moonshot kimi k3, kimi k3 benchmarks">
+<meta property="og:title" content="Kimi K3 Explained: Moonshot's 2.8T Open Weight Flagship">
+<meta property="og:description" content="Everything known about Kimi K3: 2.8T MoE architecture, 1M context, benchmarks vs Opus and GPT, API pricing, and the promised open weights release.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/kimi-k3-explained.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-07-17">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="AI">
+<meta property="article:tag" content="Kimi K3">
+<meta property="article:tag" content="Open Weights">
+<meta property="article:tag" content="Local AI">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Kimi K3 Explained: Moonshot's 2.8T Open Weight Flagship">
+<meta name="twitter:description" content="Specs, benchmarks, API pricing, and the July 27 open weights date for Moonshot's new frontier model.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/kimi-k3-explained.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Kimi K3 Explained: Moonshot's 2.8T Open Weight Flagship","description":"Everything known about Kimi K3 as of July 2026: the 2.8 trillion parameter MoE architecture, 1M token context window, self reported benchmarks against Claude Opus and GPT, API pricing, and the promised open weights release by July 27.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-07-17","dateModified":"2026-07-17","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/kimi-k3-explained.html"},"keywords":"kimi k3, kimi k3 release, kimi k3 specs, kimi k3 api, kimi k3 open weights, moonshot kimi k3"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What is Kimi K3?","acceptedAnswer":{"@type":"Answer","text":"Kimi K3 is Moonshot AI's flagship model released on July 16, 2026. It is a Mixture of Experts model with roughly 2.8 trillion total parameters and a 1 million token context window, aimed at long horizon coding and agent workloads. Two variants shipped at launch: K3 Max for chat and agents, and K3 Swarm Max for large scale parallel processing."}},{"@type":"Question","name":"Is Kimi K3 open source?","acceptedAnswer":{"@type":"Answer","text":"Not yet, but it is announced as open weight. Moonshot says the full weights will be released by July 27, 2026. The K2 series precedent is a Modified MIT license, and K3 is expected to follow the same open approach."}},{"@type":"Question","name":"How much does the Kimi K3 API cost?","acceptedAnswer":{"@type":"Answer","text":"Moonshot's official API pricing is 3 dollars per million input tokens (0.30 dollars with a cache hit) and 15 dollars per million output tokens, including reasoning tokens. The same rates apply on OpenRouter, which currently routes every K3 request to Moonshot's own servers."}},{"@type":"Question","name":"Is Kimi K3 better than Claude or GPT?","acceptedAnswer":{"@type":"Answer","text":"According to Moonshot's self reported benchmarks, K3 mostly beats Claude Opus 4.8 max and GPT 5.5 high, while losing to Claude Fable 5 and GPT 5.6. Independent verification is still thin this early, so treat launch week numbers as a claim, not a fact."}},{"@type":"Question","name":"Can I run Kimi K3 on my own computer?","acceptedAnswer":{"@type":"Answer","text":"Realistically no. At 2.8 trillion parameters, even an aggressive 4 bit quantization lands around 1.4 terabytes just for the weights, before the KV cache for its 1 million token context. That is multi node datacenter territory. On consumer hardware you run smaller open models locally and reach for hosted access when you genuinely need K3 class quality."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">908&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">300+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">News</span>
+    <span>July 17, 2026</span>
+    <span>·</span>
+    <span>8 min read</span>
+  </div>
+
+  <article>
+    <h1>Kimi K3 Explained: Moonshot's 2.8T Open Weight Flagship</h1>
+
+    <p>On July 16, 2026, Moonshot AI released <strong>Kimi K3</strong>, and the headline writes itself: it is the largest model ever announced with an open weight release on the calendar. Roughly 2.8 trillion parameters, a 1 million token context window, launch day benchmarks that poke at the frontier labs, and a promise that the full weights land on Hugging Face by July 27.</p>
+
+    <p>Here is everything actually known so far, what is claim versus fact, and what a 2.8T model realistically means for people like us who prefer running AI on hardware we own.</p>
+
+    <h2>What Kimi K3 Is</h2>
+
+    <p>K3 is a new architecture Mixture of Experts (MoE) model. The 2.8 trillion number is the <em>total</em> parameter count; as with every MoE, only a fraction of those experts activate per token, which is what keeps inference costs sane. Moonshot positions it squarely at long horizon coding and agent workloads: big context, tool calling, structured outputs, and image input.</p>
+
+    <p>Two variants shipped at launch:</p>
+
+    <ul>
+      <li><strong>K3 Max</strong>: the main chat and agent model.</li>
+      <li><strong>K3 Swarm Max</strong>: tuned for large scale parallel processing, think fleets of agents fanning out over a task.</li>
+    </ul>
+
+    <p>The rollout started on Kimi Code and inside the Kimi app (with a ¥199 subscription tier as the entry point), plus the Moonshot open platform API. A leaked promo page on Moonshot's own site tipped the release a day early, which is why half of AI Twitter was already arguing about it before the official post went up.</p>
+
+    <h2>The Spec Sheet</h2>
+
+    <table>
+      <thead><tr><th>Spec</th><th>Kimi K3</th></tr></thead>
+      <tbody>
+        <tr><td>Total parameters</td><td>~2.8 trillion (MoE)</td></tr>
+        <tr><td>Context window</td><td>1,000,000 tokens</td></tr>
+        <tr><td>Modalities</td><td>Text and image input, text output</td></tr>
+        <tr><td>Reasoning</td><td>Yes (currently only the max effort level; more levels announced)</td></tr>
+        <tr><td>Variants</td><td>K3 Max, K3 Swarm Max</td></tr>
+        <tr><td>API price</td><td>$3 / M input ($0.30 cached), $15 / M output</td></tr>
+        <tr><td>Open weights</td><td>Promised by July 27, 2026</td></tr>
+        <tr><td>Expected license</td><td>Modified MIT (the K2 precedent)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>The Benchmark Claims (Read the Fine Print)</h2>
+
+    <p>Moonshot's self reported numbers have K3 mostly beating <strong>Claude Opus 4.8 max</strong> and <strong>GPT 5.5 high</strong>, while losing to <strong>Claude Fable 5</strong> and <strong>GPT 5.6</strong>. If that holds up under independent testing, an open weight model sits comfortably inside the frontier pack, a place open models have only brushed against before.</p>
+
+    <p>Two honest caveats. First, these are launch day, vendor picked benchmarks; independent verification is thin this early, and launch week numbers have a history of shrinking in the wash. Second, "mostly beating" is doing some work in that sentence: the wins are concentrated in coding and agentic tasks, which is exactly what Moonshot optimized for.</p>
+
+    <p>Still, the direction matters more than the decimals. The gap between open weight and closed frontier models keeps narrowing, and it is Chinese labs (Moonshot, DeepSeek, Qwen, Zhipu) doing most of the narrowing. For anyone who cares about running capable models outside of closed clouds, that trend is the story.</p>
+
+    <h2>Pricing: Cheap for a Frontier Model, Not Cheap</h2>
+
+    <p>The API costs $3 per million input tokens ($0.30 on a cache hit) and $15 per million output tokens, reasoning tokens included. That undercuts most Western flagships, but notice the drift: the K2 series launched dramatically cheaper. Frontier scale MoEs are expensive to serve even when the weights are open, and the era of Chinese models being nearly free at the API level is visibly ending.</p>
+
+    <p>Right now the only place running K3 is Moonshot itself. OpenRouter lists the model, but every request is forwarded to Moonshot's servers; there is no second provider, because nobody else has the weights yet. Which brings us to the interesting part.</p>
+
+    <h2>The Open Weights Date Is the Real Event</h2>
+
+    <p>Moonshot says the full K3 weights will be public <strong>by July 27, 2026</strong>. The K2 precedent suggests a Modified MIT license, which permits pretty much everything that matters, including hosting it commercially and fine tuning it.</p>
+
+    <p>Why that date matters more than launch day:</p>
+
+    <ul>
+      <li><strong>Independent hosting.</strong> Once the weights are out, neutral inference providers can serve K3, prices fall, and your prompts no longer have to route to the model maker's own servers.</li>
+      <li><strong>Real benchmarks.</strong> The community can verify the launch claims instead of taking screenshots on faith.</li>
+      <li><strong>Derivatives.</strong> Quantizations, distills, fine tunes, and yes, eventually uncensored variants. The <a href="abliterated-models-guide.html">abliteration pipeline</a> that produced today's best uncensored models needs weights to work on. No weights, no freedom.</li>
+    </ul>
+
+    <p>Until the 27th, treat K3 as a very impressive hosted product with an open promise attached.</p>
+
+    <h2>Can You Run It Locally?</h2>
+
+    <p>Short version: no, and it is worth being straight about that. A 2.8T parameter model at 4 bit quantization is around 1.4 terabytes of weights before you allocate a single byte of KV cache for that 1M context. That is multi node datacenter hardware, not a gaming PC, and not even a maxed out Mac Studio.</p>
+
+    <p>We did the full math, including what the weights drop changes and what you can realistically run instead, in a companion piece: <a href="can-you-run-kimi-k3-locally.html">Can You Run Kimi K3 Locally?</a> The one sentence preview: your local machine runs excellent 8B to 70B open models today, and K3 class quality is what hosted access is for.</p>
+
+    <p>If you are wondering how K3 compares to its very runnable smaller sibling, we also lined it up against K2.6: <a href="kimi-k3-vs-kimi-k2-6.html">Kimi K3 vs Kimi K2.6</a>.</p>
+
+    <h2>What This Means for Local AI</h2>
+
+    <p>Every time a frontier class model goes open weight, the local ecosystem inherits the benefits about six months later: the techniques, the distills, the tooling. K2's release pushed open agent models forward across the board. K3's architecture doing the same is the realistic upside for those of us running models at home.</p>
+
+    <p>And in the meantime, the practical setup does not change: run capable open models on your own hardware for privacy and zero refusals, and keep an eye on the July 27 weights drop. If you are new to local models, our <a href="how-to-run-ai-locally.html">beginner guide to running AI locally</a> and the <a href="run-uncensored-ai-locally.html">uncensored setup guide</a> get you from zero to a working chat in minutes with <a href="https://locallyuncensored.com/">Locally Uncensored</a>.</p>
+
+    <h2>FAQ</h2>
+
+    <h3>What is Kimi K3?</h3>
+    <p>Moonshot AI's flagship model, released July 16, 2026: a Mixture of Experts model with roughly 2.8 trillion total parameters and a 1 million token context window, aimed at coding and agent workloads. It shipped as K3 Max (chat and agents) and K3 Swarm Max (parallel processing).</p>
+
+    <h3>Is Kimi K3 open source?</h3>
+    <p>Announced as open weight, but the weights are not out yet. Moonshot promises them by July 27, 2026, expected under a Modified MIT license like the K2 series.</p>
+
+    <h3>How much does the Kimi K3 API cost?</h3>
+    <p>$3 per million input tokens ($0.30 with a cache hit) and $15 per million output tokens, including reasoning tokens. OpenRouter charges the same because it routes to Moonshot.</p>
+
+    <h3>Is Kimi K3 better than Claude or GPT?</h3>
+    <p>Per Moonshot's own benchmarks it mostly beats Claude Opus 4.8 max and GPT 5.5 high and loses to Claude Fable 5 and GPT 5.6. Independent numbers are not in yet; treat it as a strong claim.</p>
+
+    <h3>Can I run Kimi K3 on my own computer?</h3>
+    <p>Realistically no. The weights alone are around 1.4 TB at 4 bit. See our <a href="can-you-run-kimi-k3-locally.html">full breakdown</a> of the hardware math and the local alternatives worth running instead.</p>
+
+    <h2>Getting Started with Local AI Today</h2>
+
+    <p>K3 sized models need a datacenter, but everything up to about 70B runs beautifully at home, uncensored, private, and free:</p>
+
+    <pre><code>git clone https://github.com/PurpleDoubleD/locally-uncensored.git
+cd locally-uncensored
+# Windows: setup.bat | Linux: ./setup.sh</code></pre>
+
+    <p>Or grab the installer from the <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest">releases page</a>, open the Model Manager, and one click a model. When the K3 weights drop on the 27th, we will cover the derivatives worth caring about.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed and free to use. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Want frontier adjacent AI on hardware you own?</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Get Started on GitHub
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>
