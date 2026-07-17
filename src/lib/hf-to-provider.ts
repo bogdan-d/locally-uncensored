@@ -47,7 +47,14 @@ export function extractGgufQuant(filename: string): string | undefined {
   // unsloth files like `...-UD-Q4_K_XL.gguf` produced NO quant tag, so the
   // Ollama HF ref fell back to a tag-less `hf.co/<repo>` pull (Aldrich Ironhart,
   // Discord 2026-06-07 — "Gemma 4 26B MoE" → ollama 400).
-  const m = filename.match(
+  //
+  // Multi-part names put the shard counter AFTER the quant
+  // (`...-UD-Q4_K_XL-00001-of-00005.gguf`) — strip it first, or the quant is
+  // never found and resolveHfGgufFiles falls back to whatever quant group the
+  // repo lists first (caught live: the "DeepSeek V4 Flash · 155 GB" card
+  // offered the repo's 80.9 GB Q2 set in the multi-part confirm dialog).
+  const normalized = filename.replace(/-\d{4,6}-of-\d{4,6}(?=\.gguf$)/i, '')
+  const m = normalized.match(
     /[-._](Q\d_K_(?:XL|XS|[MSL])|Q\d_K|Q\d_[01]|IQ\d_[A-Z0-9_]+|F16|BF16|F32)\.gguf$/i
   )
   return m?.[1].toUpperCase()

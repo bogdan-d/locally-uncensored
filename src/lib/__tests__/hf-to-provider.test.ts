@@ -25,9 +25,21 @@ describe('extractGgufQuant', () => {
     expect(extractGgufQuant('model-IQ4_XS.gguf')).toBe('IQ4_XS')
     expect(extractGgufQuant('model-F16.gguf')).toBe('F16')
   })
+  it('reads the quant through a multi-part shard suffix (2.5.8 catalog regression)', () => {
+    // Caught live on the ship exe: the 155 GB "DeepSeek V4 Flash" card offered
+    // the repo's 80.9 GB Q2 set in the confirm dialog, because the shard
+    // counter after the quant made extractGgufQuant return undefined and the
+    // resolver fell back to the repo's first quant group.
+    expect(extractGgufQuant('DeepSeek-V4-Flash-UD-Q4_K_XL-00001-of-00005.gguf')).toBe('Q4_K_XL')
+    expect(extractGgufQuant('GLM-5.2-UD-Q2_K_XL-00001-of-00007.gguf')).toBe('Q2_K_XL')
+    expect(extractGgufQuant('GLM-5.2-UD-Q3_K_M-00001-of-00009.gguf')).toBe('Q3_K_M')
+    expect(extractGgufQuant('Kimi-K2.7-Code-UD-Q2_K_XL-00008-of-00008.gguf')).toBe('Q2_K_XL')
+  })
   it('returns undefined when no quant token is present', () => {
     expect(extractGgufQuant('model.gguf')).toBeUndefined()
     expect(extractGgufQuant('not-a-gguf.txt')).toBeUndefined()
+    // a bare shard counter is not a quant
+    expect(extractGgufQuant('model-00001-of-00002.gguf')).toBeUndefined()
   })
 })
 
