@@ -715,7 +715,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
 
       {/* Image / Video bundles */}
       {(isImage || isVideo) && filteredBundles.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
           {filteredBundles.map((bundle, bi) => (
             <motion.div key={bundle.name} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(bi, 12) * 0.025 }}>
               <BundleTile
@@ -866,7 +866,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
               </div>
             )}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
               {gridGroups.map((g, i) => renderTile(g, i))}
             </div>
             {activeTextModels.length === 0 && (
@@ -884,7 +884,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                 <h3 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-500">HuggingFace results</h3>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
               </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-2.5">
                 {hfSearchResults.map((model, i) => (
                   <motion.div key={model.name + i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(i, 12) * 0.025 }}>
                     <ModelTile

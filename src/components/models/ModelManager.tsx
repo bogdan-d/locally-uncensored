@@ -142,7 +142,9 @@ export function ModelManager() {
 
       {/* Content */}
       <div className="flex-1 min-w-0 overflow-y-auto scrollbar-thin">
-        <div className="p-4 max-w-5xl mx-auto space-y-4">
+        {/* Full pane width like the chat area — no centered max-w cap, so wide
+            windows get more grid columns instead of side gutters. */}
+        <div className="p-4 space-y-4">
           {/* Top bar */}
           <div className="flex items-center gap-2">
             <button
