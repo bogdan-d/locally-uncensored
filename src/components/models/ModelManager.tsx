@@ -20,10 +20,12 @@ import type { ModelCategory, AIModel } from '../../types/models'
 // discoverMode/categoryFilter pair collapsed into the persisted store value.
 type Mode = Extract<ModelCategory, 'text' | 'image' | 'video'>
 
-const RAIL_ITEMS: { key: Mode; label: string; icon: typeof MessagesSquare; accent: string }[] = [
-  { key: 'text',  label: 'Chat',  icon: MessagesSquare, accent: 'text-blue-500 dark:text-blue-400' },
-  { key: 'image', label: 'Image', icon: Images,         accent: 'text-purple-500 dark:text-purple-400' },
-  { key: 'video', label: 'Video', icon: Clapperboard,   accent: 'text-emerald-500 dark:text-emerald-400' },
+// Monochrome on purpose — the active state is carried by the pill background,
+// not by per-category accent colors (David 2026-07-17 design pass).
+const RAIL_ITEMS: { key: Mode; label: string; icon: typeof MessagesSquare }[] = [
+  { key: 'text',  label: 'Chat',  icon: MessagesSquare },
+  { key: 'image', label: 'Image', icon: Images },
+  { key: 'video', label: 'Video', icon: Clapperboard },
 ]
 
 export function ModelManager() {
@@ -108,7 +110,7 @@ export function ModelManager() {
     <div className="h-full flex overflow-hidden">
       {/* Category rail — the big, labeled home of Chat / Image / Video */}
       <aside className="shrink-0 w-12 lg:w-36 border-r border-gray-200 dark:border-white/[0.06] bg-gray-50/60 dark:bg-white/[0.015] flex flex-col py-3 px-1.5 lg:px-2 gap-1">
-        {RAIL_ITEMS.map(({ key, label, icon: Icon, accent }) => {
+        {RAIL_ITEMS.map(({ key, label, icon: Icon }) => {
           const active = mode === key
           const count = models.filter((m) => m.type === key).length
           return (
@@ -123,7 +125,7 @@ export function ModelManager() {
                   : 'border border-transparent hover:bg-gray-100 dark:hover:bg-white/[0.04]'
               }`}
             >
-              <Icon size={15} className={active ? accent : 'text-gray-400 dark:text-gray-500'} />
+              <Icon size={15} className={active ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'} />
               <span className={`hidden lg:block text-[0.68rem] font-medium ${active ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
                 {label}
               </span>
@@ -159,7 +161,7 @@ export function ModelManager() {
                 aria-pressed={tab === 'discover'}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.62rem] font-semibold transition-colors ${
                   tab === 'discover'
-                    ? 'bg-white dark:bg-white/10 text-amber-600 dark:text-amber-300 shadow-sm'
+                    ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
@@ -170,7 +172,7 @@ export function ModelManager() {
                 aria-pressed={tab === 'installed'}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.62rem] font-semibold transition-colors ${
                   tab === 'installed'
-                    ? 'bg-white dark:bg-white/10 text-blue-600 dark:text-blue-400 shadow-sm'
+                    ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >

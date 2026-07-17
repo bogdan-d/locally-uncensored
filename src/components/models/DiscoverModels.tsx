@@ -64,7 +64,9 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
   const [loading, setLoading] = useState(false)
   const [systemVRAM, setSystemVRAM] = useState<number | null>(null)
   const [ramGb, setRamGb] = useState<number | null>(null)
-  const [subTab, setSubTab] = useState<'uncensored' | 'mainstream'>('uncensored')
+  // Mainstream is the default + first tab (David 2026-07-17) — Unfiltered is
+  // one click away but new users land on the neutral list.
+  const [subTab, setSubTab] = useState<'uncensored' | 'mainstream'>('mainstream')
   const [vramTier, setVramTier] = useState<SizeTier>('all')
   // Details modal — the card shows one calm line; the FULL catalog description
   // (incl. per-model tips like "run thinking-OFF") lives here.
@@ -641,28 +643,28 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       <div className="flex items-center gap-2 flex-wrap">
         <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06]">
           <button
-            onClick={() => setSubTab('uncensored')}
-            aria-pressed={subTab === 'uncensored'}
-            title="No filters, no limits"
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.66rem] font-semibold transition-all ${
-              subTab === 'uncensored'
-                ? 'bg-white dark:bg-white/10 text-red-500 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-            }`}
-          >
-            <Unlock size={11} /> Unfiltered
-          </button>
-          <button
             onClick={() => setSubTab('mainstream')}
             aria-pressed={subTab === 'mainstream'}
             title="Popular models with tool calling + vision"
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.66rem] font-semibold transition-all ${
               subTab === 'mainstream'
-                ? 'bg-white dark:bg-white/10 text-blue-500 shadow-sm'
+                ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
                 : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
             }`}
           >
             <ShieldCheck size={11} /> Mainstream
+          </button>
+          <button
+            onClick={() => setSubTab('uncensored')}
+            aria-pressed={subTab === 'uncensored'}
+            title="No filters, no limits"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.66rem] font-semibold transition-all ${
+              subTab === 'uncensored'
+                ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
+                : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+          >
+            <Unlock size={11} /> Unfiltered
           </button>
         </div>
 
@@ -687,12 +689,14 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
               onClick={() => setVramTier(tier.key)}
               className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-all border ${
                 vramTier === tier.key
-                  ? 'bg-gray-900 text-white dark:bg-white/15 dark:text-white border-transparent dark:border-white/20'
+                  // No text-white/bg-gray-900 inversion here: the `.light .text-white`
+                  // rescue remap (index.css) would turn that into gray-900-on-gray-900.
+                  ? 'bg-gray-200 text-gray-900 dark:bg-white/15 dark:text-white border-gray-300 dark:border-white/20'
                   : 'text-gray-500 border-gray-200 dark:border-white/[0.06] hover:text-gray-800 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5'
               }`}
             >
               {tier.label}
-              {tier.desc && <span className={`text-[9px] ml-1 ${vramTier === tier.key ? 'text-gray-300 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'}`}>{tier.desc}</span>}
+              {tier.desc && <span className={`text-[9px] ml-1 ${vramTier === tier.key ? 'text-gray-600 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'}`}>{tier.desc}</span>}
             </button>
           ))}
         </div>
@@ -838,11 +842,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         <div className="text-center py-8 text-gray-500">Loading models...</div>
       ) : isText ? (
         <>
-          {/* Start here — derived picks, only in the unfiltered default view */}
+          {/* Start here — derived picks for the active tab */}
           {topPicks.length >= 2 && (
             <div className="space-y-1.5">
               <div className="flex items-center gap-1.5 px-1">
-                <Sparkles size={11} className="text-violet-500 dark:text-violet-400" />
+                <Sparkles size={11} className="text-gray-400 dark:text-gray-500" />
                 <h3 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">Start here</h3>
                 <span className="text-[0.55rem] text-gray-400 dark:text-gray-500">picked for your PC</span>
                 <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />

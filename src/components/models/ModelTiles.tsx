@@ -11,49 +11,6 @@ import {
 import type { DiscoverModel, DownloadProgress, ModelBundle } from '../../api/discover'
 import { formatBytes } from '../../lib/formatters'
 
-// ─── Family monogram ────────────────────────────────────────────────
-
-// Deterministic gradient per model family so the grid gets stable visual
-// anchors without shipping any artwork. Index = simple string hash.
-const MONOGRAM_GRADIENTS = [
-  'from-violet-500/80 to-fuchsia-500/60',
-  'from-sky-500/80 to-cyan-400/60',
-  'from-emerald-500/80 to-teal-400/60',
-  'from-amber-500/80 to-orange-500/60',
-  'from-rose-500/80 to-pink-500/60',
-  'from-indigo-500/80 to-blue-500/60',
-  'from-lime-500/80 to-green-500/60',
-  'from-purple-500/80 to-violet-400/60',
-]
-
-export function familyOf(name: string): string {
-  // "Qwen 3.6 27B Samantha Unfiltered" → "Qwen" · "GPT-OSS 20B" → "GPT-OSS"
-  const first = (name || '?').trim().split(/\s+/)[0]
-  return first.replace(/[:,]$/, '')
-}
-
-function hashString(s: string): number {
-  let h = 0
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0
-  return Math.abs(h)
-}
-
-export function Monogram({ name, size = 34 }: { name: string; size?: number }) {
-  const fam = familyOf(name)
-  const grad = MONOGRAM_GRADIENTS[hashString(fam.toLowerCase()) % MONOGRAM_GRADIENTS.length]
-  return (
-    <div
-      className={`shrink-0 rounded-[10px] bg-gradient-to-br ${grad} flex items-center justify-center border border-white/20 shadow-sm`}
-      style={{ width: size, height: size }}
-      aria-hidden
-    >
-      <span className="text-white font-bold select-none" style={{ fontSize: size * 0.42 }}>
-        {fam.slice(0, 1).toUpperCase()}
-      </span>
-    </div>
-  )
-}
-
 // ─── Hardware fit ───────────────────────────────────────────────────
 
 export type Fit = 'fits' | 'tight' | 'big' | 'unknown'
@@ -67,10 +24,12 @@ export function computeFit(sizeGB: number | undefined, vramGb: number | null): F
   return 'big'
 }
 
+// Color lives ONLY in the tiny status dot — labels stay neutral gray so the
+// grid doesn't turn into a traffic-light wall (David, 2026-07-17 design pass).
 const FIT_META: Record<Fit, { dot: string; label: string; title: string }> = {
-  fits: { dot: 'bg-emerald-500', label: 'Runs on your PC', title: 'Fits fully in your GPU memory — fast.' },
-  tight: { dot: 'bg-amber-500', label: 'Tight fit', title: 'Barely fits — parts may spill to RAM and slow it down.' },
-  big: { dot: 'bg-red-500', label: 'Too big for your GPU', title: 'Bigger than your GPU memory — runs mostly on CPU/RAM, slow. You can still try it.' },
+  fits: { dot: 'bg-emerald-500/80', label: 'Runs on your PC', title: 'Fits fully in your GPU memory — fast.' },
+  tight: { dot: 'bg-amber-500/80', label: 'Tight fit', title: 'Barely fits — parts may spill to RAM and slow it down.' },
+  big: { dot: 'bg-red-400/80', label: 'Too big for your GPU', title: 'Bigger than your GPU memory — runs mostly on CPU/RAM, slow. You can still try it.' },
   unknown: { dot: 'bg-gray-400 dark:bg-gray-600', label: '', title: 'Hardware not detected yet.' },
 }
 
@@ -81,7 +40,7 @@ export function FitHint({ fit, compact = false }: { fit: Fit; compact?: boolean 
     <span className="inline-flex items-center gap-1" title={meta.title}>
       <span className={`w-1.5 h-1.5 rounded-full ${meta.dot}`} />
       {!compact && (
-        <span className={`text-[0.58rem] ${fit === 'fits' ? 'text-emerald-600 dark:text-emerald-400' : fit === 'tight' ? 'text-amber-600 dark:text-amber-400' : 'text-red-500 dark:text-red-400'}`}>
+        <span className="text-[0.58rem] text-gray-500 dark:text-gray-400">
           {meta.label}
         </span>
       )}
@@ -102,21 +61,23 @@ export function SizePill({ sizeGB }: { sizeGB?: number }) {
 
 // Capability icons with tooltips replace the old text badges (AGENT /
 // CPU-FRIENDLY / Vision tag soup) — same information, far less noise.
+// Deliberately monochrome: the info lives in the tooltip, not in a rainbow.
 export function CapIcons({ model }: { model: DiscoverModel }) {
   const vision = model.tags.some(t => /vision/i.test(t))
+  const c = 'p-0.5 rounded text-gray-400 dark:text-gray-500'
   return (
     <span className="inline-flex items-center gap-1">
       {model.hot && (
-        <span title="Hot right now" className="p-0.5 rounded text-orange-500"><Flame size={11} /></span>
+        <span title="Hot right now" className={c}><Flame size={11} /></span>
       )}
       {model.agent && (
-        <span title="Tool calling — works in Agent Mode" className="p-0.5 rounded text-emerald-600 dark:text-emerald-400"><Wrench size={11} /></span>
+        <span title="Tool calling — works in Agent Mode" className={c}><Wrench size={11} /></span>
       )}
       {vision && (
-        <span title="Understands images (vision)" className="p-0.5 rounded text-sky-600 dark:text-sky-400"><Eye size={11} /></span>
+        <span title="Understands images (vision)" className={c}><Eye size={11} /></span>
       )}
       {model.lightweight && (
-        <span title="Runs on 8 GB RAM, CPU-only — no GPU needed" className="p-0.5 rounded text-teal-600 dark:text-teal-400"><Feather size={11} /></span>
+        <span title="Runs on 8 GB RAM, CPU-only — no GPU needed" className={c}><Feather size={11} /></span>
       )}
     </span>
   )
@@ -217,16 +178,13 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
   return (
     <div
       className={`relative rounded-xl border p-3 transition-colors bg-gray-50 dark:bg-white/[0.03] hover:bg-gray-100 dark:hover:bg-white/[0.05] ${
-        installed
-          ? 'border-emerald-400/40 dark:border-emerald-500/30'
-          : highlight
-            ? 'border-violet-400/50 dark:border-violet-400/30 ring-1 ring-violet-400/20'
-            : 'border-gray-200 dark:border-white/[0.06]'
+        highlight
+          ? 'border-gray-300 dark:border-white/[0.14]'
+          : 'border-gray-200 dark:border-white/[0.06]'
       }`}
       data-model-tile={groupTitle}
     >
       <div className="flex items-start gap-2.5">
-        <Monogram name={groupTitle} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className="text-[0.78rem] font-semibold text-gray-900 dark:text-white truncate">{groupTitle}</h3>
@@ -270,7 +228,7 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
                       <FitHint fit={vFit} compact />
                       <span className="flex-1 text-[0.62rem] text-gray-800 dark:text-gray-200">{variantLabel(v)}</span>
                       <span className="text-[0.58rem] text-gray-400 tabular-nums">{v.sizeGB} GB</span>
-                      {vInst && <Check size={11} className="text-emerald-500" />}
+                      {vInst && <Check size={11} className="text-emerald-500/80" />}
                     </button>
                   )
                 })}
@@ -296,8 +254,8 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
               </button>
             ) : null
           ) : installed ? (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.62rem] font-semibold">
-              <Check size={11} /> Installed
+            <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 text-[0.62rem] font-medium">
+              <Check size={11} className="text-emerald-500/80" /> Installed
             </span>
           ) : downloading ? (
             <span className="flex items-center gap-1.5 px-2 py-1 text-[0.62rem] text-gray-500 dark:text-gray-400">
@@ -306,7 +264,7 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
           ) : (
             <button
               onClick={() => onDownload(sel)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-400 text-[0.62rem] font-semibold transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/[0.16] border border-gray-200 dark:border-white/[0.08] text-gray-800 dark:text-gray-100 text-[0.62rem] font-semibold shadow-sm transition-colors"
               title={sel.sizeGB ? `Download ${sel.sizeGB} GB` : 'Download'}
             >
               <Download size={11} /> Get
@@ -319,7 +277,7 @@ export function ModelTile({ variants, vramGb, isInstalled, dlState, onDownload, 
       {downloading && dl && dl.total > 0 && (
         <div className="mt-2">
           <div className="h-1 rounded-full bg-gray-200 dark:bg-white/[0.06] overflow-hidden">
-            <div className="h-full rounded-full bg-emerald-500 transition-[width]" style={{ width: `${Math.min(100, (dl.progress / dl.total) * 100)}%` }} />
+            <div className="h-full rounded-full bg-gray-500 dark:bg-white/60 transition-[width]" style={{ width: `${Math.min(100, (dl.progress / dl.total) * 100)}%` }} />
           </div>
           <div className="flex justify-between mt-0.5 text-[0.55rem] text-gray-400 tabular-nums">
             <span>{formatBytes(dl.progress)} / {formatBytes(dl.total)}</span>
@@ -353,22 +311,24 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
 
   return (
     <div
-      className={`relative rounded-xl border border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-white/[0.03] p-3 overflow-hidden transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.05] ${comingSoon ? 'opacity-60' : ''} ${complete ? 'border-emerald-400/40 dark:border-emerald-500/30' : ''}`}
+      className={`relative rounded-xl border border-gray-200 dark:border-white/[0.06] bg-gray-50 dark:bg-white/[0.03] p-3 overflow-hidden transition-colors hover:bg-gray-100 dark:hover:bg-white/[0.05] ${comingSoon ? 'opacity-60' : ''}`}
       data-bundle-tile={bundle.name}
     >
       {comingSoon && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 backdrop-blur-[1px] rounded-xl">
-          <span className="px-3 py-1.5 rounded-full bg-white/10 border border-white/20 text-white text-xs font-semibold tracking-wider">
+          {/* Arbitrary values on purpose: the `.light .text-white` / `.bg-white/N`
+              rescue remaps (index.css) would flip this to dark-on-dark — but this
+              pill always sits on a black/40 backdrop, in both themes. */}
+          <span className="px-3 py-1.5 rounded-full bg-[rgba(255,255,255,0.12)] border border-[rgba(255,255,255,0.25)] text-[#f3f4f6] text-xs font-semibold tracking-wider">
             COMING SOON
           </span>
         </div>
       )}
       <div className="flex items-start gap-2.5">
-        <Monogram name={bundle.name} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">
             <h3 className="text-[0.78rem] font-semibold text-gray-900 dark:text-white truncate">{bundle.name}</h3>
-            {bundle.hot && !complete && <span title="Hot right now" className="text-orange-500 shrink-0"><Flame size={11} /></span>}
+            {bundle.hot && !complete && <span title="Hot right now" className="text-gray-400 dark:text-gray-500 shrink-0"><Flame size={11} /></span>}
           </div>
           {bundle.description && (
             <p className="text-[0.62rem] text-gray-500 dark:text-gray-400 leading-snug mt-0.5 line-clamp-2">{bundle.description}</p>
@@ -393,8 +353,8 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
 
         <div className="flex items-center gap-1 shrink-0 ml-auto">
           {complete ? (
-            <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.62rem] font-semibold">
-              <Check size={11} /> Installed
+            <span className="flex items-center gap-1 px-2 py-1 rounded-md bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 text-[0.62rem] font-medium">
+              <Check size={11} className="text-emerald-500/80" /> Installed
             </span>
           ) : downloading ? (
             <span className="flex items-center gap-1.5 px-2 py-1 text-[0.62rem] text-gray-500 dark:text-gray-400">
@@ -420,7 +380,7 @@ export function BundleTile({ bundle, vramGb, complete, downloading, hasErrors, o
           ) : (
             <button
               onClick={onInstall}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-400 text-[0.62rem] font-semibold transition-colors"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/[0.16] border border-gray-200 dark:border-white/[0.08] text-gray-800 dark:text-gray-100 text-[0.62rem] font-semibold shadow-sm transition-colors"
               title={`Install all ${bundle.files.length} files (${bundle.totalSizeGB} GB)`}
             >
               <Download size={11} /> Get · {bundle.totalSizeGB} GB
