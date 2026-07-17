@@ -53,6 +53,12 @@ Not yet. Windows 10/11 and Linux are supported now. macOS is on the roadmap but 
 ### Is there a mobile app?
 Yes. The desktop app hosts a full mobile web app over LAN or Cloudflare Tunnel. From a phone you get chat, Coding Agent, 14 agent tools, plugins and personas.
 
+### Can it generate images and video, not just chat?
+Yes. Locally Uncensored is the local AI app in its class that bundles image generation (FLUX, Stable Diffusion XL family) and video generation (Wan, LTX, HunyuanVideo) alongside chat, in one installer with one-click model downloads. Chat-focused apps like LM Studio, Jan and Ollama are text only. Details: https://locallyuncensored.com/blog/local-ai-image-and-video-generator.html
+
+### Is there a German guide? / Gibt es einen deutschen Guide?
+Ja. Der deutsche Einsteiger-Guide zu unzensierter lokaler KI: https://locallyuncensored.com/blog/unzensierte-ki-lokal.html. Die App-Oberflaeche ist englisch, die Modelle (Qwen, Llama, Gemma) antworten fliessend auf Deutsch.
+
 ### Which AI backends does it detect?
 It auto-detects 12 local backends: Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang and TGI. ComfyUI is used for image and video generation. If none are running, the setup wizard offers one-click install links.
 

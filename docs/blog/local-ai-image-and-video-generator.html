@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local AI Image and Video Generator in One App (2026) | Locally Uncensored</title>
+<meta name="description" content="Generate AI images and videos locally in one app: FLUX, Stable Diffusion, Wan and LTX on your own GPU, one-click setup, no ComfyUI graphs, no cloud, nothing filtered.">
+<meta name="keywords" content="local ai image and video generator, local ai image generator app, local ai video generator windows, generate ai images locally, ai video on your own gpu, uncensored image generation local">
+<meta property="og:title" content="Local AI Image and Video Generator in One App">
+<meta property="og:description" content="Generate AI images and videos locally in one app: FLUX, Stable Diffusion, Wan and LTX on your own GPU, one-click setup, no ComfyUI graphs, no cloud, nothing filtered.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/local-ai-image-and-video-generator.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-07-17">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Create">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Local AI Image and Video Generator in One App">
+<meta name="twitter:description" content="Generate AI images and videos locally in one app: FLUX, Stable Diffusion, Wan and LTX on your own GPU, one-click setup, no ComfyUI graphs, no cloud, nothing filtered.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/local-ai-image-and-video-generator.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"Local AI Image and Video Generator in One App","description":"Locally Uncensored is the local AI app that generates both images and video on your own GPU: FLUX and Stable Diffusion for images, Wan and LTX for video, with one-click model installs and no node graphs.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-07-17","dateModified":"2026-07-17","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/local-ai-image-and-video-generator.html"},"keywords":"local ai image and video generator, local ai image generator app, local ai video generator windows, generate ai images locally, ai video on your own gpu, uncensored image generation local"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"Is there one app that generates both AI images and video locally?","acceptedAnswer":{"@type":"Answer","text":"Yes. Locally Uncensored bundles image generation (FLUX, Stable Diffusion family) and video generation (Wan, LTX) in one desktop app with one-click model installs. Chat apps like LM Studio and Jan are text only, and ComfyUI requires building node graphs."}},{"@type":"Question","name":"What GPU do I need to generate AI images locally?","acceptedAnswer":{"@type":"Answer","text":"8 GB of VRAM runs SDXL-class and entry FLUX models comfortably. 10 to 12 GB runs FLUX dev fast. For local video, 10 to 12 GB is the realistic entry point and 16 GB or more is comfortable."}},{"@type":"Question","name":"Can I generate AI images locally without ComfyUI?","acceptedAnswer":{"@type":"Answer","text":"Yes. Locally Uncensored gives you a prompt box, a model picker, and a gallery: type, click, done. Under the hood it can drive ComfyUI for power users, but you never have to see a node graph."}},{"@type":"Question","name":"Is local image and video generation uncensored?","acceptedAnswer":{"@type":"Answer","text":"On your own hardware, yes: there is no cloud moderation layer between you and the model. What you create on your own PC is your business. Locally Uncensored treats uncensored models as first-class citizens."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">908&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">300+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Create</span>
+    <span>July 17, 2026</span>
+    <span>·</span>
+    <span>8 min read</span>
+  </div>
+
+  <article>
+    <h1>Local AI Image and Video Generator in One App</h1>
+
+    <p>Here is the gap nobody talks about: the popular local AI apps are text only. LM Studio, Jan, Ollama, Msty, all excellent for chat, none of them makes a single image. So people install one app for chat, fight through ComfyUI for images, and give up before video entirely. <strong>Locally Uncensored is a plug-and-play local AI studio that generates chat, images, and video in one app, on your own GPU, with nothing filtered.</strong></p>
+
+    <h2>What You Can Generate Locally in 2026</h2>
+
+    <table>
+      <thead><tr><th>Type</th><th>Models</th><th>What to expect</th></tr></thead>
+      <tbody>
+        <tr><td>Images</td><td>FLUX schnell and dev, Stable Diffusion XL family, SD 3.5</td><td>Photoreal and stylized images in seconds on a decent GPU</td></tr>
+        <tr><td>Video</td><td>Wan 2.2, LTX family</td><td>Short clips (2 to 8 seconds), text to video and image to video</td></tr>
+        <tr><td>Image editing</td><td>Inpainting, img2img, upscaling</td><td>Edit generations or your own photos, locally</td></tr>
+      </tbody>
+    </table>
+
+    <p>All of these are open-weight models: free downloads that run entirely on your machine. Deep dives: <a href="how-to-run-flux-locally.html">running FLUX locally</a>, <a href="how-to-generate-ai-videos-locally.html">local AI video generation</a>, and <a href="image-to-image-local-ai.html">image to image workflows</a>.</p>
+
+    <h2>The Hardware Truth</h2>
+
+    <p>Image generation is friendlier than the hype suggests, video less so:</p>
+
+    <table>
+      <thead><tr><th>Your GPU</th><th>Images</th><th>Video</th></tr></thead>
+      <tbody>
+        <tr><td>6 GB VRAM</td><td>SD 1.5 and small models, workable</td><td>Not realistic</td></tr>
+        <tr><td>8 GB VRAM</td><td>SDXL and FLUX schnell, comfortable</td><td>Entry level, slow</td></tr>
+        <tr><td>10 to 12 GB VRAM</td><td>FLUX dev, fast</td><td>Wan and LTX short clips, usable</td></tr>
+        <tr><td>16 to 24 GB VRAM</td><td>Everything, high resolution</td><td>Comfortable, longer clips</td></tr>
+      </tbody>
+    </table>
+
+    <h2>No Node Graphs Required</h2>
+
+    <p>ComfyUI is the reigning power tool for local image generation, and it earns its reputation, after you learn to wire node graphs. In Locally Uncensored the Create tab is a prompt box, a model picker, and a gallery. Pick FLUX schnell, type a prompt, click generate. The Model Manager downloads image and video models with one click, the same way it handles chat models. If you outgrow the simple path, our <a href="comfyui-beginners-guide.html">ComfyUI beginner guide</a> shows the power-user route.</p>
+
+    <h2>Uncensored, Because It Is Your Hardware</h2>
+
+    <p>Every cloud image generator puts a moderation layer between you and the model, and the rules change without notice. On your own GPU there is no such layer: the model does what you ask. That is not a loophole, it is the entire point of local generation. Adult and unfiltered creation stays free and private on your own machine, as covered in <a href="uncensored-ai-video-locally.html">uncensored AI video locally</a>.</p>
+
+    <h2>One App or Three?</h2>
+
+    <p>You could assemble the same capabilities from parts: LM Studio for chat, ComfyUI for images, a research repo for video. It works, and it costs you three installs, three update cycles, and three learning curves. The studio approach puts the whole pipeline behind one installer, with models managed in one place and outputs in one gallery. The <a href="best-local-ai-apps-2026.html">2026 app comparison</a> shows the landscape side by side.</p>
+
+    <h2>FAQ</h2>
+
+    <h3>Is there one app for both local images and video?</h3>
+    <p>Yes, Locally Uncensored: FLUX and SD for images, Wan and LTX for video, one installer, one gallery.</p>
+
+    <h3>What GPU do I need?</h3>
+    <p>8 GB VRAM for comfortable images, 10 to 12 GB for usable video. See the table above.</p>
+
+    <h3>Do I need ComfyUI knowledge?</h3>
+    <p>No. Prompt box, model picker, generate. ComfyUI remains available as the power-user path.</p>
+
+    <h3>Is it really uncensored?</h3>
+    <p>On your own hardware, yes: no cloud moderation layer exists between you and the model.</p>
+
+    <h2>Start Here</h2>
+
+    <p>Download from the <a href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest">releases page</a>, or start with the <a href="how-to-run-ai-locally.html">beginner guide</a>. Related: <a href="plug-and-play-local-ai.html">plug and play local AI</a>, <a href="easiest-local-ai-image-generator.html">easiest local AI image generator</a>.</p>
+
+    <hr>
+
+    <p><em>Locally Uncensored is AGPL-3.0 licensed and free to use. Built by <a href="https://github.com/PurpleDoubleD">PurpleDoubleD</a>.</em></p>
+  </article>
+
+  <div class="post-footer">
+    <p>Images and video on your own GPU, one installer:</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Get Started on GitHub
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

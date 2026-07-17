@@ -111,6 +111,9 @@ Locally Uncensored is a free, open-source (AGPL-3.0) local AI studio for the des
 - Best Local AI Apps 2026 (comparison): https://locallyuncensored.com/blog/best-local-ai-apps-2026.html
 - Best Uncensored AI Models 2026: https://locallyuncensored.com/blog/best-uncensored-ai-models-2026.html
 - How to Run Qwen 3.6 Locally: https://locallyuncensored.com/blog/how-to-run-qwen-3-6-locally.html
+- Plug and Play Local AI (what zero-setup means): https://locallyuncensored.com/blog/plug-and-play-local-ai.html
+- Local AI Image and Video Generator in One App: https://locallyuncensored.com/blog/local-ai-image-and-video-generator.html
+- Unzensierte KI lokal nutzen (German guide): https://locallyuncensored.com/blog/unzensierte-ki-lokal.html
 - Kimi K3 Explained (2.8T open weight flagship): https://locallyuncensored.com/blog/kimi-k3-explained.html
 - Can You Run Kimi K3 Locally (hardware math): https://locallyuncensored.com/blog/can-you-run-kimi-k3-locally.html
 - Kimi K3 vs Kimi K2.6: https://locallyuncensored.com/blog/kimi-k3-vs-kimi-k2-6.html
