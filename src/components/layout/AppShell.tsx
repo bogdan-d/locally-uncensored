@@ -63,6 +63,23 @@ export function AppShell() {
   const appMode = settings.appMode
   const cloudAvailable = useCloudAuthStore(deriveCloudAvailable)
 
+  // Boot-sync the configured ComfyUI host/port into the FE URL builder.
+  // The backend loads them from config.json at startup, but the only FE
+  // mirror lived in SettingsPage's mount effect — so after an app restart
+  // every comfyuiUrl() (gallery media, control plane) pointed at localhost
+  // until the user happened to open Settings. On a remote-host setup (#82)
+  // that made the app look dead after every launch. Found live 2026-07-17.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { backendCall, setComfyPort, setComfyHost } = await import('../../api/backend')
+        const s = await backendCall<{ port?: number; host?: string }>('comfyui_status')
+        if (typeof s?.port === 'number' && s.port > 0) setComfyPort(s.port)
+        if (typeof s?.host === 'string' && s.host.trim()) setComfyHost(s.host)
+      } catch { /* backend not up yet — Settings' own mirror still applies later */ }
+    })()
+  }, [])
+
   // Create renders where the mode says: the global switch owns the axis the
   // Composer's per-surface toggle used to.
   useEffect(() => {

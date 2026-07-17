@@ -701,6 +701,116 @@ fn is_comfyui_running_on_port(port: u16) -> bool {
         .unwrap_or(false)
 }
 
+/// Kill whatever process listens on `port` (David 2026-07-17, "Let me do it
+/// for you" CORS-fix button). Only ever called with the user-configured
+/// ComfyUI port, on an explicit button press — LU is about to relaunch that
+/// ComfyUI under its own management with the CORS flag. Best effort: a port
+/// nobody listens on is a no-op.
+fn kill_port_owner(port: u16) {
+    let own_pid = std::process::id();
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = Command::new("netstat");
+        cmd.args(["-ano", "-p", "tcp"]);
+        cmd.creation_flags(CREATE_NO_WINDOW);
+        let Ok(out) = cmd.output() else { return };
+        let text = String::from_utf8_lossy(&out.stdout);
+        let needle = format!(":{}", port);
+        let mut pids: Vec<u32> = Vec::new();
+        for line in text.lines() {
+            // Match on the LOCAL address column only; the state column is
+            // locale-dependent ("LISTENING" / "ABHÖREN"), so don't parse it.
+            let cols: Vec<&str> = line.split_whitespace().collect();
+            if cols.len() >= 5 && cols[0].eq_ignore_ascii_case("tcp") && cols[1].ends_with(&needle) {
+                if let Ok(pid) = cols[cols.len() - 1].parse::<u32>() {
+                    if pid != 0 && pid != own_pid && !pids.contains(&pid) {
+                        pids.push(pid);
+                    }
+                }
+            }
+        }
+        for pid in pids {
+            println!("[ComfyUI] CORS fix: killing port {} owner pid {}", port, pid);
+            let mut kill = Command::new("taskkill");
+            kill.args(["/pid", &pid.to_string(), "/T", "/F"]);
+            kill.creation_flags(CREATE_NO_WINDOW);
+            let _ = kill.output();
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(out) = Command::new("lsof").args(["-ti", &format!("tcp:{}", port), "-sTCP:LISTEN"]).output() {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                if let Ok(pid) = line.trim().parse::<u32>() {
+                    if pid != 0 && pid != own_pid {
+                        let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One-click fix for the ComfyUI 0.19+ cross-origin block banner (#75/#82
+/// follow-up, David 2026-07-17): stop the user-managed ComfyUI on the
+/// configured port and relaunch it under LU's management — LU-started
+/// ComfyUI always carries `--enable-cors-header`, so direct media loads and
+/// the native progress feed work again. Requires a known install path; on a
+/// remote host LU can't manage the process at all.
+#[tauri::command]
+pub fn fix_comfyui_cors(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let host = state.comfy_host.lock().unwrap().clone();
+    if !is_local_host(&host) {
+        return Err(
+            "ComfyUI runs on a remote host, so LU can't restart it from here. Add --enable-cors-header http://tauri.localhost to the launch command on that machine instead.".to_string(),
+        );
+    }
+    let path_known = state
+        .comfy_path
+        .lock()
+        .unwrap()
+        .clone()
+        .or_else(find_comfyui_path)
+        .is_some();
+    if !path_known {
+        return Err(
+            "LU doesn't know this ComfyUI's folder yet. Set it under Settings → AI Backends → ComfyUI → Path, then press the button again. Or add --enable-cors-header http://tauri.localhost to your own launch script.".to_string(),
+        );
+    }
+    let port = *state.comfy_port.lock().unwrap();
+
+    // Stop our own child cleanly first (if any), then whatever else owns the port.
+    {
+        let mut proc = state.comfy_process.lock().unwrap();
+        if let Some(ref mut child) = *proc {
+            let pid = child.id();
+            #[cfg(target_os = "windows")]
+            {
+                let mut cmd = Command::new("taskkill");
+                cmd.args(["/pid", &pid.to_string(), "/T", "/F"]);
+                cmd.creation_flags(CREATE_NO_WINDOW);
+                let _ = cmd.output();
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = child.kill();
+            info!(pid = pid, "cors fix: stopped LU-managed comfyui");
+            *proc = None;
+        }
+    }
+    kill_port_owner(port);
+
+    // Wait for the port to actually free up — start_comfyui short-circuits
+    // with "already_running" while the old process is still winding down.
+    for _ in 0..20 {
+        if !is_comfyui_running_on_port(port) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(400));
+    }
+
+    start_comfyui(state)
+}
+
 #[tauri::command]
 pub fn start_ollama(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
     // Check if already running

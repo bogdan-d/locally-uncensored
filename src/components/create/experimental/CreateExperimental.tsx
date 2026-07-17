@@ -31,6 +31,7 @@ function CreateExperimentalInner() {
   const backend = useCreateStore((s) => s.backend)
   const comfyCorsBlocked = useCreateStore((s) => s.comfyCorsBlocked)
   const setComfyCorsBlocked = useCreateStore((s) => s.setComfyCorsBlocked)
+  const isGenerating = useCreateStore((s) => s.isGenerating)
   const { modelLoadError, connected, comfyOnCpu } = useCreateExp()
 
   const [shownId, setShownId] = useState<string | null>(null)
@@ -38,6 +39,27 @@ function CreateExperimentalInner() {
   const [maskOpen, setMaskOpen] = useState(false)
   const [lightbox, setLightbox] = useState<GalleryItem | null>(null)
   const [panelOpen, setPanelOpen] = useState(false)
+
+  // One-click CORS fix (David 2026-07-17): restart the user-managed ComfyUI
+  // under LU's management so it carries --enable-cors-header. On success the
+  // banner clears; if LU can't do it (unknown path / remote host) the backend
+  // error explains the manual route and stays visible in the banner.
+  const [corsFixing, setCorsFixing] = useState(false)
+  const [corsFixError, setCorsFixError] = useState<string | null>(null)
+  const fixCorsForMe = useCallback(async () => {
+    setCorsFixing(true)
+    setCorsFixError(null)
+    try {
+      const { backendCall } = await import('../../../api/backend')
+      await backendCall('fix_comfyui_cors')
+      // ComfyUI is relaunching with the flag — direct loads work from here on.
+      useCreateStore.getState().setComfyCorsBlocked(false)
+    } catch (err) {
+      setCorsFixError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setCorsFixing(false)
+    }
+  }, [])
 
   // David 2026-07-11: the Stage starts EMPTY and never auto-surfaces a persisted
   // gallery item — not on mount, not on a mode/intent switch. It fills only on an
@@ -133,18 +155,32 @@ function CreateExperimentalInner() {
 
       {/* Cross-origin block (#75, cinemazverev): a user-managed ComfyUI 0.19+
           answers the WebView's media/WS requests with a Sec-Fetch 403, so results
-          couldn't be viewed. LU now proxies the bytes so they still display, but
-          the live progress bar + native video seeking degrade — point the user at
-          the one-line launch fix. Local only, dismissible. */}
+          couldn't be viewed. LU proxies the bytes so they still display, but the
+          live progress bar + native video seeking degrade. David 2026-07-17: keep
+          the message short and offer a one-click fix — LU restarts ComfyUI under
+          its own management, which always passes the CORS flag. Local only,
+          dismissible; the long manual-flag hint only appears if the fix fails. */}
       {backend === 'local' && comfyCorsBlocked && (
         <div className="flex items-start gap-2 px-4 py-2 bg-yellow-500/5 border-b border-yellow-500/10 text-yellow-300 text-xs shrink-0">
           <AlertTriangle size={12} className="shrink-0 mt-0.5" />
           <span className="flex-1 min-w-0">
-            Your ComfyUI blocks cross-origin apps (v0.19+), so LU is showing results through a fallback. To restore fast preview and the live progress bar, add{' '}
-            <code className="px-1 rounded bg-white/10">--enable-cors-header http://tauri.localhost</code>{' '}
-            to ComfyUI's launch (its run .bat / .sh), then restart ComfyUI.
+            {corsFixError
+              ? corsFixError
+              : corsFixing
+                ? 'Restarting ComfyUI with the fix… this takes a moment.'
+                : 'Your ComfyUI blocks direct loads (v0.19+), so previews use a slower fallback.'}
           </span>
-          <button onClick={() => setComfyCorsBlocked(false)} className="shrink-0 text-yellow-300/70 hover:text-yellow-100" title="Dismiss">
+          {!corsFixing && (
+            <button
+              onClick={() => { void fixCorsForMe() }}
+              disabled={isGenerating}
+              title={isGenerating ? 'Waiting for the current generation to finish' : 'LU restarts ComfyUI with the CORS flag for you'}
+              className="shrink-0 px-2 py-0.5 rounded bg-yellow-500/15 hover:bg-yellow-500/25 text-yellow-200 transition-colors whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Let me do it for you!
+            </button>
+          )}
+          <button onClick={() => { setComfyCorsBlocked(false); setCorsFixError(null) }} className="shrink-0 text-yellow-300/70 hover:text-yellow-100" title="Dismiss">
             <X size={14} />
           </button>
         </div>

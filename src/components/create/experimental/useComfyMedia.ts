@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { galleryItemUrl, proxiedComfyBlobUrl, recoverGalleryUrl, markGalleryItemAvailable } from './galleryUrl'
+import { isComfyLocal } from '../../../api/backend'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 
 /**
@@ -44,9 +45,13 @@ export function useComfyMedia(item: GalleryItem | null) {
       if (blob) {
         blobRef.current = blob
         setSrc(blob)
-        // Proxy rescued a /view the direct load couldn't reach → it's a
-        // cross-origin block, not a down engine. Surface the actionable hint.
-        useCreateStore.getState().setComfyCorsBlocked(true)
+        // Proxy rescued a /view the direct load couldn't reach. On a LOCAL
+        // host that means ComfyUI 0.19+ rejected the cross-origin load and
+        // the --enable-cors-header hint is actionable. On a REMOTE host
+        // (#82, rx422) the block is LU's own CSP — expected, by design — and
+        // the CORS hint would be wrong (the flag can't unblock a CSP'd
+        // <img>), so the proxy path is simply the normal mode: no banner.
+        if (isComfyLocal()) useCreateStore.getState().setComfyCorsBlocked(true)
       } else {
         recoverGalleryUrl(item)
       }
