@@ -8,6 +8,19 @@ All notable changes to Locally Uncensored are documented here.
 
 Community fix release: works through every open GitHub issue plus the actionable Discord reports since 2.5.7. (Releases 2.5.1–2.5.7 were documented in their GitHub release notes and are not backfilled here.)
 
+### New — Model Manager rebuilt from scratch ("Model Hub")
+
+- **The Models area is a different place now.** A labeled category rail (Chat · Image · Video, plus an Installed count) replaces the cryptic icon toggles; models render as clean cards — model NAME first, one short plain-English line, size pill and capability icons with tooltips — instead of the old description-first text rows. Every function of the old manager is preserved: downloads with pause/retry/clear, bundle installs with custom nodes, CivitAI search with the `.red` mirror, HuggingFace catalog search, the Unfiltered/Mainstream split, install detection across Ollama and LM Studio, and the ComfyUI-down hints.
+- **Quant variants collapse into one card with a size picker.** Seven `Qwen 3.6 27B` rows are now one card with a "Q4_K_M · 16 GB ▾" selector; same for GLM 4.7 Flash, the 35B MoEs, Gemma 4 12B and friends. The picker recommends the best size for your GPU and marks what's already installed.
+- **The app now tells you what runs on YOUR PC.** GPU + RAM are detected up front (nvidia-smi/rocm-smi/wmic — no ComfyUI needed anymore) and every card carries an honest fit hint: green "runs on your PC", amber "tight fit", red "too big for your GPU" — plus a one-tap "Fits my PC" filter and a "Start here" strip with picks for your hardware. Nothing is ever hidden or blocked by the hint.
+- Size filters got human names (Tiny/Small/Medium/Big — same 4/10/20 GB buckets as before), the search field is always visible, and the full technical description of every model lives one ⓘ tap away.
+
+### New — Catalog refresh (May–July 2026): 27 verified additions, 2 GB to 371 GB
+
+- **Unfiltered:** DavidAU's Qwen 3.6 40B "Deckard" Heretic (the top uncensored release of mid-2026) and 27B Heretic finetune, huihui's abliterated Qwen 3.6 27B / 35B-MoE-Opus / Gemma 4 12B / Agents-A1 / Qwythos 9B (Claude-Mythos distill), the Heretic pass on Ornith 1.0 35B, TheDrummer's Rocinante XL 16B and Cydonia 24B for roleplay, and for big rigs: huihui's abliterated DeepSeek V4-Flash (600K+ downloads, single 154 GB file) and GLM 5.2 (multi-part).
+- **Mainstream:** Ornith 1.0 9B + 35B (the coding-agent hit of June, 2M+ downloads), Agents-A1 35B + 4B, LFM 2.5 8B MoE, IBM Granite 4.1 8B, MiniCPM-V 4.6 (vision in 2 GB via Ollama), Nemotron 3 Nano 4B + Omni 30B, the Qwen 3.5 9B DeepSeek-V4 distill, Mistral Medium 3.5 128B, DeepSeek V4-Flash, Hunyuan 3 295B, GLM 5.2 and Kimi K2.7-Code (1T).
+- Every direct-download entry was verified against the live HuggingFace file listing (exact repo, filename, byte size) before shipping; multi-part monsters go through the existing part-count + total-size confirmation gate. Circulating "Llama 5" and "Qwen 4" release claims were checked against the live Meta/Qwen HF orgs and are fabrications — not added.
+
 ### Fixed — Voice: whisper/piper state detection, venv installs, PEP 668 (#77, #78 ElBiggus; joerack Discord)
 
 - **Whisper badge no longer resets to "not installed" after every relaunch.** `whisper_status` only reported a *running* server process; after a restart the process is gone, so the UI showed red even though the install was fine. It now also probes the installed `faster_whisper` package on disk.
