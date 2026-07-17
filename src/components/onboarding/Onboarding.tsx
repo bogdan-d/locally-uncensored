@@ -1556,7 +1556,7 @@ export function Onboarding() {
             <div className="text-center mb-3">
               <h2 className="text-base font-semibold mb-1">Pick a starter model</h2>
               <p className={`text-[0.7rem] ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                One small model to get you running. You can browse and install more from the Discover tab in Model Manager once you're in.
+                One small model to get you running. You can browse and install more from the Models tab once you're in.
               </p>
             </div>
 
@@ -1774,10 +1774,10 @@ export function Onboarding() {
               {pulledModels.length > 0
                 ? `${pulledModels.length} model${pulledModels.length > 1 ? 's' : ''} installed. You're ready to go.`
                 : selectedBackend === BUILTIN_BACKEND_ID
-                ? 'The built-in engine is ready. Install a model anytime from Model Manager.'
+                ? 'The built-in engine is ready. Install a model anytime from the Models tab.'
                 : detectedBackends.length > 0
                 ? `Connected to ${detectedBackends.find(b => b.id === selectedBackend)?.name || detectedBackends[0].name}. You're ready to go.`
-                : 'You can configure backends and install models anytime from Settings and Model Manager.'}
+                : 'You can configure backends and install models anytime from Settings and the Models tab.'}
             </p>
             <button onClick={finish} className={primaryBtn}>
               Get Started <ArrowRight size={14} />

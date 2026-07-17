@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import {
-  Download, ArrowLeft, RefreshCw, Search, MessageSquare, Image, Video,
-  X as XIcon, HardDrive, Sparkles, PackageOpen,
+  Download, ArrowLeft, RefreshCw, Search, MessagesSquare, Images, Clapperboard,
+  X as XIcon, HardDrive, Sparkles, PackageOpen, Video as VideoIcon, Image as ImageIcon,
 } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useUIStore } from '../../stores/uiStore'
@@ -16,15 +16,14 @@ import { showModel } from '../../api/ollama'
 import { checkComfyConnection } from '../../api/comfyui'
 import type { ModelCategory, AIModel } from '../../types/models'
 
-// Three-mode filter shared by both Installed and Discover banners. There is no
-// "All" tab — the Installed view shows the active mode's section instead, so
-// the toggle stays a clean three-choice control.
+// One category drives BOTH views (Discover + Installed) — the old split
+// discoverMode/categoryFilter pair collapsed into the persisted store value.
 type Mode = Extract<ModelCategory, 'text' | 'image' | 'video'>
 
-const MODE_TABS: { key: Mode; label: string; icon: typeof MessageSquare; accent: string }[] = [
-  { key: 'text',  label: 'Text',  icon: MessageSquare, accent: 'text-blue-400' },
-  { key: 'image', label: 'Image', icon: Image,         accent: 'text-purple-400' },
-  { key: 'video', label: 'Video', icon: Video,         accent: 'text-emerald-400' },
+const RAIL_ITEMS: { key: Mode; label: string; icon: typeof MessagesSquare; accent: string }[] = [
+  { key: 'text',  label: 'Chat',  icon: MessagesSquare, accent: 'text-blue-500 dark:text-blue-400' },
+  { key: 'image', label: 'Image', icon: Images,         accent: 'text-purple-500 dark:text-purple-400' },
+  { key: 'video', label: 'Video', icon: Clapperboard,   accent: 'text-emerald-500 dark:text-emerald-400' },
 ]
 
 export function ModelManager() {
@@ -35,35 +34,25 @@ export function ModelManager() {
   const [infoOpen, setInfoOpen] = useState(false)
   const [modelInfo, setModelInfo] = useState<any>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
-  // Open Model Manager on Discover by default — most opens are to find and
-  // install something new. Installed (right icon) is one click away.
+  // Open on Discover by default — most opens are to find and install
+  // something new. Installed is one click away in the segment control.
   const [tab, setTab] = useState<'installed' | 'discover'>('discover')
 
-  // Discover-specific mode lives in the parent so the centered banner row
-  // (rendered outside the max-w-4xl column) stays in sync with the view.
-  const [discoverMode, setDiscoverMode] = useState<Mode>('text')
-
-  // Inline search lives in the header — the magnifier toggles a sliding input
-  // that submits to Discover (live filter + HF catalog search on Enter).
-  const [searchOpen, setSearchOpen] = useState(false)
+  // Header search: always visible (no hidden magnifier), live filter +
+  // Enter submits the HuggingFace catalog search in Discover.
   const [searchQuery, setSearchQuery] = useState('')
   const [searchSubmitToken, setSearchSubmitToken] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus()
-  }, [searchOpen])
-
   // The store still defaults categoryFilter to 'all' for legacy reasons, but
-  // the All tab is gone — coerce to 'text' on mount so the user never lands
-  // on an unselected state.
+  // there is no All rail item — coerce to 'text' on mount so the user never
+  // lands on an unselected state.
   useEffect(() => {
     if (categoryFilter === 'all') setCategoryFilter('text')
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // The Installed banner is driven by the same Mode tuple as Discover.
-  const installedMode: Mode = (categoryFilter === 'text' || categoryFilter === 'image' || categoryFilter === 'video')
+  const mode: Mode = (categoryFilter === 'text' || categoryFilter === 'image' || categoryFilter === 'video')
     ? categoryFilter
     : 'text'
 
@@ -86,7 +75,8 @@ export function ModelManager() {
     setConfirmDelete(null)
   }
 
-  const filteredModels = models.filter((m: AIModel) => m.type === installedMode)
+  const filteredModels = models.filter((m: AIModel) => m.type === mode)
+  const modeMeta = RAIL_ITEMS.find(r => r.key === mode)!
 
   // d37d7bf5 + neejuh (2.5.5): "models show installed in Discover but the
   // Installed tab is empty and I can't select them." Image/video models are
@@ -97,7 +87,7 @@ export function ModelManager() {
   // with a ONE-SHOT reachability check (never a poll — keep the app light, #70)
   // so we can show the real reason instead of a misleading "no models installed".
   const [comfyReachable, setComfyReachable] = useState<boolean | null>(null)
-  const imageOrVideo = installedMode === 'image' || installedMode === 'video'
+  const imageOrVideo = mode === 'image' || mode === 'video'
   useEffect(() => {
     if (!(tab === 'installed' && imageOrVideo && filteredModels.length === 0)) return
     let alive = true
@@ -115,79 +105,107 @@ export function ModelManager() {
   // ── Render ──────────────────────────────────────────────────────
 
   return (
-    <div className="h-full overflow-y-auto scrollbar-thin p-4">
-      {/* Header — bounded to the same column as the model list so the back
-          arrow and title line up with the cards beneath. */}
-      <div className="max-w-4xl mx-auto">
-        <div className="flex items-center justify-between mb-4">
+    <div className="h-full flex overflow-hidden">
+      {/* Category rail — the big, labeled home of Chat / Image / Video */}
+      <aside className="shrink-0 w-12 lg:w-36 border-r border-gray-200 dark:border-white/[0.06] bg-gray-50/60 dark:bg-white/[0.015] flex flex-col py-3 px-1.5 lg:px-2 gap-1">
+        {RAIL_ITEMS.map(({ key, label, icon: Icon, accent }) => {
+          const active = mode === key
+          const count = models.filter((m) => m.type === key).length
+          return (
+            <button
+              key={key}
+              onClick={() => setCategoryFilter(key)}
+              title={label}
+              aria-pressed={active}
+              className={`flex items-center justify-center lg:justify-start gap-2 px-2 py-2 rounded-lg transition-colors ${
+                active
+                  ? 'bg-white dark:bg-white/[0.08] shadow-sm border border-gray-200 dark:border-white/[0.08]'
+                  : 'border border-transparent hover:bg-gray-100 dark:hover:bg-white/[0.04]'
+              }`}
+            >
+              <Icon size={15} className={active ? accent : 'text-gray-400 dark:text-gray-500'} />
+              <span className={`hidden lg:block text-[0.68rem] font-medium ${active ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}>
+                {label}
+              </span>
+              {count > 0 && (
+                <span className="hidden lg:block ml-auto text-[0.55rem] text-gray-400 dark:text-gray-500 tabular-nums">{count}</span>
+              )}
+            </button>
+          )
+        })}
+        <div className="mt-auto hidden lg:block px-2 pb-1 text-[0.5rem] leading-relaxed text-gray-400 dark:text-gray-600">
+          Models run 100% on your computer.
+        </div>
+      </aside>
+
+      {/* Content */}
+      <div className="flex-1 min-w-0 overflow-y-auto scrollbar-thin">
+        <div className="p-4 max-w-5xl mx-auto space-y-4">
+          {/* Top bar */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setView('chat')}
               className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+              title="Back to chat"
             >
               <ArrowLeft size={16} />
             </button>
-            <h1 className="text-[0.8rem] font-semibold text-gray-800 dark:text-gray-200">Model Manager</h1>
+            <h1 className="text-[0.85rem] font-semibold text-gray-900 dark:text-white">Models</h1>
 
-            {/* Mode toggle — Discover (left) · Installed (right). */}
-            <div className="ml-1 flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06]">
+            {/* Discover / Installed segment */}
+            <div className="ml-2 flex items-center p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06]">
               <button
                 onClick={() => setTab('discover')}
-                title="Discover new models"
                 aria-pressed={tab === 'discover'}
-                className={`flex items-center justify-center w-[26px] h-[20px] rounded-md transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.62rem] font-semibold transition-colors ${
                   tab === 'discover'
-                    ? 'bg-white dark:bg-white/10 text-amber-500 dark:text-amber-300 shadow-sm'
+                    ? 'bg-white dark:bg-white/10 text-amber-600 dark:text-amber-300 shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
-                <Sparkles size={11} />
+                <Sparkles size={11} /> Get new
               </button>
               <button
                 onClick={() => setTab('installed')}
-                title={`Installed — ${models.length} model${models.length === 1 ? '' : 's'}`}
                 aria-pressed={tab === 'installed'}
-                className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md transition-colors ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[0.62rem] font-semibold transition-colors ${
                   tab === 'installed'
-                    ? 'bg-white dark:bg-white/10 text-blue-500 dark:text-blue-400 shadow-sm'
+                    ? 'bg-white dark:bg-white/10 text-blue-600 dark:text-blue-400 shadow-sm'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
-                <HardDrive size={11} />
-                <span className="text-[0.55rem] font-semibold">{models.length}</span>
+                <HardDrive size={11} /> Installed
+                <span className="text-[0.55rem] font-normal opacity-70 tabular-nums">{filteredModels.length}</span>
               </button>
             </div>
-          </div>
 
-          <div className="flex items-center gap-1.5">
-            {/* Sliding search input */}
-            <div className={`flex items-center transition-[width,opacity] duration-200 ease-out overflow-hidden ${
-              searchOpen ? 'w-48 opacity-100' : 'w-0 opacity-0'
-            }`}>
+            <div className="flex-1" />
+
+            {/* Always-visible search */}
+            <div className="relative w-40 sm:w-56">
+              <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
               <input
                 ref={searchInputRef}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') { setTab('discover'); setSearchSubmitToken((t) => t + 1) }
-                  else if (e.key === 'Escape') { setSearchQuery(''); setSearchOpen(false) }
+                  else if (e.key === 'Escape') setSearchQuery('')
                 }}
-                onBlur={() => { if (!searchQuery) setSearchOpen(false) }}
                 placeholder="Search models…"
-                className="w-full px-2.5 py-1 rounded-md bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/20"
+                className="w-full pl-7 pr-6 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-900 dark:text-white placeholder-gray-500 focus:outline-none focus:border-gray-400 dark:focus:border-white/20"
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                  title="Clear search"
+                  aria-label="Clear search"
+                >
+                  <XIcon size={11} />
+                </button>
+              )}
             </div>
-            <button
-              onClick={() => {
-                if (searchOpen && searchQuery) { setSearchQuery(''); setSearchOpen(false) }
-                else setSearchOpen((o) => !o)
-              }}
-              title={searchOpen ? (searchQuery ? 'Clear search' : 'Close search') : 'Search models'}
-              className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"
-              aria-label="Search models"
-            >
-              {searchOpen && searchQuery ? <XIcon size={13} /> : <Search size={13} />}
-            </button>
 
             <button onClick={fetchModels} className="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors" title="Refresh">
               <RefreshCw size={13} />
@@ -195,158 +213,129 @@ export function ModelManager() {
             {ollamaEnabled && (
               <button
                 onClick={() => setPullOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.62rem] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                title="Pull any Ollama model by name"
               >
-                <Download size={12} /> Pull Model
+                <Download size={11} /> Pull
               </button>
             )}
           </div>
-        </div>
-      </div>
 
-      {/* Banner — rendered OUTSIDE the max-w-4xl column so it sits at the true
-          horizontal centre of the view. */}
-      <div className="flex justify-center items-center gap-2 mb-5">
-        <div className="flex gap-0.5 p-0.5 bg-gray-100 dark:bg-white/[0.04] rounded-lg border border-gray-200 dark:border-white/[0.06]">
-          {MODE_TABS.map(({ key, label, icon: Icon, accent }) => {
-            const active = tab === 'installed' ? installedMode === key : discoverMode === key
-            const count = tab === 'installed' ? models.filter((m) => m.type === key).length : null
-            return (
-              <button
-                key={key}
-                onClick={() => {
-                  if (tab === 'installed') setCategoryFilter(key)
-                  else setDiscoverMode(key)
-                }}
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[0.6rem] font-medium transition-all ${
-                  active
-                    ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                <Icon size={10} className={active ? accent : ''} />
-                <span>{label}</span>
-                {count !== null && (
-                  <span className={`text-[0.55rem] font-normal ${active ? 'text-gray-400 dark:text-gray-500' : 'text-gray-400 dark:text-gray-600'}`}>
-                    {count}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Content column */}
-      <div className="max-w-4xl mx-auto">
-        {tab === 'installed' && (
-          <>
-            {imageOrVideo && filteredModels.length === 0 && comfyReachable !== true ? (
-              // comfyReachable: null = still probing, false = confirmed down.
-              // Never show the misleading "no models installed" here while the
-              // probe is pending — on desktop checkComfyConnection has to time
-              // out when ComfyUI is down (a few seconds), and that flashed the
-              // wrong message before the hint appeared (caught in desktop E2E).
-              comfyReachable === null ? (
-                <div className="text-center py-16 px-6">
-                  <p className="text-[0.7rem] text-gray-500">Checking ComfyUI…</p>
+          {/* Views */}
+          {tab === 'installed' && (
+            <>
+              {imageOrVideo && filteredModels.length === 0 && comfyReachable !== true ? (
+                // comfyReachable: null = still probing, false = confirmed down.
+                // Never show the misleading "no models installed" here while the
+                // probe is pending — on desktop checkComfyConnection has to time
+                // out when ComfyUI is down (a few seconds), and that flashed the
+                // wrong message before the hint appeared (caught in desktop E2E).
+                comfyReachable === null ? (
+                  <div className="text-center py-16 px-6">
+                    <p className="text-[0.7rem] text-gray-500">Checking ComfyUI…</p>
+                  </div>
+                ) : (
+                <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
+                  <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
+                    {mode === 'video' ? <VideoIcon size={22} className="text-gray-400 dark:text-gray-500" /> : <ImageIcon size={22} className="text-gray-400 dark:text-gray-500" />}
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {mode} models</p>
+                    <p className="text-[0.6rem] text-gray-500 max-w-[300px] leading-relaxed">
+                      {mode === 'image' ? 'Image' : 'Video'} models are served by ComfyUI, which isn't running right now — so the ones you've downloaded can't be listed yet. Open the Create tab and start ComfyUI (the power button next to the model picker), then come back.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setView('create')}
+                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
+                  >
+                    <Sparkles size={11} /> Go to Create
+                  </button>
+                </div>
+                )
+              ) : models.length === 0 ? (
+                <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
+                  <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
+                    <PackageOpen size={22} className="text-gray-400 dark:text-gray-500" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">No models installed yet</p>
+                    <p className="text-[0.6rem] text-gray-500 max-w-[280px] leading-relaxed">
+                      Browse curated chat, image and video models and install them with one click.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setTab('discover')}
+                    className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
+                  >
+                    <Sparkles size={11} /> Discover models
+                  </button>
+                </div>
+              ) : filteredModels.length === 0 ? (
+                <div className="text-center py-10 space-y-2">
+                  <p className="text-[0.7rem] text-gray-500">
+                    No {modeMeta.label.toLowerCase()} models installed
+                  </p>
+                  <button
+                    onClick={() => setTab('discover')}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
+                  >
+                    <Sparkles size={11} /> Discover {modeMeta.label.toLowerCase()} models
+                  </button>
                 </div>
               ) : (
-              <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
-                <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
-                  {installedMode === 'video' ? <Video size={22} className="text-gray-400 dark:text-gray-500" /> : <Image size={22} className="text-gray-400 dark:text-gray-500" />}
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {installedMode} models</p>
-                  <p className="text-[0.6rem] text-gray-500 max-w-[300px] leading-relaxed">
-                    {installedMode === 'image' ? 'Image' : 'Video'} models are served by ComfyUI, which isn't running right now — so the ones you've downloaded can't be listed yet. Open the Create tab and start ComfyUI (the power button next to the model picker), then come back.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setView('create')}
-                  className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
-                >
-                  <Sparkles size={11} /> Go to Create
-                </button>
-              </div>
-              )
-            ) : models.length === 0 ? (
-              <div className="flex flex-col items-center justify-center text-center py-16 px-6 gap-3">
-                <div className="w-14 h-14 rounded-full bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] flex items-center justify-center">
-                  <PackageOpen size={22} className="text-gray-400 dark:text-gray-500" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">No models installed yet</p>
-                  <p className="text-[0.6rem] text-gray-500 max-w-[280px] leading-relaxed">
-                    Browse curated text, image and video models in Discover and install them with one click.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setTab('discover')}
-                  className="flex items-center gap-1.5 mt-1 px-3 py-1.5 rounded-md bg-gray-900 dark:bg-white/10 hover:bg-gray-800 dark:hover:bg-white/15 text-white text-[0.65rem] font-medium transition-colors"
-                >
-                  <Sparkles size={11} /> Discover models
-                </button>
-              </div>
-            ) : filteredModels.length === 0 ? (
-              <div className="text-center py-10 space-y-2">
-                <p className="text-[0.7rem] text-gray-500">
-                  No {installedMode} models installed
-                </p>
-                <button
-                  onClick={() => setTab('discover')}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 text-[0.65rem] text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10 transition-colors"
-                >
-                  <Sparkles size={11} /> Discover {installedMode} models
-                </button>
-              </div>
-            ) : (
-              (() => {
-                const meta = MODE_TABS.find((s) => s.key === installedMode)!
-                const SectionIcon = meta.icon
-                return (
-                  <section className="space-y-1.5">
-                    <div className="flex items-center gap-2 px-1">
-                      <SectionIcon size={11} className={meta.accent} />
-                      <h2 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
-                        {meta.label}
-                      </h2>
-                      <span className="text-[0.55rem] text-gray-400 dark:text-gray-500 tabular-nums">{filteredModels.length}</span>
-                      <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
-                    </div>
-                    <div className="space-y-1.5">
-                      {filteredModels.map((model, i) => (
-                        <motion.div
-                          key={model.name}
-                          initial={{ opacity: 0, y: 4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: i * 0.015 }}
-                        >
-                          <ModelCard
-                            model={model}
-                            isActive={model.name === activeModel}
-                            onSelect={() => setActiveModel(model.name)}
-                            onDelete={() => setConfirmDelete(model.name)}
-                            onInfo={() => handleInfo(model.name)}
-                            canDelete={ollamaEnabled && model.type === 'text' && (!('provider' in model) || model.provider === 'ollama')}
-                          />
-                        </motion.div>
-                      ))}
-                    </div>
-                  </section>
-                )
-              })()
-            )}
-          </>
-        )}
+                (() => {
+                  const SectionIcon = modeMeta.icon
+                  const shown = searchQuery
+                    ? filteredModels.filter(m => m.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                    : filteredModels
+                  return (
+                    <section className="space-y-1.5">
+                      <div className="flex items-center gap-2 px-1">
+                        <SectionIcon size={11} className={modeMeta.accent} />
+                        <h2 className="text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-gray-700 dark:text-gray-300">
+                          {modeMeta.label}
+                        </h2>
+                        <span className="text-[0.55rem] text-gray-400 dark:text-gray-500 tabular-nums">{shown.length}</span>
+                        <div className="flex-1 h-px bg-gray-200 dark:bg-white/[0.06]" />
+                      </div>
+                      <div className="space-y-1.5">
+                        {shown.map((model, i) => (
+                          <motion.div
+                            key={model.name}
+                            initial={{ opacity: 0, y: 4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: i * 0.015 }}
+                          >
+                            <ModelCard
+                              model={model}
+                              isActive={model.name === activeModel}
+                              onSelect={() => setActiveModel(model.name)}
+                              onDelete={() => setConfirmDelete(model.name)}
+                              onInfo={() => handleInfo(model.name)}
+                              canDelete={ollamaEnabled && model.type === 'text' && (!('provider' in model) || model.provider === 'ollama')}
+                            />
+                          </motion.div>
+                        ))}
+                        {shown.length === 0 && (
+                          <p className="text-center text-[0.65rem] text-gray-500 py-6">No installed {modeMeta.label.toLowerCase()} models match "{searchQuery}"</p>
+                        )}
+                      </div>
+                    </section>
+                  )
+                })()
+              )}
+            </>
+          )}
 
-        {tab === 'discover' && (
-          <DiscoverModels
-            category={discoverMode}
-            search={searchQuery}
-            searchSubmitToken={searchSubmitToken}
-          />
-        )}
+          {tab === 'discover' && (
+            <DiscoverModels
+              category={mode}
+              search={searchQuery}
+              searchSubmitToken={searchSubmitToken}
+            />
+          )}
+        </div>
       </div>
 
       <PullModelDialog open={pullOpen} onClose={() => setPullOpen(false)} />
