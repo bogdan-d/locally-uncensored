@@ -153,7 +153,9 @@ pub struct AppState {
     /// Document-Chat / RAG so embeddings no longer require Ollama. `None` until
     /// started via `start_bundled_embed`; reaped in `shutdown_subprocesses`.
     pub bundled_embed: Mutex<Option<BundledEngine>>,
-    pub comfy_path: Mutex<Option<String>>,
+    /// Arc so the ComfyUI install worker thread can persist a custom install
+    /// target as the active path on completion (andy_38747).
+    pub comfy_path: Arc<Mutex<Option<String>>>,
     pub comfy_port: Mutex<u16>,
     /// Configurable ComfyUI host. Default "localhost". Setting this to a
     /// remote hostname/IP lets users point LU at a ComfyUI running on
@@ -281,7 +283,7 @@ impl AppState {
             ollama_process: Mutex::new(None),
             bundled_engine: Mutex::new(None),
             bundled_embed: Mutex::new(None),
-            comfy_path: Mutex::new(None),
+            comfy_path: Arc::new(Mutex::new(None)),
             comfy_port: Mutex::new(initial_port),
             comfy_host: Mutex::new(initial_host),
             ollama_base: Mutex::new(initial_ollama_base),

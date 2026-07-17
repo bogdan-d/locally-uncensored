@@ -547,7 +547,13 @@ function ComfyUISettings() {
               setInstallPhase('comfyui')
               setInstallLogs(['Installing ComfyUI…'])
               try {
-                await backendCall('install_comfyui')
+                // andy_38747 (Discord): let the Path field double as the install
+                // target so the multi-GB install can land on another drive.
+                // Empty field → backend default (~/ComfyUI). On a carcass
+                // re-install with no override, reuse the detected path so the
+                // repair happens where the broken install lives.
+                const installTarget = customPath.trim() || status?.path || ''
+                await backendCall('install_comfyui', installTarget ? { installPath: installTarget } : {})
                 const poll = setInterval(async () => {
                   try {
                     const data: any = await backendCall('install_comfyui_status')
@@ -572,6 +578,11 @@ function ComfyUISettings() {
           >
             {status?.complete === false ? 'Re-install ComfyUI' : 'Install ComfyUI'}
           </button>
+        )}
+        {(!status?.found || status?.complete === false) && installPhase === 'idle' && (
+          <p className="w-full text-[0.55rem] text-gray-600">
+            Installs to your home folder by default. Set Path above (e.g. D:\ComfyUI) to install on another drive.
+          </p>
         )}
         {installPhase !== 'idle' && (
           <div className="w-full mt-2 space-y-1">

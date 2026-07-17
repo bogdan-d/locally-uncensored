@@ -513,6 +513,9 @@ pub fn install_comfyui(
         );
     }
     let install_status = state.install_status.clone();
+    // Cloned into the worker so a custom install target can be persisted as
+    // the active ComfyUI path once the install completes (andy_38747).
+    let comfy_path_slot = state.comfy_path.clone();
 
     std::thread::spawn(move || {
         // Helper to update install status + logs
@@ -763,6 +766,31 @@ pub fn install_comfyui(
         }
 
         println!("[Install] ComfyUI installation complete");
+
+        // andy_38747 (Discord): the install target is user-configurable now.
+        // Persist it exactly like `set_comfyui_path` does (memory + config.json),
+        // otherwise a non-default target (e.g. D:\ComfyUI) is installed fine but
+        // never found again — `find_comfyui_path` only scans standard locations.
+        let dir_str = target_dir.to_string_lossy().to_string();
+        {
+            let mut p = comfy_path_slot.lock().unwrap();
+            *p = Some(dir_str.clone());
+        }
+        if let Some(config_dir) = dirs::config_dir() {
+            let app_config = config_dir.join("locally-uncensored");
+            let _ = std::fs::create_dir_all(&app_config);
+            let config_file = app_config.join("config.json");
+            let mut config: serde_json::Value = std::fs::read_to_string(&config_file)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_else(|| serde_json::json!({}));
+            config["comfyui_path"] = serde_json::json!(dir_str);
+            let _ = std::fs::write(
+                &config_file,
+                serde_json::to_string_pretty(&config).unwrap_or_default(),
+            );
+        }
+
         update("complete", "ComfyUI installed successfully!");
     });
 
