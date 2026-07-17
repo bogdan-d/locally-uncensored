@@ -161,6 +161,14 @@ export const useDownloadStore = create<DownloadStoreState>()((set, get) => ({
   },
 
   dismiss: (id: string) => {
+    // Errored entries also live in the Rust download map; drop them there
+    // too or the next refresh() (Models-tab remount) resurrects the error
+    // card the user just cleared (the_mr_pickles). Only for 'error' —
+    // cancelling an active transfer or a completed entry is not dismiss's
+    // job (the badge dismisses completed entries FE-only by design).
+    if (get().downloads[id]?.status === 'error') {
+      cancelDownload(id).catch(() => { /* app restart clears it anyway */ })
+    }
     set(s => {
       const updated = { ...s.downloads }
       delete updated[id]

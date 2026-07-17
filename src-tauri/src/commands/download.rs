@@ -392,14 +392,19 @@ pub fn cancel_download(id: String, state: State<'_, AppState>) -> Result<serde_j
         }
     }
 
-    // If paused (no active token), clean up directly
-    let was_paused = if let Ok(dl) = state.downloads.lock() {
-        dl.get(&id).map(|p| p.status == "paused").unwrap_or(false)
+    // If paused or errored (no active token), clean up directly. Errored
+    // entries otherwise live in the map forever and resurrect the bundle
+    // card's error state on every Models-tab remount after the user hit
+    // Clear (the_mr_pickles) — refresh() re-reads this map on mount.
+    let cleanup_now = if let Ok(dl) = state.downloads.lock() {
+        dl.get(&id)
+            .map(|p| p.status == "paused" || p.status == "error")
+            .unwrap_or(false)
     } else {
         false
     };
 
-    if was_paused {
+    if cleanup_now {
         // Remove from progress
         if let Ok(mut dl) = state.downloads.lock() {
             dl.remove(&id);
