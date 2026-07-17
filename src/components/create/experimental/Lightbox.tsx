@@ -68,7 +68,18 @@ export function Lightbox({ item, onClose }: { item: GalleryItem | null; onClose:
               <Sparkles size={13} /> Enhance
             </button>
           )}
-          {item.type === 'video' ? (
+          {item.type === 'audio' ? (
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-[480px] max-w-[90vw] flex flex-col items-center gap-4 p-8 rounded-lg bg-white/[0.04] border border-white/[0.08]"
+            >
+              {item.prompt && <p className="t-body text-gray-300 text-center">{item.prompt}</p>}
+              <audio src={mediaUrl} controls autoPlay onError={onMediaError} className="w-full" />
+            </motion.div>
+          ) : item.type === 'video' ? (
             <motion.video
               initial={{ scale: 0.95 }}
               animate={{ scale: 1 }}

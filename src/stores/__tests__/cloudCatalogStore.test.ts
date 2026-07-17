@@ -144,10 +144,21 @@ describe('cloudCatalogStore', () => {
       ],
     }
 
-    it('every seed clip model does both t2v and i2v', () => {
-      const vids = CLOUD_MODEL_SEED.filter((m) => m.kind === 'video')
+    it('every classic seed clip model does both t2v and i2v', () => {
+      // Op-specialized 2.5.8 entries (lipsync/extend/motion/trainer) are not
+      // clip-generation models and are hard-false on both flags.
+      const vids = CLOUD_MODEL_SEED.filter((m) => m.kind === 'video' && !m.ops)
       expect(vids.length).toBeGreaterThan(0)
       expect(vids.every((m) => m.t2v !== false && m.i2v !== false)).toBe(true)
+      const specialized = CLOUD_MODEL_SEED.filter((m) => m.kind === 'video' && m.ops)
+      expect(specialized.length).toBeGreaterThan(0)
+      expect(specialized.every((m) => m.t2v === false && m.i2v === false)).toBe(true)
+    })
+
+    it('op-specialized seed models never reach the classic pickers', () => {
+      useCloudCatalogStore.setState({ models: CLOUD_MODEL_SEED })
+      for (const m of t2vModels()) expect(m.ops).toBeUndefined()
+      for (const m of i2vModels()) expect(m.ops).toBeUndefined()
     })
 
     it('i2vModels excludes an i2v:false model; an absent flag stays capable', () => {

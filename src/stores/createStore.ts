@@ -20,12 +20,28 @@ export type CreateBackend = 'local' | 'cloud'
  * mode / image sub-mode / video sub-mode / removebg. The `mode` + sub-mode
  * enums stay the load-bearing state; `intent` is a derived view over them.
  */
-export type CreateIntent = 'image' | 'edit' | 'removebg' | 'video' | 'animate' | 'upscale' | 'eraser'
+export type CreateIntent =
+  | 'image' | 'edit' | 'removebg' | 'video' | 'animate' | 'upscale' | 'eraser'
+  | CloudOp
 
 /** Cloud-only single-purpose WaveSpeed endpoints (2.5.7): super-resolution
  *  and masked object removal. Local backends have no lane for them, so the
  *  IntentBar only offers these while the cloud backend is active. */
 export type UtilityOp = 'upscale' | 'eraser'
+
+/** 2.5.8 cloud-only Create categories (WaveSpeed, 2026-07-17 David):
+ *  Character-Studio (LoRA training + generation), talking character (lipsync),
+ *  music, video extend and motion control. Like `utilityOp`, an escape hatch
+ *  over the image/video mode axis: when set it wins the intent derivation. */
+export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
+
+/** An audio/video file (or training image) staged in the composer before
+ *  upload. `blob` carries the bytes for the cloud upload; `url` is a local
+ *  object URL for preview. Runtime-only — blobs can never persist. */
+export interface MediaRef { name: string; url: string; blob: Blob }
+
+/** A trained character on the user's cloud shelf (server: user_loras). */
+export interface CharacterRef { id: string; name: string; triggerWord: string; family: string }
 
 /**
  * A source or mask image loaded into the Stage input slot. `filename` is the
@@ -35,17 +51,19 @@ export type UtilityOp = 'upscale' | 'eraser'
  */
 export interface ImageRef { filename: string; url: string; width: number; height: number }
 
-/** Flatten mode / sub-mode / removebg / utilityOp into the single intent the
- *  UI drives. */
+/** Flatten mode / sub-mode / removebg / utilityOp / cloudOp into the single
+ *  intent the UI drives. */
 export function deriveIntent(s: {
   removebg: boolean
   utilityOp: UtilityOp | null
+  cloudOp: CloudOp | null
   mode: 'image' | 'video'
   imageSubMode: 'text2img' | 'img2img'
   videoSubMode: 't2v' | 'i2v'
 }): CreateIntent {
   if (s.removebg) return 'removebg'
   if (s.utilityOp) return s.utilityOp
+  if (s.cloudOp) return s.cloudOp
   if (s.mode === 'video') return s.videoSubMode === 'i2v' ? 'animate' : 'video'
   return s.imageSubMode === 'img2img' ? 'edit' : 'image'
 }
@@ -91,7 +109,7 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
 
 export interface GalleryItem {
   id: string
-  type: 'image' | 'video'
+  type: 'image' | 'video' | 'audio'
   filename: string
   subfolder: string
   prompt: string
@@ -162,6 +180,31 @@ interface CreateState {
   removebg: boolean
   /** Cloud-only utility intents (upscale/eraser); null = normal generate axis. */
   utilityOp: UtilityOp | null
+  /** 2.5.8 cloud-only categories (character/lipsync/music/extend/motion);
+   *  null = normal generate axis. Runtime-only like utilityOp. */
+  cloudOp: CloudOp | null
+  /** Character-Studio sub-surface: train a new character vs generate with one. */
+  characterTab: 'train' | 'use'
+  /** Character-Studio training set (4-30 images). Runtime-only (blobs). */
+  trainImages: MediaRef[]
+  /** Character-Studio trigger word — the token that summons the character. */
+  triggerWord: string
+  /** The shelf character selected for use-mode generation. Runtime-only. */
+  selectedCharacter: CharacterRef | null
+  /** Lipsync speech / voice-clone reference audio. Runtime-only (blob). */
+  audioInput: MediaRef | null
+  /** Lipsync speech from a prior cloud voice/music render instead of an
+   *  upload ({jobId} → fresh signed audio_url at submit). Runtime-only. */
+  voiceFromJob: { jobId: string; label: string } | null
+  /** Lipsync base clip / motion driving video. Runtime-only (blob). */
+  videoInput: MediaRef | null
+  /** Extend: the prior cloud render to continue ({jobId} → fresh signed URL
+   *  at submit). Runtime-only. */
+  extendSource: { jobId: string; url: string; label: string } | null
+  /** Music track length in seconds (billed per second on the cloud). */
+  musicDuration: number
+  /** Music: optional lyrics passed to models that take them. Runtime-only. */
+  musicLyrics: string
   /** Upscale target for the cloud super-resolution endpoint. */
   targetResolution: '2k' | '4k' | '8k'
   showNegative: boolean
@@ -180,6 +223,13 @@ interface CreateState {
    *  backend — separate from the persisted local checkpoint names. */
   cloudImageModel: string
   cloudVideoModel: string
+  /** Runtime-only: the model picked inside a 2.5.8 specialized intent
+   *  (trainer/lipsync/music/extend/motion). One slot for all — modelForOp
+   *  coerces a stale cross-intent pick onto the op's own list. */
+  cloudOpModel: string
+  /** Bumped when the character shelf changed (training delivered / deleted)
+   *  so the Character-Studio surface refetches /api/loras. */
+  charactersVersion: number
   /** Runtime-only: which local custom-node capabilities are installed. */
   caps: Record<'rmbg' | 'inpaint-nodes', boolean>
 
@@ -243,6 +293,20 @@ interface CreateState {
   setClipSkip: (n: number) => void
   setGrowMaskBy: (n: number) => void
   setTargetResolution: (r: '2k' | '4k' | '8k') => void
+  setCharacterTab: (tab: 'train' | 'use') => void
+  addTrainImages: (imgs: MediaRef[]) => void
+  removeTrainImage: (name: string) => void
+  clearTrainImages: () => void
+  setTriggerWord: (w: string) => void
+  setSelectedCharacter: (c: CharacterRef | null) => void
+  setAudioInput: (m: MediaRef | null) => void
+  setVoiceFromJob: (v: { jobId: string; label: string } | null) => void
+  setVideoInput: (m: MediaRef | null) => void
+  bumpCharactersVersion: () => void
+  setCloudOpModel: (id: string) => void
+  setExtendSource: (s: { jobId: string; url: string; label: string } | null) => void
+  setMusicDuration: (s: number) => void
+  setMusicLyrics: (l: string) => void
   setSource: (img: ImageRef | null) => void
   setMask: (img: ImageRef | null) => void
   setBackend: (backend: CreateBackend) => void
@@ -310,6 +374,17 @@ export const useCreateStore = create<CreateState>()(
       videoSubMode: 't2v' as 't2v' | 'i2v',
       removebg: false,
       utilityOp: null as UtilityOp | null,
+      cloudOp: null as CloudOp | null,
+      characterTab: 'train' as 'train' | 'use',
+      trainImages: [] as MediaRef[],
+      triggerWord: '',
+      selectedCharacter: null as CharacterRef | null,
+      audioInput: null as MediaRef | null,
+      voiceFromJob: null as { jobId: string; label: string } | null,
+      videoInput: null as MediaRef | null,
+      extendSource: null as { jobId: string; url: string; label: string } | null,
+      musicDuration: 60,
+      musicLyrics: '',
       targetResolution: '4k' as '2k' | '4k' | '8k',
       showNegative: false,
       selectedLoras: [] as { name: string; strength: number }[],
@@ -322,6 +397,8 @@ export const useCreateStore = create<CreateState>()(
       backend: 'local' as CreateBackend,
       cloudImageModel: '',
       cloudVideoModel: '',
+      cloudOpModel: '',
+      charactersVersion: 0,
       caps: { rmbg: false, 'inpaint-nodes': false } as Record<'rmbg' | 'inpaint-nodes', boolean>,
 
       isGenerating: false,
@@ -418,8 +495,23 @@ export const useCreateStore = create<CreateState>()(
         // mirror setMode's reset so image resolution never leaks into video.
         // A stale error from the previous intent never carries over.
         const dropAll = { source: null, mask: null, sourceSetAt: 0 }
-        const base = { removebg: false, utilityOp: null, error: null }
+        const base = { removebg: false, utilityOp: null, cloudOp: null, error: null }
         switch (intent) {
+          // ── 2.5.8 cloud categories. Inputs specific to each (train set,
+          // audio, driving video, extend pick) live in their own slots and are
+          // only read by their own intent — no cross-intent bleed to clear.
+          case 'character':
+            return { ...base, cloudOp: 'character' as const, mode: 'image' as const, imageSubMode: 'text2img' as const, ...dropAll }
+          case 'lipsync':
+            // Keeps the source slot (the portrait a photo-avatar model speaks).
+            return { ...base, cloudOp: 'lipsync' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null }
+          case 'music':
+            return { ...base, cloudOp: 'music' as const, ...dropAll }
+          case 'extend':
+            return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll }
+          case 'motion':
+            // Keeps the source slot (the character image the video drives).
+            return { ...base, cloudOp: 'motion' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null }
           case 'image':    return { ...base, mode: 'image' as const, imageSubMode: 'text2img' as const, ...dropAll }
           case 'edit':     return { ...base, mode: 'image' as const, imageSubMode: 'img2img' as const }
           case 'removebg': return { ...base, removebg: true, mode: 'image' as const, imageSubMode: 'img2img' as const, mask: null }
@@ -449,6 +541,26 @@ export const useCreateStore = create<CreateState>()(
       setClipSkip: (n) => set({ clipSkip: Math.max(0, Math.min(12, Math.floor(n))) }),
       setGrowMaskBy: (n) => set({ growMaskBy: Math.max(0, Math.min(64, Math.floor(n))) }),
       setTargetResolution: (targetResolution) => set({ targetResolution }),
+      setCharacterTab: (characterTab) => set({ characterTab }),
+      // Cap at 30 (the server's image_paths limit) and de-dupe by filename so
+      // a re-drop of the same files doesn't double the set.
+      addTrainImages: (imgs) => set((s) => {
+        const have = new Set(s.trainImages.map((i) => i.name))
+        return { trainImages: [...s.trainImages, ...imgs.filter((i) => !have.has(i.name))].slice(0, 30) }
+      }),
+      removeTrainImage: (name) => set((s) => ({ trainImages: s.trainImages.filter((i) => i.name !== name) })),
+      clearTrainImages: () => set({ trainImages: [] }),
+      setTriggerWord: (w) => set({ triggerWord: w.replace(/\s+/g, '').slice(0, 30) }),
+      setSelectedCharacter: (selectedCharacter) => set({ selectedCharacter }),
+      // Upload and voice-pick are mutually exclusive speech sources.
+      setAudioInput: (audioInput) => set({ audioInput, ...(audioInput ? { voiceFromJob: null } : {}) }),
+      setVoiceFromJob: (voiceFromJob) => set({ voiceFromJob, ...(voiceFromJob ? { audioInput: null } : {}) }),
+      setVideoInput: (videoInput) => set({ videoInput }),
+      bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
+      setCloudOpModel: (cloudOpModel) => set({ cloudOpModel }),
+      setExtendSource: (extendSource) => set({ extendSource }),
+      setMusicDuration: (s2) => set({ musicDuration: Math.max(5, Math.min(240, Math.floor(s2))) }),
+      setMusicLyrics: (musicLyrics) => set({ musicLyrics: musicLyrics.slice(0, 2000) }),
       setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null }) }),
       setMask: (mask) => set({ mask }),
       // Flipping to local clears the intents that STILL have no local lane
@@ -462,6 +574,8 @@ export const useCreateStore = create<CreateState>()(
           if (backend !== 'local') return { backend }
           const patch: Record<string, unknown> = { backend }
           if (s.utilityOp) Object.assign(patch, { utilityOp: null, mask: null, error: null })
+          // The 2.5.8 categories are hosted-only too — never strand on one.
+          if (s.cloudOp) Object.assign(patch, { cloudOp: null, error: null })
           return patch
         }),
       setCloudImageModel: (cloudImageModel) => set({ cloudImageModel }),
@@ -529,6 +643,10 @@ export const useCreateStore = create<CreateState>()(
         selectedVae: state.selectedVae,
         clipSkip: state.clipSkip,
         growMaskBy: state.growMaskBy,
+        // 2.5.8 cloud categories: only the cheap scalar prefs persist — the
+        // staged media (blobs / object URLs) and cloudOp are runtime-only.
+        musicDuration: state.musicDuration,
+        triggerWord: state.triggerWord,
       }),
       // Future schema bumps hook into migrate. NOTE: zustand only invokes it
       // when the stored blob carries a NUMERIC version that differs — legacy

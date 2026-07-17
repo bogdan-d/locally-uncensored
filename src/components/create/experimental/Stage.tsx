@@ -52,6 +52,9 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
   // source was loaded — otherwise an older gallery item would hijack the stage.
   const freshResult = displayed && displayed.createdAt >= sourceSetAt
 
+  const characterTab = useCreateStore((s) => s.characterTab)
+  const characterTrain = intent === 'character' && characterTab === 'train'
+
   let body: React.ReactNode
   if (isGenerating) {
     body = <GeneratingView />
@@ -59,6 +62,10 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
     body = <ModelInstallCard kind={meta.requiresModels!} />
   } else if (meta.capability && !capReady) {
     body = <CapabilityCard cap={meta.capability} />
+  } else if (characterTrain) {
+    // Character-Studio training board: the image SET lives here (4-30 photos);
+    // trigger word + train button sit in the composer below.
+    body = <TrainSetBoard />
   } else if (meta.needsSource && !source) {
     body = <InputSlot />
   } else if (meta.needsSource && source && !freshResult) {
@@ -410,5 +417,82 @@ function ModelInstallCard({ kind }: { kind: 'image' | 'video' }) {
     <EmptyState icon={copy.icon} tone="accent" title={copy.title} description={copy.description}>
       <InstallCardBody run={run} installing={installing} status={status} err={err} onDismiss={() => setErr(null)} />
     </EmptyState>
+  )
+}
+
+// ── Character-Studio training board (2.5.8): the 4-30 photo set. Trigger word
+// and the Create (train) button live in the composer; this is the visual home
+// of the image set with add/remove + drag&drop. ──
+function TrainSetBoard() {
+  const trainImages = useCreateStore((s) => s.trainImages)
+  const addTrainImages = useCreateStore((s) => s.addTrainImages)
+  const removeTrainImage = useCreateStore((s) => s.removeTrainImage)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const addFiles = (files: FileList | File[]) => {
+    const imgs = Array.from(files)
+      .filter((f) => f.type.startsWith('image/'))
+      .map((f) => ({ name: f.name, url: URL.createObjectURL(f), blob: f as Blob }))
+    if (imgs.length > 0) addTrainImages(imgs)
+  }
+
+  return (
+    <div
+      className="flex-1 min-h-0 flex flex-col p-4 gap-3"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => { e.preventDefault(); addFiles(e.dataTransfer.files) }}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = '' }}
+      />
+      {trainImages.length === 0 ? (
+        <button
+          onClick={() => inputRef.current?.click()}
+          className="flex-1 rounded-xl border-2 border-dashed border-white/10 hover:border-white/25 transition-colors flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-gray-300"
+        >
+          <UploadCloud size={28} />
+          <div className="t-body">Drop 4-30 photos of your character here</div>
+          <div className="t-label text-gray-600">
+            One person or character, varied angles and lighting works best
+          </div>
+        </button>
+      ) : (
+        <>
+          <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+              {trainImages.map((img) => (
+                <div key={img.name} className="relative group aspect-square rounded-lg overflow-hidden bg-white/[0.03] border border-white/[0.06]">
+                  <img src={img.url} alt="" className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => removeTrainImage(img.name)}
+                    className="absolute top-1 right-1 p-1 rounded-md bg-black/60 text-gray-300 opacity-0 group-hover:opacity-100 hover:text-white transition-opacity"
+                    title="Remove"
+                    aria-label="Remove"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => inputRef.current?.click()}
+                className="aspect-square rounded-lg border-2 border-dashed border-white/10 hover:border-white/25 flex items-center justify-center text-gray-500 hover:text-gray-300 transition-colors"
+                title="Add photos"
+                aria-label="Add photos"
+              >
+                <ImagePlus size={18} />
+              </button>
+            </div>
+          </div>
+          <div className="t-label text-gray-500 text-center shrink-0">
+            {trainImages.length}/30 photos — training runs in the cloud and lands the character on your shelf.
+          </div>
+        </>
+      )}
+    </div>
   )
 }

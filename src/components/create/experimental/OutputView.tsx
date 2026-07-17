@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff } from 'lucide-react'
+import { Cpu, Sparkles, ImageDown, Maximize2, Download, Wand2, MonitorOff, AudioLines } from 'lucide-react'
 import { useCreateStore, type GalleryItem, type ProgressPhase } from '../../../stores/createStore'
 import { downloadComfyFile, isTauri } from '../../../api/backend'
 import { refreshResultUrl } from '../../../api/cloud/jobs'
@@ -63,13 +63,16 @@ interface ResultProps {
   onSendToEditor?: () => void
 }
 
-function extFor(contentType: string, kind: 'image' | 'video'): string {
+function extFor(contentType: string, kind: 'image' | 'video' | 'audio'): string {
   if (contentType.includes('png')) return 'png'
   if (contentType.includes('jpeg') || contentType.includes('jpg')) return 'jpg'
   if (contentType.includes('webp')) return 'webp'
   if (contentType.includes('mp4')) return 'mp4'
   if (contentType.includes('webm')) return 'webm'
-  return kind === 'video' ? 'mp4' : 'png'
+  if (contentType.includes('mpeg') || contentType.includes('mp3')) return 'mp3'
+  if (contentType.includes('wav')) return 'wav'
+  if (contentType.includes('ogg')) return 'ogg'
+  return kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'png'
 }
 
 // Save a gallery item. Local ComfyUI outputs (non-empty filename) go through
@@ -143,11 +146,20 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
   const { src: url, onError } = useComfyMedia(item)
   const download = () => void downloadGalleryItem(item)
   const isVideo = item.type === 'video'
+  const isAudio = item.type === 'audio'
   return (
     <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin flex flex-col">
      <div className="m-auto flex flex-col items-center p-6">
       <div className="relative group max-w-full max-h-full">
-        {isVideo ? (
+        {isAudio ? (
+          <div className="w-[420px] max-w-full flex flex-col items-center gap-3 p-6 rounded-[var(--radius-panel)] border border-white/[0.06] bg-white/[0.02]">
+            <AudioLines size={26} className="text-gray-400" strokeWidth={1.5} />
+            {item.prompt && (
+              <p className="t-body text-gray-400 text-center line-clamp-2">{item.prompt}</p>
+            )}
+            <audio src={url} controls onError={onError} className="w-full" onLoadedData={() => markGalleryItemAvailable(item)} />
+          </div>
+        ) : isVideo ? (
           <video
             src={url}
             controls
@@ -174,7 +186,7 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
           </div>
         )}
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {onSendToEditor && !isVideo && !item.unavailable && (
+          {onSendToEditor && item.type === 'image' && !item.unavailable && (
             <IconBtn title="Edit with mask" onClick={onSendToEditor}><Wand2 size={14} /></IconBtn>
           )}
           <IconBtn
@@ -184,14 +196,20 @@ export function ResultView({ item, onFullscreen, onSendToEditor }: ResultProps) 
           >
             <Download size={14} />
           </IconBtn>
-          <IconBtn title="Fullscreen" onClick={onFullscreen}><Maximize2 size={14} /></IconBtn>
+          {!isAudio && (
+            <IconBtn title="Fullscreen" onClick={onFullscreen}><Maximize2 size={14} /></IconBtn>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-3 mt-3 t-mono text-gray-600">
-        <span>{item.width}×{item.height}</span>
-        <span>·</span>
-        <span>seed {item.seed}</span>
-        <span>·</span>
+        {!isAudio && (
+          <>
+            <span>{item.width}×{item.height}</span>
+            <span>·</span>
+            <span>seed {item.seed}</span>
+            <span>·</span>
+          </>
+        )}
         <span className="truncate max-w-[280px]">{prettyModel(item.model)}</span>
       </div>
      </div>

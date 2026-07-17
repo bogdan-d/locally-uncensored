@@ -9,10 +9,12 @@ import {
   defaultCloudModel,
   defaultEditModel,
   isEditCapable,
+  modelForOp,
   runCredits,
 } from '../../../stores/cloudCatalogStore'
 import { INTENT_MAP } from './intents'
 import { ModelChip } from './ModelChip'
+import { SpecialControls } from './SpecialIntentControls'
 import { CreditsMeter } from './CreditsMeter'
 import { Button } from '../ui/Button'
 import { PromptField } from '../ui/PromptField'
@@ -42,8 +44,18 @@ export function Composer({ onOpenAdvanced }: Props) {
   const setTargetResolution = useCreateStore((s) => s.setTargetResolution)
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
   const frames = useCreateStore((s) => s.frames)
   const fps = useCreateStore((s) => s.fps)
+  // 2.5.8 specialized-intent inputs (readiness for the Create button).
+  const characterTab = useCreateStore((s) => s.characterTab)
+  const trainImages = useCreateStore((s) => s.trainImages)
+  const selectedCharacter = useCreateStore((s) => s.selectedCharacter)
+  const audioInput = useCreateStore((s) => s.audioInput)
+  const voiceFromJob = useCreateStore((s) => s.voiceFromJob)
+  const videoInput = useCreateStore((s) => s.videoInput)
+  const extendSource = useCreateStore((s) => s.extendSource)
+  const musicDuration = useCreateStore((s) => s.musicDuration)
   const { generate, cancel, quota } = useCreateExp()
 
   // The Create button turns into Cancel in place — a double-click's second
@@ -59,26 +71,45 @@ export function Composer({ onOpenAdvanced }: Props) {
     cancel()
   }, [cancel])
 
-  const needPrompt = meta.needsPrompt
   // Single-purpose endpoints (cutout/upscale/eraser): no prompt, no
   // generation knobs, no model choice — just the input (+ mask/resolution).
   const isUtility = meta.id === 'removebg' || meta.id === 'upscale' || meta.id === 'eraser'
-  const { kind: intentKind, op: intentOp } = intentToJob(intent)
+  // 2.5.8 categories with their own composer surfaces + input contracts.
+  const special =
+    intent === 'character' || intent === 'lipsync' || intent === 'music' ||
+    intent === 'extend' || intent === 'motion'
+  const characterUse = intent === 'character' && characterTab === 'use'
+  let { kind: intentKind, op: intentOp } = intentToJob(intent)
+  if (characterUse) {
+    // The use-surface is a plain image generate with the character attached.
+    intentKind = 'image'
+    intentOp = 'generate'
+  }
+  // The prompt field shows wherever the run consumes one — that's the meta
+  // flag, plus Character-Studio's use-surface (train has no prompt).
+  const needPrompt = meta.needsPrompt || characterUse
   // Gate on the exact run's cost (model + op + clip length), the same figure
   // the CreditsMeter shows — quota.costs[kind] is only the tier's
   // representative per-kind number and would mis-gate utility ops / pricier
   // models.
-  const pickedModel =
-    (intentKind === 'video' ? cloudVideoModel : cloudImageModel) || defaultCloudModel(intentKind).id
+  const pickedModel = characterUse
+    ? 'flux-schnell-lora'
+    : special
+      ? cloudOpModel
+      : (intentKind === 'video' ? cloudVideoModel : cloudImageModel) ||
+        defaultCloudModel(intentKind)?.id || ''
   const runSeconds =
-    intentKind === 'video' && (intentOp === 'generate' || intentOp === 'animate') && fps > 0
-      ? frames / fps
-      : undefined
+    intentOp === 'music'
+      ? musicDuration
+      : intentKind === 'video' && (intentOp === 'generate' || intentOp === 'animate') && fps > 0
+        ? frames / fps
+        : undefined
+  const costFallback = quota?.costs[intentKind === 'audio' ? 'image' : intentKind] ?? 0
   const creditsOk =
     backend !== 'cloud' ||
     (quota != null &&
       quota.remaining.credits >=
-        runCredits(intentKind, intentOp, pickedModel, runSeconds, quota.costs[intentKind], targetResolution))
+        runCredits(intentKind, intentOp, pickedModel, runSeconds, costFallback, targetResolution))
   // Match useCloudCreate's submit-time edit fallback so the Neg gate reflects
   // the model the run actually uses, not a t2i model still in the picker.
   const runModel =
@@ -87,9 +118,25 @@ export function Composer({ onOpenAdvanced }: Props) {
   // hide the toggle (and the collapsed field) where it would be silently
   // dropped, like the other dead knobs on cloud.
   const negSupported = backend !== 'cloud' || cloudModelById(runModel)?.negative_prompt === true
+  // Per-intent readiness for the 2.5.8 categories (mirrors useCloudCreate's
+  // submit-time checks so the button never invites a doomed run).
+  const lipsyncNeedsClip =
+    intent === 'lipsync' &&
+    cloudModelById(modelForOp('video', 'lipsync', cloudOpModel))?.lipsync_source === 'video'
+  const specialReady =
+    intent === 'character'
+      ? (characterUse ? !!selectedCharacter : trainImages.length >= 4)
+      : intent === 'lipsync'
+        ? (!!audioInput || !!voiceFromJob) && (lipsyncNeedsClip ? !!videoInput : !!source)
+        : intent === 'extend'
+          ? !!extendSource
+          : intent === 'motion'
+            ? !!source && !!videoInput
+            : true
   const canGenerate =
     (!needPrompt || prompt.trim().length > 0) &&
     (!meta.needsSource || !!source) &&
+    specialReady &&
     creditsOk
 
   return (
@@ -99,22 +146,23 @@ export function Composer({ onOpenAdvanced }: Props) {
     // exact SAME height across all tabs, not just within one.
     <div className="shrink-0 px-4 pb-4 pt-2 min-h-[192px] flex flex-col justify-end">
       <div className="mx-auto w-full max-w-[760px] space-y-2.5">
-        {!isUtility && <QuickControls />}
+        {!isUtility && !special && <QuickControls />}
+        {special && <SpecialControls intent={intent} />}
 
         <div className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors">
-          {meta.needsPrompt && (
+          {needPrompt && (
             <div className="px-3.5 pt-3">
               <PromptField
                 value={prompt}
                 onChange={setPrompt}
-                placeholder={meta.placeholder}
+                placeholder={characterUse ? 'Describe the scene for your character…' : meta.placeholder}
                 onSubmit={() => canGenerate && !isGenerating && guardedGenerate()}
               />
             </div>
           )}
 
           <AnimatePresence>
-            {showNegative && meta.needsPrompt && negSupported && (
+            {showNegative && needPrompt && negSupported && (
               <motion.div
                 initial={{ height: 0, opacity: 0 }}
                 animate={{ height: 'auto', opacity: 1 }}
@@ -133,7 +181,7 @@ export function Composer({ onOpenAdvanced }: Props) {
             )}
           </AnimatePresence>
 
-          {!meta.needsPrompt && (
+          {!needPrompt && (
             <div className="px-3.5 py-3 t-body text-gray-500">
               {noPromptHint(meta.id)}
             </div>
@@ -141,7 +189,7 @@ export function Composer({ onOpenAdvanced }: Props) {
 
           {/* Action bar */}
           <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-white/[0.05]">
-            {meta.needsPrompt && negSupported && (
+            {needPrompt && negSupported && (
               <button
                 onClick={toggleNegative}
                 className={cn('t-control px-2 h-[var(--control-h-sm)] rounded-md transition-colors', showNegative ? 'bg-white/10 text-gray-200' : 'text-gray-500 hover:text-gray-300 hover:bg-white/[0.05]')}
@@ -150,7 +198,7 @@ export function Composer({ onOpenAdvanced }: Props) {
                 Neg
               </button>
             )}
-            {meta.needsPrompt && <PromptHistory onPick={setPrompt} />}
+            {needPrompt && <PromptHistory onPick={setPrompt} />}
             <div className="flex-1" />
             {/* The backend axis moved to the global header switch (2.5.7) —
                 the Composer just reflects it via the CreditsMeter. */}
@@ -197,6 +245,12 @@ function noPromptHint(id: CreateIntent): string {
       return 'No prompt needed — just hit Create to enhance the image.'
     case 'eraser':
       return 'No prompt needed — paint a mask over the object to remove, then hit Create.'
+    case 'character':
+      return 'Add 4-30 photos of one person or character above, pick a trigger word, then hit Create to train.'
+    case 'lipsync':
+      return 'Add the portrait (or clip) and a voice above, then hit Create to make it speak.'
+    case 'motion':
+      return 'Add a character image and a driving dance/pose video above, then hit Create.'
     default:
       return 'No prompt needed — just hit Create to remove the background.'
   }

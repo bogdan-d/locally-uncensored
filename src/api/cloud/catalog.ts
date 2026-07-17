@@ -26,6 +26,9 @@ export interface CloudCatalog {
 }
 
 export async function getCatalog(): Promise<CloudCatalog> {
-  const res = await cloudFetch('/api/jobs/catalog')
+  // v=2: this build understands op-specialized models (trainers, lipsync,
+  // voice, music, extend, motion) — without the flag the server serves only
+  // the classic list so pre-2.5.8 clients never mis-list them.
+  const res = await cloudFetch('/api/jobs/catalog?v=2')
   return jsonOrError<CloudCatalog>(res)
 }

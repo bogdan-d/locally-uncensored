@@ -20,8 +20,20 @@ export interface CloudJobParams {
   grow_mask_by?: number
   source_path?: string
   mask_path?: string
-  source_url?: string // video enhance: URL of the clip to upscale
+  source_url?: string // video enhance/extend: URL of the clip to re-process
   target_resolution?: string // upscale target (image 2k|4k|8k, video 720p|1080p)
+  // ── 2.5.8 categories ──
+  audio_path?: string // lipsync speech / voice-clone reference (staged upload)
+  audio_url?: string // lipsync speech from a prior OWN render (tts/music result)
+  video_path?: string // lipsync base clip / motion driving video (staged upload)
+  image_paths?: string[] // character training set (4-30 staged uploads)
+  duration?: number // music track seconds (billed per second)
+  lyrics?: string // music: optional lyrics
+  voice?: string // tts: named voice
+  voice_description?: string // tts voice-design
+  trigger_word?: string // character training
+  name?: string // character shelf label
+  loras?: { id: string; scale?: number }[] // OWN user_loras rows — server resolves to URLs
 }
 
 export interface CloudJobSubmit {
@@ -58,12 +70,17 @@ export interface CloudMe {
   }
 }
 
-/** Stage a source image or mask; returns the render-inputs storage path.
+/** Stage an input; returns the render-inputs storage path. Roles: 'source' /
+ *  'mask' (images), and since 2.5.8 'train' (one character-training image per
+ *  call), 'audio' (speech / voice reference) and 'video' (base/driving clip).
  *  Sends the raw bytes (role in the query) rather than multipart/form-data:
  *  WKWebView's fetch fails a cross-origin FormData(Blob) body with a bare
  *  "Load failed", which broke every source-needing op (edit/removebg/eraser/
  *  upscale/animate). An ArrayBuffer body serialises fine. */
-export async function uploadInput(file: Blob, role: 'source' | 'mask'): Promise<string> {
+export async function uploadInput(
+  file: Blob,
+  role: 'source' | 'mask' | 'train' | 'audio' | 'video',
+): Promise<string> {
   const body = await file.arrayBuffer()
   const res = await cloudFetch(`/api/jobs/upload?role=${role}`, {
     method: 'POST',

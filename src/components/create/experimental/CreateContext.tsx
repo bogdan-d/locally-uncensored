@@ -21,6 +21,14 @@ interface CreateExpValue {
   cancel: () => void | Promise<void>
   /** Video super-resolution on a finished cloud render (Lightbox "Enhance"). */
   enhanceVideo: (item: GalleryItem, targetResolution?: '720p' | '1080p') => Promise<void>
+  /** Talking-character voice maker (qwen3-tts) — lands an audio gallery item
+   *  and pre-selects it as the lipsync voice. Cloud-only. */
+  makeVoice: (opts: {
+    text: string
+    mode: 'speak' | 'design'
+    voice?: string
+    description?: string
+  }) => Promise<void>
   /** ComfyUI /object_info sampler + scheduler names (fallback lists until loaded). */
   samplerList: string[]
   schedulerList: string[]
@@ -272,6 +280,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
     // run keeps going (a cloud job keeps billing; a local job keeps rendering).
     cancel: () => (hasActiveCloudRun() ? cloud.cancel() : cancel()),
     enhanceVideo: cloud.enhanceVideo,
+    makeVoice: cloud.makeVoice,
     samplerList, schedulerList, loraList, vaeList,
     connected, modelsLoaded, modelLoadError, comfyOnCpu, installCapability, installModelBundle,
     cloudAvailable, quota, refreshQuota,

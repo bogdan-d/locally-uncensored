@@ -53,8 +53,34 @@ export async function refreshCatalog(): Promise<void> {
   }
 }
 
+// Classic per-kind list (the Image / Video pickers): op-specialized 2.5.8
+// models (`ops` set) are excluded — they live behind their own intents via
+// modelsForOp below.
 export function cloudModelsFor(kind: RenderKind): CloudModel[] {
-  return useCloudCatalogStore.getState().models.filter((m) => m.kind === kind)
+  return useCloudCatalogStore.getState().models.filter((m) => m.kind === kind && !m.ops)
+}
+
+// Does this catalog entry serve this op? Classic models (no `ops`) keep their
+// flag contract: generate always, edit per flag, animate = video i2v.
+export function cloudModelSupportsOp(m: CloudModel, op: RenderOp): boolean {
+  if (m.ops) return m.ops.includes(op)
+  if (op === 'generate') return m.kind !== 'video' || m.t2v !== false
+  if (op === 'edit') return m.edit === true
+  if (op === 'animate') return m.kind === 'video' && m.i2v !== false
+  return false
+}
+
+/** The pickers behind the 2.5.8 intents; 'generate' + kind image restricted to
+ *  LoRA-capable models yields the Character-Studio generation list. */
+export function modelsForOp(kind: RenderKind, op: RenderOp): CloudModel[] {
+  return useCloudCatalogStore.getState().models.filter(
+    (m) => m.kind === kind && cloudModelSupportsOp(m, op),
+  )
+}
+
+/** Character-Studio generation endpoints (accept `params.loras`). */
+export function loraGenModels(): CloudModel[] {
+  return useCloudCatalogStore.getState().models.filter((m) => m.lora === true)
 }
 
 export function defaultCloudModel(kind: RenderKind): CloudModel {
@@ -80,11 +106,11 @@ export function defaultEditModel(): CloudModel | undefined {
 // cached before this field existed still lists every clip model; only an
 // explicit false hides a capability-restricted model from that picker.
 export function t2vModels(): CloudModel[] {
-  return useCloudCatalogStore.getState().models.filter((m) => m.kind === 'video' && m.t2v !== false)
+  return useCloudCatalogStore.getState().models.filter((m) => m.kind === 'video' && !m.ops && m.t2v !== false)
 }
 
 export function i2vModels(): CloudModel[] {
-  return useCloudCatalogStore.getState().models.filter((m) => m.kind === 'video' && m.i2v !== false)
+  return useCloudCatalogStore.getState().models.filter((m) => m.kind === 'video' && !m.ops && m.i2v !== false)
 }
 
 /** The model a run will really use for this op — coerces a leftover/incapable
@@ -94,6 +120,12 @@ export function modelForOp(kind: RenderKind, op: RenderOp, pickedId: string): st
   if (op === 'edit') return isEditCapable(pickedId) ? pickedId : (defaultEditModel()?.id ?? pickedId)
   if (kind === 'video' && (op === 'generate' || op === 'animate')) {
     const list = op === 'animate' ? i2vModels() : t2vModels()
+    return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? pickedId)
+  }
+  // 2.5.8 op-specialized intents: coerce a stale pick onto a model that
+  // actually serves the op (same rule the pickers apply).
+  if (op === 'lipsync' || op === 'extend' || op === 'motion' || op === 'music' || op === 'tts' || op === 'lora-train') {
+    const list = modelsForOp(kind, op)
     return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? pickedId)
   }
   return pickedId
@@ -115,6 +147,14 @@ export function runCredits(
   resolution?: string,
 ): number {
   const { ops } = useCloudCatalogStore.getState()
+  // Music bills per second: catalog per_s × the requested duration (60 s
+  // default, mirroring the server's MUSIC_SECONDS fallback).
+  if (op === 'music') {
+    const m = cloudModelById(modelForOp(kind, op, pickedModel))
+    const perS = m?.credits?.per_s
+    if (perS === undefined) return m?.credits?.base ?? fallback
+    return Math.ceil(perS * (seconds && seconds > 0 ? seconds : 60))
+  }
   if (op === 'removebg' || op === 'eraser' || op === 'upscale') {
     // Video upscale is per-second with a floor; the server defaults to 8 s
     // when the submit carries no clip length (mirrors mediaCredits).

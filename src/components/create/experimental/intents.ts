@@ -1,4 +1,7 @@
-import { Image as ImageIcon, Wand2, Scissors, Video, Film, Maximize2, Eraser } from 'lucide-react'
+import {
+  Image as ImageIcon, Wand2, Scissors, Video, Film, Maximize2, Eraser,
+  UserRound, Mic, Music, FastForward, PersonStanding,
+} from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { CreateIntent } from '../../../stores/createStore'
 
@@ -82,6 +85,54 @@ export const INTENTS: IntentMeta[] = [
     needsSource: true, needsPrompt: true, allowsMask: false, isVideo: true,
     requiresModels: 'video',
     examples: ['slow zoom in, subtle parallax', 'hair and clothes moving in the wind'],
+  },
+
+  // ── 2.5.8 hosted categories (WaveSpeed, 2026-07-17 David). All cloudOnly;
+  // their composer surfaces own the extra inputs (training set, audio, driving
+  // video, extend pick), so needsSource/needsPrompt describe only what the
+  // shared composer scaffolding should render. ────────────────────────────────
+  {
+    id: 'character', label: 'Character Studio', short: 'Character', icon: UserRound,
+    placeholder: 'Describe the scene for your character…',
+    needsSource: false, needsPrompt: false, allowsMask: false, isVideo: false,
+    cloudOnly: true,
+    examples: [],
+  },
+  {
+    // Inputs (portrait or base clip + speech audio) are composer chips, not
+    // the Stage source slot — which input the model needs depends on the
+    // picked endpoint (photo-avatar vs re-sync).
+    id: 'lipsync', label: 'Talking Character', short: 'Lipsync', icon: Mic,
+    placeholder: '',
+    needsSource: false, needsPrompt: false, allowsMask: false, isVideo: true,
+    cloudOnly: true,
+    examples: [],
+  },
+  {
+    id: 'music', label: 'Music', short: 'Music', icon: Music,
+    placeholder: 'Describe the track — genre, mood, tempo, instruments…',
+    needsSource: false, needsPrompt: true, allowsMask: false, isVideo: false,
+    cloudOnly: true,
+    examples: [
+      'dreamy lo-fi hip hop, vinyl crackle, mellow keys',
+      'epic orchestral trailer, driving percussion',
+      'upbeat synthwave, retro 80s arps',
+    ],
+  },
+  {
+    id: 'extend', label: 'Extend Video', short: 'Extend', icon: FastForward,
+    placeholder: 'Describe how the clip should continue…',
+    needsSource: false, needsPrompt: true, allowsMask: false, isVideo: true,
+    cloudOnly: true,
+    examples: [],
+  },
+  {
+    // Character image + driving video are composer chips (see lipsync note).
+    id: 'motion', label: 'Motion Control', short: 'Motion', icon: PersonStanding,
+    placeholder: 'Optional: extra style/scene hints…',
+    needsSource: false, needsPrompt: false, allowsMask: false, isVideo: true,
+    cloudOnly: true,
+    examples: [],
   },
 ]
 
