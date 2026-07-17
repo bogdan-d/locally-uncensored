@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How to Run Kimi K3 (2026): API, OpenRouter, App, and Local | Locally Uncensored</title>
+<meta name="description" content="How to run Kimi K3 in July 2026: Moonshot API setup with code, OpenRouter in one line, the Kimi app, and the honest math on running the 2.8T model locally.">
+<meta name="keywords" content="how to run kimi k3, kimi k3 api, kimi k3 openrouter, kimi k3 setup, run kimi k3, kimi k3 tutorial, kimi k3 python, moonshot api kimi k3">
+<meta property="og:title" content="How to Run Kimi K3: Every Option That Actually Works">
+<meta property="og:description" content="How to run Kimi K3 in July 2026: Moonshot API setup with code, OpenRouter in one line, the Kimi app, and the honest math on running the 2.8T model locally.">
+<meta property="og:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<meta property="og:url" content="https://locallyuncensored.com/blog/how-to-run-kimi-k3.html">
+<meta property="og:type" content="article">
+<meta property="article:published_time" content="2026-07-17">
+<meta property="article:author" content="PurpleDoubleD">
+<meta property="article:tag" content="Model Guide">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How to Run Kimi K3: Every Option That Actually Works">
+<meta name="twitter:description" content="How to run Kimi K3 in July 2026: Moonshot API setup with code, OpenRouter in one line, the Kimi app, and the honest math on running the 2.8T model locally.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
+<link rel="canonical" href="https://locallyuncensored.com/blog/how-to-run-kimi-k3.html">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="icon" href="../favicon.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"How to Run Kimi K3: Every Option That Actually Works","description":"Practical guide to running Kimi K3: the Moonshot API (OpenAI-compatible, $3/$15 per million tokens), OpenRouter, the Kimi app, and why local hosting waits for the July 27 weights release. Includes working code and hardware math.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-07-17","dateModified":"2026-07-17","inLanguage":"en","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/how-to-run-kimi-k3.html"},"keywords":"how to run kimi k3, kimi k3 api, kimi k3 openrouter, kimi k3 setup, run kimi k3, kimi k3 tutorial, kimi k3 python, moonshot api kimi k3"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"How can I use Kimi K3 right now?","acceptedAnswer":{"@type":"Answer","text":"Three ways: the Moonshot open platform API (OpenAI-compatible, $3 per million input tokens and $15 per million output), OpenRouter (same model, one line of code changed, requests still forwarded to Moonshot), or the Kimi app and Kimi Code with a subscription. Local hosting is not possible yet because the weights have not been released."}},{"@type":"Question","name":"Can I run Kimi K3 on my own PC?","acceptedAnswer":{"@type":"Answer","text":"Not realistically. Kimi K3 is a ~2.8 trillion parameter Mixture-of-Experts model; even at aggressive 4-bit quantization the weights alone are well over a terabyte, which is server territory, not a gaming PC. For local use, run smaller open-weight models like Qwen or GLM in a local AI studio instead."}},{"@type":"Question","name":"How much does the Kimi K3 API cost?","acceptedAnswer":{"@type":"Answer","text":"$3 per million input tokens ($0.30 on cache hits) and $15 per million output tokens, reasoning tokens included. That is cheaper than most Western frontier models but noticeably pricier than the Kimi K2 series was at launch."}},{"@type":"Question","name":"When will Kimi K3 open weights be released?","acceptedAnswer":{"@type":"Answer","text":"Moonshot has promised the full weights on Hugging Face by July 27, 2026. Once they land, independent hosts can serve the model, prices typically drop, and quantized community versions usually follow within days."}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/assets/lu.css">
+<script defer src="/assets/lu.js"></script>
+  <script data-goatcounter="https://lu-uncensored.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+</head>
+<body>
+
+<nav class="lu-nav">
+  <a class="lu-nav-brand" href="/" aria-label="Locally Uncensored">
+    <span class="lu-mono" data-mono="nav" data-size="40" aria-hidden="true"></span>
+    <span class="lu-nav-word">Locally <span class="accent">Uncensored</span></span>
+  </a>
+  <div class="lu-nav-links" id="lu-nav-links">
+    <a class="lu-nav-link" href="/">Home</a>
+    <a class="lu-nav-link" href="/blog/">Blog</a>
+    <a class="lu-nav-link" href="/guide/">Guide</a>
+    <a class="lu-nav-link" href="/remote-access/">Remote</a>
+  </div>
+  <div class="lu-nav-right">
+    <a class="lu-nav-icon" href="https://github.com/PurpleDoubleD/locally-uncensored" title="GitHub" aria-label="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.05-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.11-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.65 1.66.24 2.88.12 3.18.77.84 1.23 1.91 1.23 3.22 0 4.61-2.8 5.63-5.48 5.92.43.37.81 1.1.81 2.22 0 1.6-.01 2.9-.01 3.29 0 .32.21.7.82.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span class="lu-nav-badge">908&#8202;⭐</span></a>
+    <a class="lu-nav-icon discord" href="https://locallyuncensored.com/discord" target="_blank" rel="noopener" title="Discord" aria-label="Discord"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.32 4.37A19.8 19.8 0 0 0 15.45 3c-.2.36-.44.85-.6 1.23a18.3 18.3 0 0 0-5.7 0c-.16-.38-.4-.87-.6-1.23a19.7 19.7 0 0 0-4.87 1.37C.55 8.9-.32 13.3.11 17.63a19.9 19.9 0 0 0 6 3.03c.48-.66.9-1.36 1.27-2.1-.7-.26-1.36-.58-1.99-.96.17-.12.33-.25.49-.38a14.2 14.2 0 0 0 12.24 0c.16.13.32.26.49.38-.63.38-1.3.7-2 .96.37.74.8 1.44 1.27 2.1a19.8 19.8 0 0 0 6-3.03c.5-5.03-.85-9.39-3.55-13.26ZM8.02 15c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.09-2.15-2.42 0-1.34.95-2.43 2.15-2.43 1.2 0 2.17 1.09 2.15 2.43 0 1.33-.94 2.42-2.15 2.42Z"/></svg><span class="lu-nav-badge">300+&#8202;<span style="font-size:0.715em">🟢</span></span></a>
+    <span class="lu-nav-sep"></span>
+    <div class="switch" id="theme-switch" role="button" aria-label="Toggle theme"></div>
+    <a class="lu-nav-dl" href="https://github.com/PurpleDoubleD/locally-uncensored/releases/latest"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Download</a>
+    <button type="button" class="lu-nav-toggle" aria-label="Menu"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  </div>
+</nav>
+<div class="container lu-doc">
+  <div class="breadcrumb"><a href="../">Locally Uncensored</a> / <a href="./">Blog</a> / This Post</div>
+
+  <div class="post-meta">
+    <span class="post-tag">Model Guide</span>
+    <span>July 17, 2026</span>
+    <span>·</span>
+    <span>8 min read</span>
+  </div>
+
+  <article>
+    <h1>How to Run Kimi K3: Every Option That Actually Works</h1>
+
+    <p>Kimi K3 launched on July 16, 2026, and the first question everyone asks after the benchmarks is the practical one: <strong>how do I actually run this thing?</strong> Here is every working option as of today, with real setup steps, real prices, and the honest answer on local hosting. (New to the model itself? Start with our <a href="kimi-k3-explained.html">Kimi K3 explainer</a>.)</p>
+
+    <h2>Your Options at a Glance</h2>
+
+    <table>
+      <thead><tr><th>Option</th><th>Status today</th><th>Cost</th><th>Best for</th></tr></thead>
+      <tbody>
+        <tr><td>Moonshot API</td><td>Live</td><td>$3 / M input, $15 / M output</td><td>Developers, agents, coding tools</td></tr>
+        <tr><td>OpenRouter</td><td>Live (routes to Moonshot)</td><td>Same + OpenRouter margin</td><td>Apps already on OpenRouter</td></tr>
+        <tr><td>Kimi app / Kimi Code</td><td>Live</td><td>Subscription (¥199 entry tier)</td><td>Chat users, no code</td></tr>
+        <tr><td>Your own hardware</td><td>Not yet — weights due July 27</td><td>—</td><td>Nobody with a consumer PC (see below)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Option 1: The Moonshot API (the direct route)</h2>
+
+    <p>Moonshot's open platform exposes K3 through an OpenAI-compatible API, so any tool or library that speaks the OpenAI format works with three changed values: the base URL, the API key, and the model name.</p>
+
+    <ol>
+      <li>Create an account on the Moonshot open platform and generate an API key.</li>
+      <li>Point your client at Moonshot's endpoint.</li>
+      <li>Use the K3 model ID exactly as listed in your Moonshot console (the launch variants are K3 Max and K3 Swarm Max).</li>
+    </ol>
+
+    <pre><code>from openai import OpenAI
+
+client = OpenAI(
+    api_key="YOUR_MOONSHOT_KEY",
+    base_url="https://api.moonshot.ai/v1",
+)
+
+resp = client.chat.completions.create(
+    model="kimi-k3-max",  # check your console for the exact ID
+    messages=[{"role": "user", "content": "Summarize this repo's architecture."}],
+)
+print(resp.choices[0].message.content)</code></pre>
+
+    <p>Notes from the fine print: the 1M-token context window is real but you pay for what you fill; cached input drops to $0.30 per million, which matters a lot for agent loops that resend the same system prompt; and reasoning tokens are billed as output. If you are wiring K3 into a coding agent, the cache discount is the difference between a reasonable bill and a scary one.</p>
+
+    <h2>Option 2: OpenRouter (one line of code)</h2>
+
+    <p>OpenRouter lists Kimi K3, so if your app already uses it, switching is just a model-string change. One thing to be clear-eyed about: right now <strong>every OpenRouter request for K3 is forwarded to Moonshot's own servers</strong>, because nobody else has the weights. You get OpenRouter's unified billing and fallback plumbing, but no second provider, no price competition, and no privacy distance from Moonshot. That changes only after the weights release.</p>
+
+    <h2>Option 3: The Kimi App and Kimi Code</h2>
+
+    <p>If you just want to talk to the model, the Kimi app and Kimi Code ship K3 behind a subscription, with a ¥199 tier as the entry point. This is the zero-setup route, with the usual trade: your conversations live on someone else's servers, under someone else's terms and filters.</p>
+
+    <h2>Option 4: Running Kimi K3 Locally (the honest math)</h2>
+
+    <p>Short version: <strong>you cannot run K3 locally today, and after July 27 you still almost certainly will not want to try on consumer hardware.</strong> The weights are not public yet, and when they land, the arithmetic is brutal: ~2.8 trillion parameters means that even at aggressive 4-bit quantization the weights alone are well over a terabyte. That is multi-server, multi-GPU territory. We ran the full numbers in <a href="can-you-run-kimi-k3-locally.html">Can You Run Kimi K3 Locally?</a> — the summary is: no gaming PC, no Mac Studio, no single workstation gets there.</p>
+
+    <p>What the weights release <em>does</em> change is who can serve the model. Independent hosts (DeepInfra and friends) can spin it up, prices typically fall under competition, and the OpenRouter listing stops being a single-upstream pass-through. If you want K3 without a Moonshot account, that is the moment to watch.</p>
+
+    <h2>What to Run Locally While You Wait</h2>
+
+    <p>The realistic local play is not a 2.8T flagship — it is the strong mid-size open models that fit real hardware: Qwen 3.6, GLM, Gemma, and the pruned or distilled variants the community builds within weeks of every big release (K2 got them; K3 will too). If you compared the family already, our <a href="kimi-k3-vs-kimi-k2-6.html">K3 vs K2.6 breakdown</a> covers which capabilities actually need the big model.</p>
+
+    <p><strong>Locally Uncensored is a plug-and-play local AI studio for Windows: one installer gives you uncensored chat, image and video generation on your own PC, with no command line, no Docker, and no cloud.</strong> It auto-detects 12 local backends or ships its own engine, recommends models that fit your VRAM, and downloads them in one click. When K3 distills appear, they will show up the same way: click, download, chat.</p>
+
+    <h2>The Timeline That Matters</h2>
+
+    <table>
+      <thead><tr><th>Date</th><th>What changes</th></tr></thead>
+      <tbody>
+        <tr><td>July 16, 2026</td><td>K3 launch: Moonshot API, Kimi app, OpenRouter (single upstream)</td></tr>
+        <tr><td>By July 27, 2026</td><td>Promised open-weights release on Hugging Face → independent hosts, price competition</td></tr>
+        <tr><td>Weeks after</td><td>Community quantizations and distills → the first K3-family models real hardware can run</td></tr>
+      </tbody>
+    </table>
+  </article>
+
+  <div class="post-footer">
+    <p>Want capable open models running on your own PC today, no terminal required?</p>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored" class="cta-btn" target="_blank">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      Get Started on GitHub
+    </a>
+  </div>
+</div>
+
+<footer>
+  <div class="footer-row footer-meta"><span>&copy; 2026 &middot; Locally Uncensored &middot; AGPL-3.0</span></div>
+  <div class="footer-row footer-links">
+    <a href="https://locallyuncensored.com/blog/">Blog</a>
+    <a href="https://locallyuncensored.com/guide/">Guide</a>
+    <a href="https://locallyuncensored.com/remote-access/">Remote access</a>
+    <a href="https://locallyuncensored.com/discord" target="_blank" rel="noopener">Discord</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/discussions">Discussions</a>
+    <a href="https://github.com/PurpleDoubleD/locally-uncensored/issues">Issues</a>
+    <a href="https://reddit.com/user/GroundbreakingMall54">Reddit</a>
+    <a href="https://www.linkedin.com/in/david-drobnitza-locallyuncensored/" rel="me noopener" target="_blank">LinkedIn</a>
+  </div>
+</footer>
+</body>
+</html>

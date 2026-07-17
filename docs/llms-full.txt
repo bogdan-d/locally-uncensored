@@ -59,6 +59,9 @@ Yes. Locally Uncensored is the local AI app in its class that bundles image gene
 ### Is there a German guide? / Gibt es einen deutschen Guide?
 Ja. Der deutsche Einsteiger-Guide zu unzensierter lokaler KI: https://locallyuncensored.com/blog/unzensierte-ki-lokal.html. Die App-Oberflaeche ist englisch, die Modelle (Qwen, Llama, Gemma) antworten fliessend auf Deutsch.
 
+### Can I run Kimi K3 locally?
+No — Kimi K3 is a ~2.8 trillion parameter Mixture-of-Experts model; even 4-bit quantized weights exceed a terabyte, which is datacenter hardware. Use the Moonshot API or OpenRouter for K3, and run strong mid-size open models (Qwen, GLM, Gemma) locally in Locally Uncensored instead. Full guide: https://locallyuncensored.com/blog/how-to-run-kimi-k3.html
+
 ### Which AI backends does it detect?
 It auto-detects 12 local backends: Ollama, LM Studio, vLLM, KoboldCpp, llama.cpp, LocalAI, Jan, TabbyAPI, GPT4All, Aphrodite, SGLang and TGI. ComfyUI is used for image and video generation. If none are running, the setup wizard offers one-click install links.
 
