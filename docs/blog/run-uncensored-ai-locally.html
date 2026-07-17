@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Uncensored AI, Locally: Free Chat, Image & Video in One App — Locally Uncensored</title>
-<meta name="description" content="Generate anything — text, images, video. Locally. Uncensored. Practical guide to abliterated models, Ollama, and ComfyUI setup. No cloud, no filters, no limits.">
+<title>Run Uncensored AI Locally: Free Chat, Image and Video</title>
+<meta name="description" content="Generate anything: text, images, video. Locally. Uncensored. Practical guide to abliterated models, Ollama, and ComfyUI. No cloud, no filters, no limits.">
 <meta name="keywords" content="run uncensored AI locally, local AI app, ollama comfyui combined, uncensored local AI, abliterated models, local image generation, local video generation">
 <meta property="og:title" content="How to Run Uncensored AI Locally: Chat, Images & Video in One App">
 <meta property="og:description" content="Generate anything — text, images, video. Locally. Uncensored. Practical guide to running AI on your own hardware.">
@@ -22,12 +22,15 @@
 <meta name="twitter:description" content="Run uncensored AI locally — chat, images, and video in one open-source app.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png">
 <link rel="canonical" href="https://locallyuncensored.com/blog/run-uncensored-ai-locally.html">
+<link rel="alternate" hreflang="en" href="https://locallyuncensored.com/blog/run-uncensored-ai-locally.html">
+<link rel="alternate" hreflang="de" href="https://locallyuncensored.com/blog/unzensierte-ki-lokal.html">
+<link rel="alternate" hreflang="x-default" href="https://locallyuncensored.com/blog/run-uncensored-ai-locally.html">
 <meta name="robots" content="index, follow">
 <meta name="theme-color" content="#0a0a0a">
 <link rel="icon" href="../favicon.png">
 <!-- Privacy: No external fonts loaded. Using system fonts. -->
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"BlogPosting","headline":"How to Run Uncensored AI Locally: Chat, Images & Video in One App","description":"A practical guide to running uncensored AI on your own hardware. Learn about abliterated models, set up Locally Uncensored with Ollama and ComfyUI, and generate text, images, and video — all offline.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-03-29","dateModified":"2026-03-29","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/run-uncensored-ai-locally.html"},"keywords":"run uncensored AI locally, local AI app, ollama comfyui combined, uncensored local AI, abliterated models"}
+{"@context":"https://schema.org","@type":"BlogPosting","headline":"How to Run Uncensored AI Locally: Chat, Images & Video in One App","description":"A practical guide to running uncensored AI on your own hardware. Learn about abliterated models, set up Locally Uncensored with Ollama and ComfyUI, and generate text, images, and video — all offline.","image":"https://raw.githubusercontent.com/PurpleDoubleD/locally-uncensored/master/docs/social-preview.png","datePublished":"2026-03-29","dateModified":"2026-07-17","author":{"@type":"Person","name":"PurpleDoubleD","url":"https://github.com/PurpleDoubleD"},"publisher":{"@type":"Organization","name":"Locally Uncensored","url":"https://locallyuncensored.com/"},"mainEntityOfPage":{"@type":"WebPage","@id":"https://locallyuncensored.com/blog/run-uncensored-ai-locally.html"},"keywords":"run uncensored AI locally, local AI app, ollama comfyui combined, uncensored local AI, abliterated models"}
 </script>
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[{"@type":"Question","name":"What does \"uncensored\" actually mean in this context?","acceptedAnswer":{"@type":"Answer","text":"It means the AI models used don't have artificial content restrictions. They respond to all requests without refusals or disclaimers. This is achieved through abliterated model weights, not through prompt injection or jailbreaking. The models are structurally modified to remove refusal behavior."}},{"@type":"Question","name":"Is this legal?","acceptedAnswer":{"@type":"Answer","text":"Yes. Running open-weight AI models locally is completely legal. The models used (Llama 3.1, Mistral, Qwen, etc.) are released under permissive licenses that allow local use. You're responsible for what you do with the outputs, just like with any tool."}},{"@type":"Question","name":"Can I run this without an NVIDIA GPU?","acceptedAnswer":{"@type":"Answer","text":"For chat: absolutely. Ollama supports CPU inference, and Apple Silicon Macs get GPU acceleration via Metal. Chat models run fine on CPU, just slower. For image and video generation: you need an NVIDIA GPU with CUDA support (or an AMD GPU with ROCm on Linux). ComfyUI doesn't support CPU-only generation in any practical way."}},{"@type":"Question","name":"How much disk space do I need?","acceptedAnswer":{"@type":"Answer","text":"A minimal setup (one chat model) needs about 6 GB. If you add image generation models, plan for 15-25 GB depending on which checkpoints you download. Video models add another 8-10 GB. Everything is downloaded incrementally — start with chat and add generation models later."}},{"@type":"Question","name":"Can I use my own custom Ollama models or ComfyUI checkpoints?","acceptedAnswer":{"@type":"Answer","text":"Yes. The app auto-detects any model installed in Ollama and any checkpoint placed in ComfyUI's model directory. There's no lock-in to specific model sources."}},{"@type":"Question","name":"Does it phone home or collect telemetry?","acceptedAnswer":{"@type":"Answer","text":"No. Zero telemetry, zero analytics, zero network requests beyond what Ollama and ComfyUI need for their initial installation. Once set up, the entire stack runs on localhost. The code is AGPL-3.0 licensed and fully auditable on GitHub."}},{"@type":"Question","name":"How is this different from just running Ollama + ComfyUI separately?","acceptedAnswer":{"@type":"Answer","text":"You absolutely can run them separately — many people do. Locally Uncensored saves you the hassle of maintaining two separate tools, switching between browser tabs, and manually configuring ComfyUI workflows. It's a convenience layer that ties everything together with a unified UI, built-in personas, and one-click model management."}}]}
@@ -68,11 +71,15 @@
     <span class="post-tag">Guide</span>
     <span>March 29, 2025</span>
     <span>·</span>
+    <span>Updated July 17, 2026</span>
+    <span>·</span>
     <span>10 min read</span>
   </div>
 
   <article>
     <h1>How to Run Uncensored AI Locally: Chat, Images &amp; Video in One App</h1>
+
+    <p><strong>To run uncensored AI locally, you install open-weight models whose refusal training has been removed (abliterated models) on your own computer and run them through a free app like Locally Uncensored.</strong> Everything happens on your hardware: chat, image generation, and video generation, with no cloud account, no content filters, and no data leaving your machine.</p>
 
     <p>If you've spent any time with ChatGPT, Midjourney, or other cloud AI services, you've run into the walls. The "I can't help with that" responses. The content policies that treat every request like a potential crime. The nagging feeling that your conversations are being logged, reviewed, and used to train the next model.</p>
 
@@ -111,7 +118,7 @@
       <li><strong>Qwen 3 Abliterated</strong> — excellent for reasoning tasks and CJK languages</li>
       <li><strong>DeepSeek R1</strong> — chain-of-thought reasoning with visible thinking process</li>
     </ul>
-    <p>These models are hosted on Hugging Face and Ollama's registry, freely downloadable.</p>
+    <p>These models are hosted on Hugging Face and Ollama's registry, freely downloadable. For direct download links and a VRAM-by-model pick guide, see the <a href="/blog/abliterated-models-guide.html">abliterated models guide</a>.</p>
 
     <h2>Setting Up Locally Uncensored (Step by Step)</h2>
 
@@ -147,13 +154,13 @@ cd locally-uncensored</code></pre>
     </ul>
 
     <h3>Step 3: Start Chatting</h3>
-    <p>The app opens at <code>localhost:5173</code>. You'll see 25+ built-in personas ready to go — from a helpful coding assistant to creative writing characters. Pick one, or just start typing in the default chat.</p>
+    <p>The app opens at <code>localhost:5173</code>. You'll see 25+ built-in personas ready to go — from a helpful coding assistant to creative writing characters. Pick one, or just start typing in the default chat. For a deeper look at chat specifically, see the <a href="/blog/uncensored-ai-chat.html">uncensored AI chat guide</a>.</p>
 
     <h3>Step 4: Enable Image Generation (Optional)</h3>
     <p>Click the <strong>Create</strong> tab, then click <strong>Install ComfyUI</strong>. The app downloads and configures ComfyUI automatically — no manual node installation, no workflow files to hunt down. Once installed, you can generate images with models like FLUX.1 Schnell, Juggernaut XL, or any SDXL checkpoint.</p>
 
     <h3>Step 5: Enable Video Generation (Optional)</h3>
-    <p>With ComfyUI installed, you can also generate video using Wan 2.1 text-to-video. The app handles the ComfyUI workflow behind the scenes — you just type a prompt and hit generate. No node graph editing required.</p>
+    <p>With ComfyUI installed, you can also generate video using Wan 2.1 text-to-video. The app handles the ComfyUI workflow behind the scenes — you just type a prompt and hit generate. No node graph editing required. The <a href="/blog/uncensored-ai-video-locally.html">uncensored AI video guide</a> covers text-to-video and image-to-video in depth.</p>
 
     <p>The entire setup takes under 5 minutes (plus model download time, which depends on your internet speed).</p>
 
@@ -197,11 +204,11 @@ cd locally-uncensored</code></pre>
 
     <p>Let's be honest about the landscape. There are good tools out there, and the right choice depends on what you need.</p>
 
-    <p><strong>Open WebUI</strong> is the most popular Ollama frontend. It's well-built, has a large community, and handles chat well. But it requires Docker, only does text chat, and doesn't touch image or video generation. If all you need is a ChatGPT-like interface for local models, Open WebUI is solid. If you want the full <strong>Ollama ComfyUI combined</strong> experience — chat plus image and video generation — it doesn't cover that.</p>
+    <p><strong>Open WebUI</strong> is the most popular Ollama frontend. It's well-built, has a large community, and handles chat well. But it requires Docker, only does text chat, and doesn't touch image or video generation. If all you need is a ChatGPT-like interface for local models, Open WebUI is solid (<a href="/blog/locally-uncensored-vs-open-webui.html">full comparison</a>). If you want the full <strong>Ollama ComfyUI combined</strong> experience — chat plus image and video generation — it doesn't cover that.</p>
 
-    <p><strong>LM Studio</strong> has the best UX for downloading and running models. It's polished, easy to use, and doesn't require Ollama at all (it has its own inference engine). The downsides: it's closed source, chat-only, and doesn't support image or video generation.</p>
+    <p><strong>LM Studio</strong> has the best UX for downloading and running models. It's polished, easy to use, and doesn't require Ollama at all (it has its own inference engine). The downsides: it's closed source, chat-only, and doesn't support image or video generation (<a href="/blog/locally-uncensored-vs-lm-studio.html">full comparison</a>).</p>
 
-    <p><strong>SillyTavern</strong> is purpose-built for roleplay and character-based chat. It has deep character customization that Locally Uncensored doesn't match. But it's chat-only, has a steeper setup curve, and doesn't integrate with ComfyUI.</p>
+    <p><strong>SillyTavern</strong> is purpose-built for roleplay and character-based chat. It has deep character customization that Locally Uncensored doesn't match. But it's chat-only, has a steeper setup curve, and doesn't integrate with ComfyUI (<a href="/blog/locally-uncensored-vs-sillytavern.html">full comparison</a>).</p>
 
     <p><strong>ComfyUI</strong> itself is incredibly powerful for image and video generation, but it's a node-based workflow tool — not something you'd use for casual text-to-image generation. The learning curve is steep. Locally Uncensored uses ComfyUI as a backend but hides the complexity behind a simple prompt-and-generate interface.</p>
 
@@ -238,7 +245,7 @@ cd locally-uncensored</code></pre>
 cd locally-uncensored
 # Windows: setup.bat | macOS/Linux: ./setup.sh</code></pre>
 
-    <p>That's it. The setup script handles everything else.</p>
+    <p>That's it. The setup script handles everything else. If you would rather have a plain-language walkthrough with hardware advice, start with the <a href="/blog/how-to-run-ai-locally.html">5-minute beginner guide</a> or the <a href="/blog/best-uncensored-ai-models-2026.html">best uncensored models overview</a>.</p>
 
     <p>Check out the <a href="https://locallyuncensored.com/">landing page</a> for screenshots and feature details, or go straight to the <a href="https://github.com/PurpleDoubleD/locally-uncensored">GitHub repo</a> to browse the source.</p>
 
