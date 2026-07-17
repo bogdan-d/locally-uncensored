@@ -183,7 +183,17 @@ fn whisper_package_installed(state: &AppState) -> bool {
         return false;
     }
     let mut cmd = Command::new(&python);
-    cmd.args(["-c", "import faster_whisper"])
+    // Probe INSTALLABILITY with importlib.find_spec, NOT a full
+    // `import faster_whisper`. The real import pulls in ctranslate2 / onnxruntime
+    // / av and takes ~8 s warm (longer with a cold OS file cache), which on the
+    // first status check right after a cold relaunch blew past the cap below and
+    // made STT read as "not installed" until the next check — the #78 symptom,
+    // softened but not gone. find_spec answers "is the package present" in about
+    // 100 ms with no heavy import, so the badge is right on the very first probe.
+    cmd.args([
+        "-c",
+        "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('faster_whisper') else 1)",
+    ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
@@ -193,8 +203,8 @@ fn whisper_package_installed(state: &AppState) -> bool {
         Ok(c) => c,
         Err(_) => return false,
     };
-    // An ABSENT package fails in well under a second; a present one loads
-    // ctranslate2 (a few seconds cold). 10 s cap so status never hangs.
+    // find_spec returns in well under a second; the cap is kept purely so a
+    // wedged interpreter can never hang the status call.
     for _ in 0..100 {
         match child.try_wait() {
             Ok(Some(status)) => return status.success(),

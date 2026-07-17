@@ -54,7 +54,7 @@ pub fn piper_voice_paths(app: &tauri::AppHandle, voice: &str) -> Result<(PathBuf
     ))
 }
 
-/// Whether neural TTS is usable: `import piper` succeeds AND the DEFAULT voice
+/// Whether neural TTS is usable: the `piper` package is installed AND a voice
 /// model is present. The Settings badge + the chat SpeakerButton gate on this.
 #[tauri::command]
 pub fn tts_status(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<serde_json::Value, String> {
@@ -63,7 +63,15 @@ pub fn tts_status(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<s
     let mut piper_importable = false;
     if !python.is_empty() && crate::python::is_real_python(&python) {
         let mut cmd = Command::new(&python);
-        cmd.args(["-c", "import piper"]).stdout(Stdio::null()).stderr(Stdio::null());
+        // find_spec, not a full `import piper`, so the badge stays a cheap
+        // installability check that can't stall on a heavy import (mirrors
+        // whisper_package_installed — see #78).
+        cmd.args([
+            "-c",
+            "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('piper') else 1)",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
         #[cfg(target_os = "windows")]
         cmd.creation_flags(CREATE_NO_WINDOW);
         piper_importable = cmd.output().map(|o| o.status.success()).unwrap_or(false);
