@@ -92,8 +92,11 @@ export function CloudExampleModal() {
 
             <div className="p-4 space-y-3">
               <div className="flex items-center gap-2">
-                <Cloud size={14} className="text-violet-500 dark:text-violet-200" />
-                <h3 className="text-[0.85rem] font-semibold text-white">{TITLES[target.intent]}</h3>
+                {/* Panel is fixed dark in both themes, so always use the dark
+                    tints; arbitrary text color dodges the `.light .text-white`
+                    remap (same rule as ModelTiles). */}
+                <Cloud size={14} className="text-violet-300" />
+                <h3 className="text-[0.85rem] font-semibold text-[#fafafa]">{TITLES[target.intent]}</h3>
                 <span className="ml-auto text-[0.55rem] font-medium uppercase tracking-widest text-violet-300/80">
                   LU Cloud
                 </span>

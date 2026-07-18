@@ -1,0 +1,13 @@
+{
+  "title": "Erase Object",
+  "tagline": "Paint over it. Gone.",
+  "caption": "Object removed on LU Cloud",
+  "flow": { "take": "assets-src/teasers-raw/eraser/take-01", "preClick": 6, "postDone": 2 },
+  "result": {
+    "type": "image-compare",
+    "before": "input.png",
+    "after": "result.png",
+    "beforeTag": "Before",
+    "afterTag": "After"
+  }
+}

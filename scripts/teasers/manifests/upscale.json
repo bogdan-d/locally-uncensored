@@ -1,0 +1,13 @@
+{
+  "title": "Upscale",
+  "tagline": "Sharper images, up to 8K",
+  "caption": "Upscaled to 2K on LU Cloud",
+  "flow": { "take": "assets-src/teasers-raw/upscale/take-01", "preClick": 6, "postDone": 2 },
+  "result": {
+    "type": "image-compare",
+    "before": "input.png",
+    "after": "result.png",
+    "beforeTag": "Source",
+    "afterTag": "2K"
+  }
+}
