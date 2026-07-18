@@ -263,7 +263,11 @@ function LipsyncControls() {
   )
 }
 
-const TTS_VOICES = ['cherry', 'serena', 'ethan', 'chelsie'] as const
+// The hosted tts endpoint requires one of WaveSpeed's own preset voices —
+// these exact ids, live-verified 2026-07-18 (invented names get a 400).
+const TTS_VOICES = [
+  'Serena', 'Vivian', 'Dylan', 'Eric', 'Ryan', 'Aiden', 'Sohee', 'Ono_Anna', 'Uncle_Fu',
+] as const
 
 function VoiceChip({
   audioName,
@@ -393,7 +397,7 @@ function VoiceChip({
                       className="t-control flex-1 px-2 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 focus:outline-none"
                     >
                       {TTS_VOICES.map((v) => (
-                        <option key={v} value={v}>{v}</option>
+                        <option key={v} value={v}>{v.replace(/_/g, ' ')}</option>
                       ))}
                     </select>
                   ) : (

@@ -16,21 +16,41 @@ export function CreditsMeter() {
   const intent = useCreateStore((s) => s.intent())
   const cloudImageModel = useCreateStore((s) => s.cloudImageModel)
   const cloudVideoModel = useCreateStore((s) => s.cloudVideoModel)
+  const cloudOpModel = useCreateStore((s) => s.cloudOpModel)
+  const characterTab = useCreateStore((s) => s.characterTab)
   const frames = useCreateStore((s) => s.frames)
   const fps = useCreateStore((s) => s.fps)
+  const musicDuration = useCreateStore((s) => s.musicDuration)
   const targetResolution = useCreateStore((s) => s.targetResolution)
   if (!quota) return null
 
-  const { kind, op } = intentToJob(intent)
-  // Price the exact run the user is about to make — model, op, (for video)
-  // clip length and (for upscale) target resolution — not the tier's
-  // representative per-kind figure; utility ops and pricier models would
-  // otherwise show a wrong number and mis-gate the button. Same figure
-  // Composer's creditsOk gates on.
-  const picked = (kind === 'video' ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind).id
+  let { kind, op } = intentToJob(intent)
+  // Mirror Composer's creditsOk pick exactly — meter and gate must show the
+  // same number: the character use-surface is a plain LoRA image generate, the
+  // specialized 2.5.8 ops run the op picker's model (audio has no classic
+  // entries at all), everything else prices the per-kind picker's model.
+  const characterUse = intent === 'character' && characterTab === 'use'
+  if (characterUse) {
+    kind = 'image'
+    op = 'generate'
+  }
+  const special =
+    op === 'lipsync' || op === 'extend' || op === 'motion' ||
+    op === 'music' || op === 'tts' || op === 'lora-train'
+  const picked = characterUse
+    ? 'flux-schnell-lora'
+    : special
+      ? cloudOpModel
+      : (kind === 'video' ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind)?.id || ''
   const seconds =
-    kind === 'video' && (op === 'generate' || op === 'animate') && fps > 0 ? frames / fps : undefined
-  const cost = runCredits(kind, op, picked, seconds, quota.costs[kind], targetResolution)
+    op === 'music'
+      ? musicDuration
+      : kind === 'video' && (op === 'generate' || op === 'animate') && fps > 0
+        ? frames / fps
+        : undefined
+  const cost = runCredits(
+    kind, op, picked, seconds, quota.costs[kind === 'audio' ? 'image' : kind], targetResolution,
+  )
   const remaining = quota.remaining.credits
   const limit = quota.limits.credits
   const enough = remaining >= cost

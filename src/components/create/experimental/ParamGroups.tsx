@@ -39,7 +39,7 @@ export function ParamGroups() {
   // control. Sampler/scheduler/LoRA/VAE/clip-skip/batch have no cloud path at
   // all (useCloudCreate never sends them), so they're local-only knobs.
   const cloudModelId =
-    (isVideo ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(isVideo ? 'video' : 'image').id
+    (isVideo ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(isVideo ? 'video' : 'image')?.id || ''
   const showSteps = !(isCloud && isVideo)
   const showCfg = isCloud ? cloudModelById(cloudModelId)?.cfg === true : true
 

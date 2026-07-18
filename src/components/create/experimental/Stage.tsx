@@ -456,7 +456,7 @@ function TrainSetBoard() {
           className="flex-1 rounded-xl border-2 border-dashed border-white/10 hover:border-white/25 transition-colors flex flex-col items-center justify-center gap-2 text-gray-500 hover:text-gray-300"
         >
           <UploadCloud size={28} />
-          <div className="t-body">Drop 4-30 photos of your character here</div>
+          <div className="t-body">Drop 4 to 30 photos of your character here</div>
           <div className="t-label text-gray-600">
             One person or character, varied angles and lighting works best
           </div>
@@ -489,7 +489,7 @@ function TrainSetBoard() {
             </div>
           </div>
           <div className="t-label text-gray-500 text-center shrink-0">
-            {trainImages.length}/30 photos — training runs in the cloud and lands the character on your shelf.
+            {trainImages.length}/30 photos. Training runs in the cloud and lands the character on your shelf.
           </div>
         </>
       )}

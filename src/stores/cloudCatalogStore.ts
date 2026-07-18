@@ -83,8 +83,11 @@ export function loraGenModels(): CloudModel[] {
   return useCloudCatalogStore.getState().models.filter((m) => m.lora === true)
 }
 
-export function defaultCloudModel(kind: RenderKind): CloudModel {
-  return cloudModelsFor(kind)[0]
+/** First classic model of the kind; kinds whose models are ALL op-specialized
+ *  (audio — every entry carries `ops`, in the live catalog and the seed alike)
+ *  fall back to the kind's first entry so callers never explode on `.id`. */
+export function defaultCloudModel(kind: RenderKind): CloudModel | undefined {
+  return cloudModelsFor(kind)[0] ?? useCloudCatalogStore.getState().models.find((m) => m.kind === kind)
 }
 
 export function cloudModelById(id: string): CloudModel | undefined {

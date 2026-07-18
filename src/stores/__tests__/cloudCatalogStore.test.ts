@@ -46,8 +46,8 @@ beforeEach(() => {
 describe('cloudCatalogStore', () => {
   it('falls back to the static seed before any fetch', () => {
     expect(cloudModelsFor('image').length).toBeGreaterThan(0)
-    expect(defaultCloudModel('image').id).toBe('flux-schnell')
-    expect(defaultCloudModel('video').id).toBe('wan-2.2-720p')
+    expect(defaultCloudModel('image')?.id).toBe('flux-schnell')
+    expect(defaultCloudModel('video')?.id).toBe('wan-2.2-720p')
     expect(isEditCapable('flux-dev')).toBe(true)
     expect(isEditCapable('flux-schnell')).toBe(false)
     // never fetched → unknown → treat as live (don't false-block)
@@ -56,8 +56,8 @@ describe('cloudCatalogStore', () => {
 
   it('setCatalog replaces the seed with the server truth', () => {
     useCloudCatalogStore.getState().setCatalog(serverCatalog)
-    expect(defaultCloudModel('image').id).toBe('flux-9')
-    expect(defaultCloudModel('video').id).toBe('wan-9')
+    expect(defaultCloudModel('image')?.id).toBe('flux-9')
+    expect(defaultCloudModel('video')?.id).toBe('wan-9')
     expect(isEditCapable('flux-9')).toBe(true)
     expect(useCloudCatalogStore.getState().ops?.eraser).toBe(2500)
     expect(useCloudCatalogStore.getState().fetchedAt).not.toBeNull()
@@ -70,6 +70,20 @@ describe('cloudCatalogStore', () => {
     expect(editCapable).toEqual(['flux-dev'])
     const negPrompt = CLOUD_MODEL_SEED.filter((m) => m.negative_prompt).map((m) => m.id)
     expect(negPrompt).toEqual(['wan-2.2-720p', 'wan-2.2-fast', 'hunyuan-video'])
+  })
+
+  it('defaultCloudModel never explodes on an all-specialized kind (audio)', () => {
+    // Audio has no classic (ops-less) entries — in the seed AND the live v2
+    // catalog. Before the guard this was `cloudModelsFor('audio')[0].id` →
+    // TypeError, taking down the whole Create page for anyone opening Music
+    // without a previously picked image model (live-found on 2026-07-18).
+    expect(cloudModelsFor('audio')).toEqual([])
+    expect(defaultCloudModel('audio')?.kind).toBe('audio')
+    expect(defaultCloudModel('audio')?.ops?.length).toBeGreaterThan(0)
+    // a kind with no models at all resolves to undefined instead of throwing
+    useCloudCatalogStore.setState({ models: [] })
+    expect(defaultCloudModel('audio')).toBeUndefined()
+    expect(defaultCloudModel('image')).toBeUndefined()
   })
 
   it('defaultEditModel resolves the first edit-capable image model (seed and server)', () => {

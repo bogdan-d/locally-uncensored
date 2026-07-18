@@ -38,6 +38,18 @@ const CHARACTER_GEN_DEFAULT: Record<string, string> = {
   'z-image': 'z-image-turbo-lora',
 }
 
+// Gallery label for ops that never read the composer prompt. Without this
+// they inherit whatever was typed last, and the extend picker then shows a
+// motion clip wearing the previous t2v prompt as its name (live find
+// 2026-07-18: two different clips, identical "…dancing…" label).
+const OP_GALLERY_LABEL: Record<string, string> = {
+  lipsync: 'Talking character',
+  motion: 'Motion transfer',
+  removebg: 'Background removed',
+  upscale: 'Upscaled image',
+  eraser: 'Object erased',
+}
+
 // Per-op progress verb — "Rendering" reads wrong for a training run or a song.
 function opProgressVerb(op: string): string {
   switch (op) {
@@ -112,7 +124,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     } else if (specialOp) {
       picked = s.cloudOpModel
     } else {
-      picked = (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind).id
+      picked = (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind)?.id || ''
     }
     // lora-train: the picked trainer decides the kind (LTX trains video
     // characters) BEFORE coercion, so the video trainer isn't coerced away.
@@ -333,7 +345,7 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
           type: kind,
           filename: '',
           subfolder: '',
-          prompt: s.prompt,
+          prompt: OP_GALLERY_LABEL[op] ?? s.prompt,
           negativePrompt: s.negativePrompt,
           model,
           modelType: 'unknown',
