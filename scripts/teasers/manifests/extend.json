@@ -1,0 +1,7 @@
+{
+  "title": "Extend Video",
+  "tagline": "Your clip keeps going",
+  "caption": "Extended on LU Cloud",
+  "flow": { "take": "assets-src/teasers-raw/extend/take-01", "preClick": 6, "postDone": 2 },
+  "result": { "type": "video-extend", "video": "result.mp4", "boundaryPct": 49 }
+}

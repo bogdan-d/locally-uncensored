@@ -1,0 +1,7 @@
+{
+  "title": "Motion Control",
+  "tagline": "Your character, any dance",
+  "caption": "Motion transfer on LU Cloud",
+  "flow": { "take": "assets-src/teasers-raw/motion/take-02", "preClick": 6, "postDone": 2 },
+  "result": { "type": "video-pip", "video": "result.mp4", "pip": "driving.mp4" }
+}

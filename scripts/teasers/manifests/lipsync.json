@@ -1,0 +1,7 @@
+{
+  "title": "Talking Character",
+  "tagline": "Give any photo a voice",
+  "caption": "Voiced and lipsynced on LU Cloud",
+  "flow": { "take": "assets-src/teasers-raw/lipsync/take-01", "preClick": 8, "postDone": 2 },
+  "result": { "type": "video", "video": "result.mp4" }
+}

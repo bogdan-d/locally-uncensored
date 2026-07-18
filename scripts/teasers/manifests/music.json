@@ -1,0 +1,7 @@
+{
+  "title": "Music",
+  "tagline": "Full tracks from a text prompt",
+  "caption": "Composed on LU Cloud",
+  "flow": { "take": "assets-src/teasers-raw/music/take-01", "preClick": 6, "postDone": 2 },
+  "result": { "type": "audio-waveform", "audio": "result.mp3" }
+}

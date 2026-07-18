@@ -38,6 +38,15 @@ export const helpers = {
     await page.waitForTimeout(300)
   },
 
+  /** Type into a specific field found by its placeholder (voice maker,
+   *  trigger word) — .first() would hit the composer prompt instead. */
+  async typeInto(page, placeholderRe, text) {
+    const field = page.locator(`textarea[placeholder*="${placeholderRe}"], input[placeholder*="${placeholderRe}"]`).first()
+    await field.click()
+    await field.pressSequentially(text, { delay: 18 })
+    await page.waitForTimeout(300)
+  },
+
   async setSlider(page, value) {
     await page.evaluate((v) => {
       const s = document.querySelector('input[type="range"]')
@@ -177,7 +186,7 @@ export const helpers = {
 
   /** Download a result URL from INSIDE the page (carries the session's auth
    *  and also handles blob: URLs) and write it to takeDir. */
-  async saveResult(page, url, takeDir, ext) {
+  async saveResult(page, url, takeDir, ext, basename = 'result') {
     const b64 = await page.evaluate(async (u) => {
       const res = await fetch(u)
       const buf = await res.arrayBuffer()
@@ -189,19 +198,24 @@ export const helpers = {
       }
       return btoa(s)
     }, url)
-    const file = path.join(takeDir, `result${ext}`)
+    const file = path.join(takeDir, `${basename}${ext}`)
     fs.writeFileSync(file, Buffer.from(b64, 'base64'))
     return file
   },
 
-  /** Set a hidden <input type=file> whose accept matches, via Playwright. */
-  async setFile(page, acceptRe, files) {
-    const handle = await page.evaluateHandle((re) => {
-      const rx = new RegExp(re, 'i')
-      return [...document.querySelectorAll('input[type="file"]')].find((i) => rx.test(i.accept || ''))
-    }, acceptRe.source)
+  /** Set a hidden <input type=file> whose accept matches, via Playwright.
+   *  `multiple: true` targets the multi-file input (the Character-Studio
+   *  training board); default prefers a single-file input. */
+  async setFile(page, acceptRe, files, { multiple = false } = {}) {
+    const handle = await page.evaluateHandle((args) => {
+      const rx = new RegExp(args.re, 'i')
+      const ins = [...document.querySelectorAll('input[type="file"]')].filter((i) => rx.test(i.accept || ''))
+      return args.multiple
+        ? ins.find((i) => i.multiple)
+        : (ins.find((i) => !i.multiple) ?? ins[0])
+    }, { re: acceptRe.source, multiple })
     const el = handle.asElement()
-    if (!el) throw new Error(`no file input matching ${acceptRe}`)
+    if (!el) throw new Error(`no file input matching ${acceptRe}${multiple ? ' (multiple)' : ''}`)
     await el.setInputFiles(files)
     await page.waitForTimeout(800)
   },
@@ -217,6 +231,19 @@ export const helpers = {
       if (hit) return path.join(dir, t, hit)
     }
     throw new Error(`no result.* in any "${fn}" take, record it first`)
+  },
+
+  /** A named file from the newest prep take (portraits / driving clip that the
+   *  lipsync, motion and character takes reuse). */
+  prepFile(name) {
+    const dir = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/(\w:)/, '$1')), '..', '..', 'assets-src', 'teasers-raw', 'prep')
+    if (!fs.existsSync(dir)) throw new Error('no prep take yet, run --fn=prep first')
+    const takes = fs.readdirSync(dir).filter((d) => d.startsWith('take-')).sort().reverse()
+    for (const t of takes) {
+      const p = path.join(dir, t, name)
+      if (fs.existsSync(p)) return p
+    }
+    throw new Error(`"${name}" not found in any prep take`)
   },
 }
 
@@ -332,9 +359,8 @@ export const FLOWS = {
     return {}
   },
 
-  /** Music (ace-step, 5 s) — BLOCKED until the ops-aware catalog is deployed:
-   *  the picker filters on per-model `ops`, which only the unpushed uselu
-   *  commit serves (?v=2). Kept ready for the moment the server updates. */
+  /** Music (ace-step, 5 s) on the ops-aware catalog (?v=2, live since the
+   *  2026-07-18 deploy) — also proves the per-second music billing. */
   async music({ page, mark, takeDir }) {
     await h.nav(page, 'Create')
     await h.pickIntent(page, 'Music')
@@ -353,5 +379,202 @@ export const FLOWS = {
     const after = await h.credits(page)
     console.log(JSON.stringify({ credits: { before, after }, src: src.slice(0, 120), saved }))
     return {}
+  },
+
+  /** Prep run (not turned into a teaser): renders the reusable inputs — four
+   *  portraits of one consistent character (the lipsync/motion portrait + the
+   *  Character-Studio training set) and one dancing clip (the extend source in
+   *  the gallery + the motion driving video). Cheapest models throughout. */
+  async prep({ page, mark, takeDir }) {
+    await h.nav(page, 'Create')
+    const BASE = 'a woman in her 30s with short silver hair, freckles and green eyes, wearing a dark turtleneck'
+    const SHOTS = [
+      `studio portrait of ${BASE}, soft key light, looking at camera`,
+      `portrait of ${BASE}, smiling, warm cafe light`,
+      `side profile portrait of ${BASE}, window light`,
+      `outdoor portrait of ${BASE}, golden hour, shallow depth of field`,
+    ]
+    const t0 = await h.credits(page)
+    for (const [i, prompt] of SHOTS.entries()) {
+      await h.pickIntent(page, 'Image')
+      if (i === 0) await h.ensureModel(page, /flux.?schnell/i)
+      const ta = page.locator('textarea').first()
+      await ta.click()
+      await ta.fill('')
+      await ta.pressSequentially(prompt, { delay: 4 })
+      const baseline = await h.mediaSrcs(page, 'img')
+      mark(`portrait-${i + 1}`)
+      await h.clickCreate(page)
+      const src = await h.waitDone(page, 'img', { baseline, timeoutMs: 4 * 60_000 })
+      await h.saveResult(page, src, takeDir, '.png', `portrait-${i + 1}`)
+    }
+    // The driving/extend clip: a full-body dance so the motion models have an
+    // actual pose performance to transfer.
+    await h.pickIntent(page, 'Video')
+    await h.ensureModel(page, /ltx/i)
+    const ta = page.locator('textarea').first()
+    await ta.click()
+    await ta.fill('')
+    await ta.pressSequentially('a young woman dancing in a bright studio, full body shot, smooth flowing motion', { delay: 4 })
+    const baseline = await h.mediaSrcs(page, 'video')
+    mark('dance-clip')
+    await h.clickCreate(page)
+    const src = await h.waitDone(page, 'video', { baseline })
+    await page.waitForTimeout(3000)
+    await h.saveResult(page, src, takeDir, '.mp4', 'dance')
+    const t1 = await h.credits(page)
+    console.log(JSON.stringify({ credits: { before: t0, after: t1 } }))
+    return {}
+  },
+
+  /** Talking character: photo avatar + a voice MADE IN-FLOW via the qwen3-tts
+   *  maker (proves the tts lane too), then the lipsync render. */
+  async lipsync({ page, mark, takeDir }) {
+    const portrait = h.prepFile('portrait-1.png')
+    await h.nav(page, 'Create')
+    await h.pickIntent(page, 'Talking Character')
+    // cheapest live lipsync: p-video-avatar 2500 (infinitetalk-fast is 7500)
+    await h.ensureModel(page, /p.?video avatar/i)
+    await h.setFile(page, /image/i, [portrait])
+    const beforeTts = await h.credits(page)
+    await h.clickButton(page, 'Add voice')
+    await h.clickButton(page, 'Generate a voice (AI)')
+    await h.typeInto(page, 'What should the character say', 'Hey there! Welcome to LU Cloud. Let me show you around.')
+    mark('make-voice')
+    await h.clickButton(page, 'Make voice')
+    // The tts run flips isGenerating; done when Cancel is gone and the voice
+    // chip carries the pick (makeVoice wires voiceFromJob itself).
+    const t0 = Date.now()
+    for (;;) {
+      const st = await page.evaluate(() => ({
+        cancel: [...document.querySelectorAll('button')].some((b) => (b.textContent || '').trim() === 'Cancel'),
+        picked: /Generated audio|Hey there/.test(document.body.textContent || ''),
+      }))
+      if (!st.cancel && st.picked) break
+      if (Date.now() - t0 > 5 * 60_000) throw new Error('voice make timed out')
+      await page.waitForTimeout(1500)
+    }
+    const afterTts = await h.credits(page)
+    // lipsync has no prompt field — portrait + voice are the whole input
+    const before = await h.credits(page)
+    const baseline = await h.mediaSrcs(page, 'video')
+    mark('create-clicked')
+    await h.clickCreate(page)
+    const src = await h.waitDone(page, 'video', { baseline, timeoutMs: 20 * 60_000 })
+    mark('render-done')
+    await page.waitForTimeout(3500)
+    const saved = await h.saveResult(page, src, takeDir, '.mp4')
+    const after = await h.credits(page)
+    console.log(JSON.stringify({ credits: { tts: { beforeTts, afterTts }, lipsync: { before, after } }, src: src.slice(0, 120), saved }))
+    return { inputCopy: portrait }
+  },
+
+  /** Extend: pick the dance clip rendered on this account and continue it. */
+  async extend({ page, mark, takeDir }) {
+    const dance = h.prepFile('dance.mp4')
+    await h.nav(page, 'Create')
+    await h.pickIntent(page, 'Extend Video')
+    // cheapest live extend: pixverse 2500 (ltx 10000, wan spicy 15000)
+    await h.ensureModel(page, /pixverse/i)
+    await h.clickButton(page, 'Pick one of your cloud videos')
+    await page.waitForTimeout(600)
+    await h.clickButton(page, 'dancing')
+    await h.typePrompt(page, 'she keeps dancing as the camera slowly circles around her')
+    const before = await h.credits(page)
+    const baseline = await h.mediaSrcs(page, 'video')
+    mark('create-clicked')
+    await h.clickCreate(page)
+    const src = await h.waitDone(page, 'video', { baseline, timeoutMs: 20 * 60_000 })
+    mark('render-done')
+    await page.waitForTimeout(3500)
+    const saved = await h.saveResult(page, src, takeDir, '.mp4')
+    const after = await h.credits(page)
+    console.log(JSON.stringify({ credits: { before, after }, src: src.slice(0, 120), saved }))
+    return { inputCopy: dance }
+  },
+
+  /** Motion control: portrait + the dance clip as the driving performance. */
+  async motion({ page, mark, takeDir }) {
+    const portrait = h.prepFile('portrait-1.png')
+    const dance = h.prepFile('dance.mp4')
+    // the teaser composites the driving clip as a PiP next to the result
+    fs.copyFileSync(dance, path.join(takeDir, 'driving.mp4'))
+    await h.nav(page, 'Create')
+    await h.pickIntent(page, 'Motion Control')
+    // cheapest live motion: p-video-animate 3000 (dreamactor 5000, wan/steady 20000)
+    await h.ensureModel(page, /p.?video animate/i)
+    await h.setFile(page, /image/i, [portrait])
+    await h.setFile(page, /video/i, [dance])
+    // motion has no prompt field — image + driving clip are the whole input
+    const before = await h.credits(page)
+    const baseline = await h.mediaSrcs(page, 'video')
+    mark('create-clicked')
+    await h.clickCreate(page)
+    const src = await h.waitDone(page, 'video', { baseline, timeoutMs: 20 * 60_000 })
+    mark('render-done')
+    await page.waitForTimeout(3500)
+    const saved = await h.saveResult(page, src, takeDir, '.mp4')
+    const after = await h.credits(page)
+    console.log(JSON.stringify({ credits: { before, after }, src: src.slice(0, 120), saved }))
+    return { inputCopy: portrait }
+  },
+
+  /** Character Studio, full lane: train a Flux LoRA on the four prep
+   *  portraits (cheapest IMAGE trainer live: flux 100000; the 35000 one is the
+   *  LTX video trainer whose character can't feed the image teaser), then
+   *  generate two scenes with the fresh character for the image cuts. */
+  async character({ page, mark, takeDir }) {
+    const photos = [1, 2, 3, 4].map((i) => h.prepFile(`portrait-${i}.png`))
+    await h.nav(page, 'Create')
+    await h.pickIntent(page, 'Character Studio')
+    await h.clickButton(page, 'Train new')
+    await h.ensureModel(page, /flux character training/i)
+    await h.typeInto(page, 'Trigger word', 'lumi')
+    await h.setFile(page, /image/i, photos, { multiple: true })
+    const beforeTrain = await h.credits(page)
+    mark('create-clicked')
+    await h.clickCreate(page)
+    // Training yields a shelf entry, not a media item: done when the run ended
+    // and the store flipped to the use-surface with the fresh character chip.
+    const t0 = Date.now()
+    for (;;) {
+      const st = await page.evaluate(() => {
+        const cancel = [...document.querySelectorAll('button')].some((b) => (b.textContent || '').trim() === 'Cancel')
+        const chip = [...document.querySelectorAll('button')].some((b) => /lumi/.test(b.textContent || ''))
+        const err = [...document.querySelectorAll('div,p,span')].find(
+          (n) => n.children.length === 0 && /failed|error/i.test(n.textContent || '') && (n.textContent || '').length < 220,
+        )
+        return { cancel, chip, err: err ? err.textContent.trim().slice(0, 200) : null }
+      })
+      if (!st.cancel && st.chip) break
+      if (!st.cancel && st.err && Date.now() - t0 > 30_000) throw new Error(`training failed: ${st.err}`)
+      if (Date.now() - t0 > 30 * 60_000) throw new Error('training timed out')
+      await page.waitForTimeout(4000)
+    }
+    mark('trained')
+    const afterTrain = await h.credits(page)
+    // Generate two scenes with the character (the use-surface is active now).
+    await h.clickButton(page, 'lumi')
+    const scenes = [
+      'lumi drinking coffee in a paris cafe, golden morning light',
+      'lumi hiking on a mountain ridge at sunset, wide shot',
+    ]
+    const gens = []
+    for (const [i, prompt] of scenes.entries()) {
+      const ta = page.locator('textarea').first()
+      await ta.click()
+      await ta.fill('')
+      await ta.pressSequentially(prompt, { delay: 10 })
+      const baseline = await h.mediaSrcs(page, 'img')
+      mark(`gen-${i + 1}`)
+      await h.clickCreate(page)
+      const src = await h.waitDone(page, 'img', { baseline, timeoutMs: 6 * 60_000 })
+      await page.waitForTimeout(2500)
+      gens.push(await h.saveResult(page, src, takeDir, '.png', i === 0 ? 'result' : `result-${i + 1}`))
+    }
+    mark('render-done')
+    const after = await h.credits(page)
+    console.log(JSON.stringify({ credits: { train: { beforeTrain, afterTrain }, final: after }, gens }))
+    return { inputCopy: photos[0] }
   },
 }

@@ -1,0 +1,7 @@
+{
+  "title": "Character Studio",
+  "tagline": "Train your character once, use it anywhere",
+  "caption": "Trained and rendered on LU Cloud",
+  "flow": { "take": "assets-src/teasers-raw/character/take-01", "preClick": 8, "postDone": 2 },
+  "result": { "type": "image-cuts", "cuts": ["input.png", "result.png", "result-2.png"] }
+}
