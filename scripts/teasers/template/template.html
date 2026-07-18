@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- Teaser motion template. No CSS animations anywhere: render.mjs drives a
+     virtual clock frame by frame via window.__SEEK(t) and screenshots each
+     frame, so output is deterministic regardless of machine load. -->
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="theme.css" />
+</head>
+<body>
+  <div id="root">
+    <div id="glow"></div>
+
+    <section id="s0" class="seg">
+      <div class="inner">
+        <div class="micro">LU Cloud</div>
+        <div class="title"></div>
+        <div class="underline"></div>
+        <div class="tagline"></div>
+      </div>
+    </section>
+
+    <section id="s1" class="seg">
+      <div class="frame"><img alt="" /></div>
+      <div class="caption"></div>
+    </section>
+
+    <section id="s2" class="seg"><div class="stage"></div></section>
+
+    <section id="s3" class="seg">
+      <div class="mark">
+        <div class="ring"></div>
+        <img alt="" />
+      </div>
+    </section>
+  </div>
+  <script src="template.js"></script>
+</body>
+</html>

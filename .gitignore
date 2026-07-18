@@ -73,3 +73,7 @@ SETUP_REPORT.md
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# Teaser raw takes + render scratch (scripts/teasers) - only the encoded
+# webm/poster assets in public/teasers ship
+/assets-src/

@@ -19,11 +19,11 @@ interface TeaserCopy {
 const INTENT_COPY: Record<Extract<CloudTeaserTarget, { surface: 'intent' }>['intent'], TeaserCopy> = {
   upscale: {
     title: 'Upscale',
-    line: 'Blow any image up to crisp 2K-8K — no VRAM needed.',
+    line: 'Blow any image up to crisp 2K, 4K or 8K. No VRAM needed.',
   },
   eraser: {
     title: 'Erase Object',
-    line: 'Paint over anything and it’s gone — clean fill, no trace.',
+    line: 'Paint over anything and it’s gone. Clean fill, no trace.',
   },
   character: {
     title: 'Character Studio',
@@ -35,11 +35,11 @@ const INTENT_COPY: Record<Extract<CloudTeaserTarget, { surface: 'intent' }>['int
   },
   music: {
     title: 'Music',
-    line: 'Describe a track, get a full song — up to four minutes.',
+    line: 'Describe a track, get a full song. Up to four minutes.',
   },
   extend: {
     title: 'Extend Video',
-    line: 'Keep a clip going — the cloud continues it seamlessly.',
+    line: 'Keep a clip going. The cloud continues it seamlessly.',
   },
   motion: {
     title: 'Motion Control',
@@ -51,6 +51,7 @@ export function CloudTeaserModal() {
   const target = useUIStore((s) => s.cloudTeaser)
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
   const setCloudGateOpen = useUIStore((s) => s.setCloudGateOpen)
+  const setCloudExampleVideo = useUIStore((s) => s.setCloudExampleVideo)
   const { updateSettings } = useSettingsStore()
 
   const close = () => setCloudTeaser(null)
@@ -62,8 +63,8 @@ export function CloudTeaserModal() {
             title: cloudModelById(target.modelId)?.label ?? 'Hosted model',
             line:
               target.kind === 'video'
-                ? 'Cinema-grade video models on datacenter GPUs — no download, no VRAM limit.'
-                : 'Frontier image models on datacenter GPUs — no download, no VRAM limit.',
+                ? 'Cinema grade video models on datacenter GPUs. No download, no VRAM limit.'
+                : 'Frontier image models on datacenter GPUs. No download, no VRAM limit.',
           }
         : null
 
@@ -108,12 +109,20 @@ export function CloudTeaserModal() {
               </div>
               <p className="text-[0.7rem] leading-relaxed text-gray-400">{copy.line}</p>
               <p className="text-[0.62rem] leading-relaxed text-gray-500">
-                Runs on LU Cloud — your PC stays cool while datacenter GPUs do the
+                Runs on LU Cloud. Your PC stays cool while datacenter GPUs do the
                 heavy lifting. Part of the Max plan (closed beta).
               </p>
               <div className="flex items-center gap-2 pt-1">
                 <button
-                  onClick={() => { close(); setCloudGateOpen(true) }}
+                  onClick={() => {
+                    // Intent teasers detour through the example video popup
+                    // (real footage of the tool); model rows go straight to
+                    // the gate since there is no per model clip.
+                    const t = target
+                    close()
+                    if (t.surface === 'intent') setCloudExampleVideo(t)
+                    else setCloudGateOpen(true)
+                  }}
                   className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg bg-white text-black text-[0.7rem] font-semibold hover:bg-gray-200 transition-colors"
                 >
                   <Sparkles size={12} /> See plans

@@ -1,0 +1,65 @@
+/* Teaser template theme: tokens copied from src/index.css so the clips look
+ * like the app (accent #a094f8, canvas #1b1b1b, Inter/system stack). */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 640px; height: 360px; overflow: hidden; background: #1b1b1b; }
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  color: #f3f4f6;
+  -webkit-font-smoothing: antialiased;
+}
+#root { position: relative; width: 640px; height: 360px; background: #1b1b1b; }
+#glow {
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse 420px 260px at 50% 42%, rgba(160, 148, 248, 0.10), transparent 70%);
+}
+.seg { position: absolute; inset: 0; opacity: 0; display: flex; align-items: center; justify-content: center; }
+
+/* S0 title card */
+#s0 .inner { text-align: center; }
+#s0 .micro { font-size: 10px; font-weight: 600; letter-spacing: 0.32em; color: #a094f8; text-transform: uppercase; }
+#s0 .title { margin-top: 10px; font-size: 34px; font-weight: 600; color: #ffffff; }
+#s0 .underline { margin: 14px auto 0; width: 120px; height: 2px; background: #a094f8; border-radius: 1px; transform-origin: 50% 50%; }
+#s0 .tagline { margin-top: 12px; font-size: 12.5px; color: #9ca3af; }
+
+/* S1 flow in a device frame */
+#s1 .frame {
+  width: 560px; height: 280px; border-radius: 14px; overflow: hidden;
+  background: #262626; border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+#s1 img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+#s1 .caption {
+  position: absolute; left: 0; right: 0; bottom: 12px; text-align: center;
+  font-size: 11px; color: #9ca3af; letter-spacing: 0.02em;
+}
+
+/* S2 result stage */
+#s2 .stage { position: relative; width: 640px; height: 360px; overflow: hidden; background: #101010; }
+#s2 img.fill { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+#s2 .divider { position: absolute; top: 0; bottom: 0; width: 2px; background: #a094f8; box-shadow: 0 0 12px rgba(160, 148, 248, 0.8); }
+#s2 .tag {
+  position: absolute; top: 12px; padding: 3px 8px; border-radius: 999px;
+  font-size: 10px; font-weight: 600; background: rgba(0, 0, 0, 0.55); color: #e5e7eb;
+}
+#s2 .pill {
+  position: absolute; left: 14px; bottom: 14px; padding: 4px 10px; border-radius: 999px;
+  font-size: 10px; font-weight: 500; color: #d6d0ff;
+  background: rgba(160, 148, 248, 0.14); border: 1px solid rgba(160, 148, 248, 0.35);
+}
+#s2 .timeline { position: absolute; left: 40px; right: 40px; bottom: 34px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+#s2 .timeline .orig { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255, 255, 255, 0.35); }
+#s2 .timeline .ext { position: absolute; top: 0; bottom: 0; background: #a094f8; }
+#s2 .pip {
+  position: absolute; right: 14px; top: 14px; width: 128px; height: 72px; border-radius: 8px;
+  overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.25); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+#s2 .pip img { width: 100%; height: 100%; object-fit: cover; }
+#s2 .wave { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 2px; padding: 0 40px; }
+#s2 .wave span { width: 2px; border-radius: 1px; background: rgba(255, 255, 255, 0.22); }
+#s2 .wavehead { position: absolute; top: 70px; bottom: 70px; width: 2px; background: #a094f8; box-shadow: 0 0 10px rgba(160, 148, 248, 0.9); }
+#s2 .wtitle { position: absolute; left: 0; right: 0; top: 44px; text-align: center; font-size: 13px; color: #e5e7eb; font-weight: 500; }
+
+/* S3 outro */
+#s3 .mark { position: relative; width: 84px; height: 84px; display: flex; align-items: center; justify-content: center; }
+#s3 img { width: 56px; height: 56px; }
+#s3 .ring { position: absolute; inset: 0; border-radius: 50%; border: 1.5px solid rgba(160, 148, 248, 0.55); }

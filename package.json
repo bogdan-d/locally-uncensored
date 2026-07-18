@@ -32,7 +32,9 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "teasers:record": "node scripts/teasers/record.mjs",
+    "teasers:build": "node scripts/teasers/build-all.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
