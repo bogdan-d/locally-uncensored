@@ -170,14 +170,14 @@ function CharacterPanel() {
             className="t-control w-44 px-2.5 h-[var(--control-h-sm)] rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15"
           />
           <span className="t-label text-gray-600">
-            {trainImages.length}/30 photos added{trainImages.length < 4 ? ' — need at least 4' : ''}
+            {trainImages.length}/30 photos added{trainImages.length < 4 ? ', need at least 4' : ''}
           </span>
         </div>
       ) : (
         <div className="flex items-center justify-center gap-1.5 flex-wrap">
           {shelf === null && <span className="t-label text-gray-600">Loading your characters…</span>}
           {shelf?.length === 0 && (
-            <span className="t-label text-gray-600">No characters yet — train one first.</span>
+            <span className="t-label text-gray-600">No characters yet. Train one first.</span>
           )}
           {shelf?.map((c) => {
             const active = selectedCharacter?.id === c.id
@@ -248,7 +248,7 @@ function LipsyncControls() {
   return (
     <div className="flex items-center justify-center gap-2 flex-wrap">
       {needsClip ? (
-        <DrivingVideoChip empty="Add video to re-sync" />
+        <DrivingVideoChip empty="Add video to resync" />
       ) : (
         <PortraitChip empty="Add portrait" />
       )}
@@ -473,7 +473,7 @@ function MusicControls() {
             <textarea
               value={musicLyrics}
               onChange={(e) => setMusicLyrics(e.target.value)}
-              placeholder="Optional lyrics — models that sing will use them…"
+              placeholder="Optional lyrics. Models that sing will use them…"
               rows={3}
               className="w-full t-control px-2.5 py-1.5 rounded-md bg-white/[0.03] border border-white/[0.06] text-gray-200 placeholder-gray-600 focus:outline-none focus:border-white/15 resize-none"
             />
@@ -527,7 +527,7 @@ function ExtendControls() {
             >
               {clips.length === 0 && (
                 <div className="t-control text-gray-500 px-2.5 py-2">
-                  No cloud videos yet — render one on the Video tab first.
+                  No cloud videos yet. Render one on the Video tab first.
                 </div>
               )}
               {clips.map((g) => (

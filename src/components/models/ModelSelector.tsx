@@ -30,7 +30,7 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
   return (
     <div className="mt-1 border-t border-white/[0.05]">
       <div className="px-2.5 pt-2 pb-0.5 flex items-center gap-1">
-        <Cloud size={9} className="text-violet-300/80" />
+        <Cloud size={10} className="text-violet-500 dark:text-violet-200" />
         <span className="text-[0.55rem] font-medium uppercase tracking-widest text-gray-600">
           LU Cloud
         </span>
@@ -41,26 +41,26 @@ function CloudTeaserSection({ onOpen }: { onOpen: () => void }) {
             key={m.name}
             onClick={open}
             className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
-            title="Runs on LU Cloud — tap to see plans"
+            title="Runs on LU Cloud, tap to see plans"
           >
-            <Cloud size={10} className="text-violet-300/70 shrink-0" />
+            <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
             <span className="text-[0.68rem] text-gray-400 truncate">
               {('displayName' in m && m.displayName) || displayModelName(m.name)}
             </span>
-            <span className="ml-auto text-[8px] text-violet-300/70">Cloud</span>
+            <span className="ml-auto text-[8px] text-violet-500 dark:text-violet-200">Cloud</span>
           </button>
         ))
       ) : (
         <button
           onClick={open}
           className="w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-white/[0.04] transition-colors"
-          title="Runs on LU Cloud — tap to see plans"
+          title="Runs on LU Cloud, tap to see plans"
         >
-          <Cloud size={10} className="text-violet-300/70 shrink-0" />
+          <Cloud size={10} className="text-violet-500 dark:text-violet-200 shrink-0" />
           <span className="text-[0.68rem] text-gray-400">
-            Frontier chat models — no GPU needed
+            Frontier chat models, no GPU needed
           </span>
-          <span className="ml-auto text-[8px] text-violet-300/70">Cloud</span>
+          <span className="ml-auto text-[8px] text-violet-500 dark:text-violet-200">Cloud</span>
         </button>
       )}
     </div>
@@ -391,8 +391,8 @@ function LoadToggle({ loaded, busy, disabled, onClick }: {
       onClick={(e) => { e.stopPropagation(); onClick() }}
       disabled={disabled}
       title={loaded
-        ? 'Loaded in VRAM — click to unload (Off)'
-        : 'Not loaded — click to load into VRAM (On)'}
+        ? 'Loaded in VRAM. Click to unload (Off)'
+        : 'Not loaded. Click to load into VRAM (On)'}
       className={`flex items-center gap-0.5 pl-1 pr-1.5 py-0.5 rounded text-[8px] font-semibold uppercase tracking-wide transition-colors disabled:opacity-40 ${
         loaded
           ? 'text-emerald-400 bg-emerald-500/[0.12] hover:bg-emerald-500/20'
@@ -626,7 +626,7 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
       {/* ── Trigger Button ── */}
       <button
         onClick={() => setOpen(!open)}
-        title={activeModel ? `Model: ${activeDisplayName} — click to switch` : 'Select a chat model'}
+        title={activeModel ? `Model: ${activeDisplayName}, click to switch` : 'Select a chat model'}
         aria-label="Select chat model"
         className={`
           group flex items-center gap-1.5 h-[26px] px-2 rounded-md

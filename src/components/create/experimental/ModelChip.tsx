@@ -6,7 +6,7 @@ import { Select, type SelectOption } from '../ui/Select'
 import { TYPE_BADGE } from './badges'
 import { isI2VModel, isT2VCapable } from '../../../api/comfyui'
 
-const CLOUD_BADGE = { label: 'Cloud', color: 'bg-violet-500/15 text-violet-300' }
+const CLOUD_BADGE = { label: 'Cloud', color: 'bg-violet-500/15 text-violet-500 dark:text-violet-200' }
 
 // Local-mode discovery (2.5.8): hosted models ride at the bottom of the local
 // picker as teaser rows — picking one opens the Cloud sheet instead of

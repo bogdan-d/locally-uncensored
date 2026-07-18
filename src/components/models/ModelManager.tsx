@@ -246,7 +246,7 @@ export function ModelManager() {
                   <div className="space-y-1">
                     <p className="text-[0.75rem] font-medium text-gray-800 dark:text-gray-200">Start ComfyUI to see your {mode} models</p>
                     <p className="text-[0.6rem] text-gray-500 max-w-[300px] leading-relaxed">
-                      {mode === 'image' ? 'Image' : 'Video'} models are served by ComfyUI, which isn't running right now — so the ones you've downloaded can't be listed yet. Open the Create tab and start ComfyUI (the power button next to the model picker), then come back.
+                      {mode === 'image' ? 'Image' : 'Video'} models are served by ComfyUI, which isn't running right now, so the ones you've downloaded can't be listed yet. Open the Create tab and start ComfyUI (the power button next to the model picker), then come back.
                     </p>
                   </div>
                   <button

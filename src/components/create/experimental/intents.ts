@@ -32,7 +32,7 @@ export const INTENTS: IntentMeta[] = [
     requiresModels: 'image',
     examples: [
       'a lighthouse at dusk, dramatic storm clouds, cinematic',
-      'a neon-lit alley in the rain, reflections, moody',
+      'a neon alley in the rain, reflections, moody',
       'a cozy reading nook by a window, warm morning light',
     ],
   },
@@ -41,7 +41,7 @@ export const INTENTS: IntentMeta[] = [
     // (VAEEncodeForInpaint / InpaintModelConditioning) — the 4th local tab.
     // Cloud keeps its hosted edit endpoint; both share the MaskEditor.
     id: 'edit', label: 'Edit Image', short: 'Edit', icon: Wand2,
-    placeholder: 'Describe the edit — what should change in the painted area…',
+    placeholder: 'Describe the edit. What should change in the painted area…',
     needsSource: true, needsPrompt: true, allowsMask: true, isVideo: false,
     capability: 'inpaint-nodes', requiresModels: 'image',
     examples: ['replace the sky with a starry night', 'add a leather jacket', 'remove the person on the left'],
@@ -72,7 +72,7 @@ export const INTENTS: IntentMeta[] = [
     placeholder: 'Describe the motion and the scene…',
     needsSource: false, needsPrompt: true, allowsMask: false, isVideo: true,
     requiresModels: 'video',
-    examples: ['a slow-motion wave breaking on rocks, cinematic', 'timelapse of clouds over a mountain range'],
+    examples: ['a wave breaking on rocks in slow motion, cinematic', 'timelapse of clouds over a mountain range'],
   },
   {
     // Local lane restored 2026-07-17 (David): the lu-labs port had marked
@@ -110,11 +110,11 @@ export const INTENTS: IntentMeta[] = [
   },
   {
     id: 'music', label: 'Music', short: 'Music', icon: Music,
-    placeholder: 'Describe the track — genre, mood, tempo, instruments…',
+    placeholder: 'Describe the track. Genre, mood, tempo, instruments…',
     needsSource: false, needsPrompt: true, allowsMask: false, isVideo: false,
     cloudOnly: true,
     examples: [
-      'dreamy lo-fi hip hop, vinyl crackle, mellow keys',
+      'dreamy lofi hip hop, vinyl crackle, mellow keys',
       'epic orchestral trailer, driving percussion',
       'upbeat synthwave, retro 80s arps',
     ],

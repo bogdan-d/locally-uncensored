@@ -48,13 +48,15 @@ function PlanGrid() {
   )
 }
 
+/** Deliberately big (David 2026-07-18): the way back to Local must be as
+ *  unmissable as the plans, in every gate state. */
 function StayLocalButton({ onLocal }: { onLocal: () => void }) {
   return (
     <button
       onClick={onLocal}
-      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[0.72rem] font-medium border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+      className="w-full flex items-center justify-center gap-2 px-3 py-3 rounded-lg text-[0.85rem] font-semibold border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
     >
-      <HardDrive size={12} /> Stay on Local
+      <HardDrive size={15} /> Stay on Local
     </button>
   )
 }
@@ -193,7 +195,7 @@ export function CloudGateModal() {
             <PlanGrid />
             <StayLocalButton onLocal={stayLocal} />
             <button className={ghostBtn} onClick={() => void refresh()}>
-              <RefreshCw size={12} /> I subscribed — re-check
+              <RefreshCw size={12} /> I subscribed, check again
             </button>
           </div>
         </div>
@@ -208,7 +210,7 @@ export function CloudGateModal() {
             </p>
             <StayLocalButton onLocal={stayLocal} />
             <button className={ghostBtn} onClick={() => void refresh()}>
-              <RefreshCw size={12} /> Re-check
+              <RefreshCw size={12} /> Check again
             </button>
           </div>
         </div>
@@ -222,7 +224,7 @@ export function CloudGateModal() {
             </p>
             <StayLocalButton onLocal={stayLocal} />
             <button className={ghostBtn} onClick={() => void refresh()}>
-              <RefreshCw size={12} /> Re-check
+              <RefreshCw size={12} /> Check again
             </button>
           </div>
         </div>
@@ -240,7 +242,7 @@ export function CloudGateModal() {
             </button>
             <StayLocalButton onLocal={stayLocal} />
             <button className={ghostBtn} onClick={() => void refresh()}>
-              <RefreshCw size={12} /> Re-check
+              <RefreshCw size={12} /> Check again
             </button>
           </div>
         </div>

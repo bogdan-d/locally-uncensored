@@ -27,9 +27,9 @@ export function computeFit(sizeGB: number | undefined, vramGb: number | null): F
 // Color lives ONLY in the tiny status dot — labels stay neutral gray so the
 // grid doesn't turn into a traffic-light wall (David, 2026-07-17 design pass).
 const FIT_META: Record<Fit, { dot: string; label: string; title: string }> = {
-  fits: { dot: 'bg-emerald-500/80', label: 'Runs on your PC', title: 'Fits fully in your GPU memory — fast.' },
-  tight: { dot: 'bg-amber-500/80', label: 'Tight fit', title: 'Barely fits — parts may spill to RAM and slow it down.' },
-  big: { dot: 'bg-red-400/80', label: 'Too big for your GPU', title: 'Bigger than your GPU memory — runs mostly on CPU/RAM, slow. You can still try it.' },
+  fits: { dot: 'bg-emerald-500/80', label: 'Runs on your PC', title: 'Fits fully in your GPU memory. Fast.' },
+  tight: { dot: 'bg-amber-500/80', label: 'Tight fit', title: 'Barely fits. Parts may spill to RAM and slow it down.' },
+  big: { dot: 'bg-red-400/80', label: 'Too big for your GPU', title: 'Bigger than your GPU memory. Runs mostly on CPU/RAM, slow. You can still try it.' },
   unknown: { dot: 'bg-gray-400 dark:bg-gray-600', label: '', title: 'Hardware not detected yet.' },
 }
 
@@ -71,13 +71,13 @@ export function CapIcons({ model }: { model: DiscoverModel }) {
         <span title="Hot right now" className={c}><Flame size={11} /></span>
       )}
       {model.agent && (
-        <span title="Tool calling — works in Agent Mode" className={c}><Wrench size={11} /></span>
+        <span title="Tool calling. Works in Agent Mode" className={c}><Wrench size={11} /></span>
       )}
       {vision && (
         <span title="Understands images (vision)" className={c}><Eye size={11} /></span>
       )}
       {model.lightweight && (
-        <span title="Runs on 8 GB RAM, CPU-only — no GPU needed" className={c}><Feather size={11} /></span>
+        <span title="Runs on 8 GB RAM, CPU only. No GPU needed" className={c}><Feather size={11} /></span>
       )}
     </span>
   )
@@ -90,9 +90,11 @@ export function CapIcons({ model }: { model: DiscoverModel }) {
 export function shortBlurb(m: DiscoverModel): string {
   if (m.blurb) return m.blurb
   const d = m.description || ''
-  const afterDash = d.includes('—') ? d.slice(d.indexOf('—') + 1) : d
-  const dot = afterDash.indexOf('. ')
-  const first = dot > 0 ? afterDash.slice(0, dot) : afterDash
+  // Catalog descriptions are "Name · blurb" (middot separator, dash-free copy
+  // rule 2026-07-18); slice off the name part.
+  const afterSep = d.includes('·') ? d.slice(d.indexOf('·') + 1) : d
+  const dot = afterSep.indexOf('. ')
+  const first = dot > 0 ? afterSep.slice(0, dot) : afterSep
   const t = first.trim().replace(/\.\s*$/, '')
   return t.length > 92 ? `${t.slice(0, 89)}…` : t
 }
@@ -399,7 +401,7 @@ export function HardwareChip({ vramGb, ramGb }: { vramGb: number | null; ramGb: 
   return (
     <span
       className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-100 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.06] text-[0.6rem] text-gray-600 dark:text-gray-300"
-      title="Detected hardware — used for the 'runs on your PC' hints. Models are never hidden because of it."
+      title="Detected hardware. Used for the 'runs on your PC' hints. Models are never hidden because of it."
     >
       <HardDrive size={11} className="text-gray-400" />
       {vramGb ? <span className="tabular-nums">{Math.round(vramGb)} GB GPU</span> : null}

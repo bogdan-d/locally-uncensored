@@ -435,14 +435,14 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     // Sharded / "not compatible with llama.cpp" repos genuinely can't go via
     // Ollama (ollama/ollama#5245) — point at LM Studio.
     if (isShardedOrIncompatibleGguf(msg)) {
-      return `${modelName} can't be pulled into Ollama — its HuggingFace repo is split into parts or isn't a flat single-file GGUF. Download it via LM Studio instead (it loads sharded GGUF fine), or pick a single-file quant.`
+      return `${modelName} can't be pulled into Ollama. Its HuggingFace repo is split into parts or isn't a flat single file GGUF. Download it via LM Studio instead (it loads sharded GGUF fine), or pick a single file quant.`
     }
     // A bare HTTP 400 from `ollama pull hf.co/...` is usually an OUT-OF-DATE
     // Ollama (HF-pull support is version-gated) — the same ref succeeds on
     // current Ollama. Tell the user instead of surfacing "ollama: 400"
     // (Aldrich Ironhart, Discord 2026-06-07: "Gemma 4 26B MoE → ollama: 400").
     if (/\b400\b/.test(msg)) {
-      return `Ollama rejected the download of ${modelName} (HTTP 400). This is almost always an out-of-date Ollama — update it from ollama.com/download and retry. Otherwise download via LM Studio, or pick a single-file quant.`
+      return `Ollama rejected the download of ${modelName} (HTTP 400). This is almost always an outdated Ollama. Update it from ollama.com/download and retry. Otherwise download via LM Studio, or pick a single file quant.`
     }
     return `Download failed: ${msg}`
   }
@@ -467,7 +467,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     if (model.ollamaModel) {
       const ollamaOn = !!providers.ollama?.enabled
       if (!ollamaOn) {
-        setInstallError(`${model.name} is an Ollama-only model. Enable the Ollama provider (Settings → Providers) before downloading.`)
+        setInstallError(`${model.name} only runs on Ollama. Enable the Ollama provider (Settings → Providers) before downloading.`)
         return
       }
       if (activeProviderId && !isActiveOllama) {
@@ -527,7 +527,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         targetDir,
         totalGB: +(resolution.totalBytes / 1_073_741_824).toFixed(1),
         note: ollamaCantLoad
-          ? `Ollama can't load split GGUF (#5245) — the parts go to your LM Studio models folder. Load it from LM Studio, or pick a single-file quant for Ollama.`
+          ? `Ollama can't load split GGUF (#5245). The parts go to your LM Studio models folder. Load it from LM Studio, or pick a single file quant for Ollama.`
           : undefined,
       })
       return
@@ -551,7 +551,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
     if (useOllamaPath) {
       const ref = hfUrlToOllamaRef(realUrl, realName)
       if (!ref) {
-        setInstallError(`Cannot map ${model.name} to an Ollama HF reference — try LM Studio.`)
+        setInstallError(`Cannot map ${model.name} to an Ollama HF reference. Try LM Studio.`)
         return
       }
       try {
@@ -680,8 +680,8 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
             { key: 'all' as SizeTier, label: 'All', desc: '' },
             ...(systemVRAM ? [{ key: 'fit' as SizeTier, label: 'Fits my PC', desc: `≤${systemVRAM} GB` }] : []),
             { key: 'ultra' as SizeTier, label: 'Tiny', desc: '≤4 GB' },
-            { key: 'light' as SizeTier, label: 'Small', desc: '4–10 GB' },
-            { key: 'middle' as SizeTier, label: 'Medium', desc: '10–20 GB' },
+            { key: 'light' as SizeTier, label: 'Small', desc: '4 to 10 GB' },
+            { key: 'middle' as SizeTier, label: 'Medium', desc: '10 to 20 GB' },
             { key: 'highend' as SizeTier, label: 'Big', desc: '>20 GB' },
           ]).map(tier => (
             <button
@@ -752,7 +752,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
                   key={h}
                   onClick={() => setCivitaiHost(h)}
                   title={h === 'civitai.red'
-                    ? 'Use the civitai.red mirror — for regions where civitai.com is blocked'
+                    ? 'Use the civitai.red mirror for regions where civitai.com is blocked'
                     : 'Use civitai.com (default)'}
                   className={
                     'px-1.5 py-0.5 rounded font-mono transition-colors ' +
@@ -909,7 +909,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
       )}
 
       {/* Details modal — the full catalog description, tags and links */}
-      <Modal open={!!infoModel} onClose={() => setInfoModel(null)} title={infoModel?.group ? `${infoModel.group} — ${infoModel.name}` : (infoModel?.name || 'Model')}>
+      <Modal open={!!infoModel} onClose={() => setInfoModel(null)} title={infoModel?.group ? `${infoModel.group}: ${infoModel.name}` : (infoModel?.name || 'Model')}>
         {infoModel && (
           <div className="space-y-3">
             <p className="text-[0.72rem] text-gray-700 dark:text-gray-200 leading-relaxed">{infoModel.description}</p>
@@ -933,7 +933,7 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
         )}
       </Modal>
 
-      <Modal open={!!confirmDownload} onClose={() => setConfirmDownload(null)} title="Download multi-part model">
+      <Modal open={!!confirmDownload} onClose={() => setConfirmDownload(null)} title="Download split model">
         {confirmDownload && (
           <div className="space-y-3">
             <p className="text-[0.75rem] text-gray-700 dark:text-gray-200">
@@ -942,11 +942,11 @@ export function DiscoverModels({ category, search = '', searchSubmitToken = 0 }:
               totalling <span className="font-semibold text-gray-900 dark:text-white">{confirmDownload.totalGB} GB</span>.
             </p>
             <p className="text-[0.7rem] text-gray-500">
-              All parts must download into one folder to load as a single model. Make sure you have the disk space — and the RAM/VRAM to actually run it.
+              All parts must download into one folder to load as a single model. Make sure you have the disk space, and the RAM/VRAM to actually run it.
             </p>
             {confirmDownload.totalGB > 60 && (
               <p className="text-[0.7rem] text-amber-500">
-                That is very large for a local model — most consumer GPUs can't run it.
+                That is very large for a local model. Most consumer GPUs can't run it.
               </p>
             )}
             {confirmDownload.note && (

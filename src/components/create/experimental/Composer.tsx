@@ -173,7 +173,7 @@ export function Composer({ onOpenAdvanced }: Props) {
                   <PromptField
                     value={negativePrompt}
                     onChange={setNegativePrompt}
-                    placeholder="Negative — what to avoid…"
+                    placeholder="What to avoid…"
                     className="text-gray-400"
                   />
                 </div>
@@ -204,7 +204,7 @@ export function Composer({ onOpenAdvanced }: Props) {
                 the Composer just reflects it via the CreditsMeter. */}
             {backend === 'cloud' && <CreditsMeter />}
             {meta.id === 'upscale' && (
-              <Tooltip content="Target resolution for the super-resolution pass.">
+              <Tooltip content="Target resolution for the upscale pass.">
                 <div>
                   <Segmented
                     size="sm"
@@ -219,7 +219,7 @@ export function Composer({ onOpenAdvanced }: Props) {
             {!isUtility && (
               <>
                 <ModelChip />
-                <Tooltip content="All advanced settings — sampler, seed, LoRA, VAE and more.">
+                <Tooltip content="All advanced settings. Sampler, seed, LoRA, VAE and more.">
                   <Button variant="ghost" size="sm" icon={SlidersHorizontal} iconOnly onClick={onOpenAdvanced} title="Advanced settings" />
                 </Tooltip>
               </>
@@ -242,17 +242,17 @@ export function Composer({ onOpenAdvanced }: Props) {
 function noPromptHint(id: CreateIntent): string {
   switch (id) {
     case 'upscale':
-      return 'No prompt needed — just hit Create to enhance the image.'
+      return 'No prompt needed. Just hit Create to enhance the image.'
     case 'eraser':
-      return 'No prompt needed — paint a mask over the object to remove, then hit Create.'
+      return 'No prompt needed. Paint a mask over the object to remove, then hit Create.'
     case 'character':
-      return 'Add 4-30 photos of one person or character above, pick a trigger word, then hit Create to train.'
+      return 'Add 4 to 30 photos of one person or character above, pick a trigger word, then hit Create to train.'
     case 'lipsync':
       return 'Add the portrait (or clip) and a voice above, then hit Create to make it speak.'
     case 'motion':
       return 'Add a character image and a driving dance/pose video above, then hit Create.'
     default:
-      return 'No prompt needed — just hit Create to remove the background.'
+      return 'No prompt needed. Just hit Create to remove the background.'
   }
 }
 

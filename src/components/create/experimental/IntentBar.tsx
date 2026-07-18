@@ -44,8 +44,8 @@ export function IntentBar() {
             key={meta.id}
             role="radio"
             aria-checked={selected}
-            aria-label={locked ? `${meta.label} — runs on LU Cloud` : meta.label}
-            title={locked ? `${meta.label} — runs on LU Cloud` : meta.label}
+            aria-label={locked ? `${meta.label}, runs on LU Cloud` : meta.label}
+            title={locked ? `${meta.label}, runs on LU Cloud` : meta.label}
             onClick={() =>
               locked
                 ? setCloudTeaser({ surface: 'intent', intent: meta.id as TeaserIntent })
@@ -65,10 +65,12 @@ export function IntentBar() {
               <Icon size={16} strokeWidth={selected ? 2 : 1.75} />
             </span>
             {locked && (
+              // Brighter, theme-aware cloud tag: violet-300/80 was near
+              // invisible on light backgrounds and easy to miss on dark.
               <Cloud
-                size={9}
-                className="absolute top-1 right-1 text-violet-300/80"
-                strokeWidth={2.2}
+                size={11}
+                className="absolute top-0.5 right-0.5 text-violet-500 dark:text-violet-200"
+                strokeWidth={2.4}
                 aria-hidden
               />
             )}

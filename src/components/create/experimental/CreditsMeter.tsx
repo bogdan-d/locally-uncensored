@@ -42,14 +42,14 @@ export function CreditsMeter() {
         onClick={() => void openExternal(`${CLOUD_BASE}/pricing`)}
         className="t-control px-2 h-[var(--control-h-sm)] inline-flex items-center rounded-md bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-colors"
       >
-        {remaining <= 0 ? 'Out of credits — upgrade' : `Needs ${cost} credits (${remaining} left)`}
+        {remaining <= 0 ? 'Out of credits, upgrade' : `Needs ${cost} credits (${remaining} left)`}
       </button>
     )
   }
 
   return (
     <Tooltip
-      content={`${remaining} of ${limit} credits left this month — this ${kind === 'video' ? 'clip' : 'image'} uses ${cost}.`}
+      content={`${remaining} of ${limit} credits left this month. This ${kind === 'video' ? 'clip' : 'image'} uses ${cost}.`}
     >
       <div className="flex items-center gap-1.5 px-2 h-[var(--control-h-sm)] rounded-md bg-white/[0.04] text-gray-400 t-control">
         <div className="w-12 h-1 rounded-full bg-white/10 overflow-hidden">
