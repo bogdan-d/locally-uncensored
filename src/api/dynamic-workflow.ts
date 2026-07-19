@@ -1376,12 +1376,22 @@ export function buildMusicWorkflow(params: LocalOpParams, seed: number, allNodes
   workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [ckptId, 0], shift: 5.0 } }
   const latentId = String(n++)
   workflow[latentId] = { class_type: latentNode, inputs: { seconds, batch_size: 1 } }
+  // ACE-Step samples on the flow-match euler/simple pairing, NOT the composer's
+  // image-model sampler (dpmpp_2m/karras etc. leaks in through the shared knobs).
+  // And the 1.5 TURBO checkpoint is distilled for ~10 steps at cfg 1.0 — the
+  // shared 'ace' default (50 steps, cfg 5) overcooks it into near-silence
+  // (measured: -43 dB mean output vs -18 dB at the turbo recipe, David's "quiet
+  // noise" bug). Pin the turbo recipe by name; other ACE checkpoints keep the
+  // composer's step/cfg but still sample on euler/simple.
+  const isTurbo = /turbo/.test(params.model.toLowerCase())
+  const musicSteps = isTurbo ? Math.min(params.steps || 10, 10) : params.steps
+  const musicCfg = isTurbo ? 1.0 : params.cfgScale
   const samplerId = String(n++)
   workflow[samplerId] = {
     class_type: 'KSampler',
     inputs: {
       model: [shiftId, 0], positive: [posId, 0], negative: [negId, 0], latent_image: [latentId, 0],
-      seed, steps: params.steps, cfg: params.cfgScale, sampler_name: params.sampler, scheduler: params.scheduler, denoise: 1.0,
+      seed, steps: musicSteps, cfg: musicCfg, sampler_name: 'euler', scheduler: 'simple', denoise: 1.0,
     },
   }
   const decodeId = String(n++)
