@@ -1867,8 +1867,17 @@ mod tests {
 /// mode reloads everything LAZILY on first use, so this is safe to run on every
 /// switch into cloud and on launch-in-cloud. (LM Studio is offloaded separately
 /// by the frontend via `lmstudio_unload_model("--all")`.)
+/// `include_comfyui` = whether to also free ComfyUI's VRAM. Cloud switch passes
+/// nothing (defaults true — release everything). A LOCAL render passes `false`:
+/// it wants the chat LLMs out of VRAM to make room, but ComfyUI keeps its own
+/// checkpoint cached across consecutive Create runs (freeing it here would force
+/// a slow reload between every generate).
 #[tauri::command]
-pub fn offload_local_models(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+pub fn offload_local_models(
+    state: State<'_, AppState>,
+    include_comfyui: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let free_comfy = include_comfyui.unwrap_or(true);
     let mut freed: Vec<&str> = Vec::new();
 
     // 1) Whisper STT — the python server holds the model resident; stopping it
@@ -1895,12 +1904,13 @@ pub fn offload_local_models(state: State<'_, AppState>) -> Result<serde_json::Va
     }
 
     // 4) ComfyUI — free VRAM/RAM without killing the server, so the next local
-    //    render just reloads the checkpoint (no slow process restart).
-    if free_comfyui_memory() {
+    //    render just reloads the checkpoint (no slow process restart). Skipped
+    //    when a local render is the caller (it keeps its own checkpoint cached).
+    if free_comfy && free_comfyui_memory() {
         freed.push("comfyui");
     }
 
-    println!("[Offload] cloud mode — released local model backends: {:?}", freed);
+    println!("[Offload] released local model backends (comfyui={}): {:?}", free_comfy, freed);
     Ok(serde_json::json!({ "offloaded": freed }))
 }
 
@@ -1946,7 +1956,9 @@ fn offload_ollama_loaded_models() -> bool {
 
 /// Ask ComfyUI to unload checkpoints and free memory, keeping the server up so
 /// the next local render reloads on demand. Best-effort (default port 8188).
-fn free_comfyui_memory() -> bool {
+/// Also used by the character trainer — on a 12 GB card a cached video
+/// checkpoint next door is the difference between training and CUDA OOM.
+pub(crate) fn free_comfyui_memory() -> bool {
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()

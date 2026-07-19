@@ -116,6 +116,7 @@ fn main() {
             // Installation
             commands::install::install_comfyui,
             commands::install::install_comfyui_status,
+            commands::install::update_comfyui,
             commands::install::cancel_comfyui_install,
             commands::install::install_ollama,
             commands::install::install_ollama_status,
@@ -136,6 +137,14 @@ fn main() {
             commands::install::install_tts,
             commands::install::install_tts_status,
             commands::install::check_git_installed,
+            // Local character trainer (musubi-tuner)
+            commands::trainer::install_character_trainer,
+            commands::trainer::character_trainer_status,
+            commands::trainer::stage_training_image,
+            commands::trainer::clear_training_set,
+            commands::trainer::start_character_training,
+            commands::trainer::character_training_status,
+            commands::trainer::cancel_character_training,
             // Whisper STT
             commands::whisper::whisper_status,
             commands::whisper::transcribe,

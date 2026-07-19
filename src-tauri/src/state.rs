@@ -200,6 +200,15 @@ pub struct AppState {
     /// Progress/log state for the in-app Piper neural-TTS installer (mirrors
     /// `whisper_install`); `install_tts` writes it, `install_tts_status` reads it.
     pub tts_install: Arc<Mutex<InstallState>>,
+    /// 2.5.8 local character trainer (musubi-tuner in its own venv, outside
+    /// the ComfyUI dir). `trainer_install` streams the one-time environment
+    /// setup; `trainer_run` streams an actual training run (status
+    /// idle/running/complete/error, logs, step counters in
+    /// download_progress/total). Commands live in `commands::trainer`.
+    pub trainer_install: Arc<Mutex<InstallState>>,
+    pub trainer_run: Arc<Mutex<InstallState>>,
+    pub trainer_cancel: Arc<AtomicBool>,
+    pub trainer_process: Arc<Mutex<Option<u32>>>,
     pub searxng_install: Mutex<InstallState>,
     pub searxng_available: AtomicBool,
     /// Resolved Python binary path. Empty string means "no real Python on
@@ -300,6 +309,10 @@ impl AppState {
             python_install: Arc::new(Mutex::new(InstallState::default())),
             whisper_install: Arc::new(Mutex::new(InstallState::default())),
             tts_install: Arc::new(Mutex::new(InstallState::default())),
+            trainer_install: Arc::new(Mutex::new(InstallState::default())),
+            trainer_run: Arc::new(Mutex::new(InstallState::default())),
+            trainer_cancel: Arc::new(AtomicBool::new(false)),
+            trainer_process: Arc::new(Mutex::new(None)),
             searxng_install: Mutex::new(InstallState::default()),
             searxng_available: AtomicBool::new(false),
             python_bin: Arc::new(Mutex::new(python_bin)),

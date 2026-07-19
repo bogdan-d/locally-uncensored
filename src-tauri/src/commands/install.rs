@@ -809,6 +809,161 @@ pub fn install_comfyui_status(state: State<'_, AppState>) -> Result<serde_json::
     }))
 }
 
+/// Update an existing ComfyUI install in place: `git pull --ff-only` plus a
+/// venv-aware `pip install -r requirements.txt`. The 2.5.8 local Create lanes
+/// (music / talking character / extend / motion) need node classes that ship
+/// with current ComfyUI cores, and the UI gates on node PRESENCE — when the
+/// nodes are missing this command is the one-click "Update ComfyUI" path.
+/// Progress streams through the same `install_status` channel the installer
+/// uses, so the existing `install_comfyui_status` polling UI works unchanged.
+#[tauri::command]
+pub fn update_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    {
+        let mut install = state.install_status.lock().unwrap();
+        if install.status == "installing" || install.status == "downloading" {
+            return Ok(serde_json::json!({"status": "already_installing"}));
+        }
+        install.status = "installing".to_string();
+        install.logs.clear();
+        install.logs.push("Updating ComfyUI...".to_string());
+    }
+
+    info!("comfyui update start");
+
+    let comfy_dir = {
+        let p = state.comfy_path.lock().unwrap().clone();
+        p.or_else(crate::commands::process::find_comfyui_path)
+            .map(PathBuf::from)
+    };
+    let fail = |state: &State<'_, AppState>, msg: &str| -> Result<serde_json::Value, String> {
+        let mut install = state.install_status.lock().unwrap();
+        install.status = "error".to_string();
+        install.logs.push(msg.to_string());
+        error!("comfyui update aborted: {}", msg);
+        Err(msg.to_string())
+    };
+    let Some(comfy_dir) = comfy_dir else {
+        return fail(&state, "ComfyUI not found. Install ComfyUI first.");
+    };
+    if !comfy_dir.join(".git").exists() {
+        // Portable / zip installs carry no git metadata — nothing to pull.
+        return fail(
+            &state,
+            "This ComfyUI was not installed from git, so it can't be updated in place. \
+             Update it with its own updater, or reinstall from Settings.",
+        );
+    }
+
+    // Prefer the install's venv Python (same preference the launcher uses);
+    // refuse without a usable interpreter — a pulled core with stale
+    // requirements is worse than no update (frontend package pins move often).
+    let python_bin = crate::python::resolve_comfyui_venv_python(&comfy_dir)
+        .unwrap_or_else(|| state.python_bin.lock().unwrap().clone());
+    if python_bin.is_empty() || !crate::python::is_real_python(&python_bin) {
+        return fail(
+            &state,
+            "No usable Python found for this ComfyUI. Install Python first, then retry the update.",
+        );
+    }
+
+    let install_status = state.install_status.clone();
+    std::thread::spawn(move || {
+        let update = |status: &str, msg: &str| {
+            if let Ok(mut s) = install_status.lock() {
+                s.status = status.to_string();
+                s.logs.push(msg.to_string());
+            }
+        };
+
+        #[cfg(target_os = "windows")]
+        {
+            let probe = windows_git_probe();
+            if probe == WindowsGitState::Missing {
+                update("error", &windows_git_install_hint(&probe).unwrap_or_default());
+                return;
+            }
+        }
+
+        update("installing", "Step 1/2: Pulling the latest ComfyUI...");
+        let mut pull = Command::new("git");
+        // --ff-only: a user-modified checkout must not silently merge; surface
+        // the divergence honestly instead.
+        pull.args(["pull", "--ff-only"])
+            .current_dir(&comfy_dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        #[cfg(target_os = "windows")]
+        pull.creation_flags(CREATE_NO_WINDOW);
+        match pull.output() {
+            Ok(o) if o.status.success() => {
+                let out = String::from_utf8_lossy(&o.stdout);
+                let line = out.lines().last().unwrap_or("").trim().to_string();
+                update(
+                    "installing",
+                    if line.is_empty() { "Repository updated." } else { &line },
+                );
+            }
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                update(
+                    "error",
+                    &format!(
+                        "git pull failed. If you changed files inside the ComfyUI folder, \
+                         stash or revert them and retry.\n\n{}",
+                        stderr.trim(),
+                    ),
+                );
+                return;
+            }
+            Err(e) => {
+                update("error", &format!("Could not run git: {}", e));
+                return;
+            }
+        }
+
+        update(
+            "installing",
+            "Step 2/2: Updating Python dependencies (live pip output below)...",
+        );
+        let reqs = comfy_dir.join("requirements.txt");
+        if reqs.exists() {
+            let reqs_str = reqs.to_string_lossy().to_string();
+            let req_args = vec![
+                "-m", "pip", "install",
+                "--progress-bar", "off",
+                "--no-input",
+                "-r", reqs_str.as_str(),
+            ];
+            match pip_install_streaming_with_retry_cancellable(
+                &req_args,
+                &python_bin,
+                3,
+                &install_status,
+                None,
+            ) {
+                Ok(()) => update("installing", "Dependencies updated."),
+                Err(diagnosis) => {
+                    // Same stance as the installer's step 3: optional deps may
+                    // fail while ComfyUI still starts — log, don't abort.
+                    println!("[Update] Requirements warning: {}", diagnosis);
+                    update(
+                        "installing",
+                        "Some dependencies had warnings (non-critical, ComfyUI should still start).",
+                    );
+                }
+            }
+        }
+
+        println!("[Update] ComfyUI update complete");
+        update(
+            "complete",
+            "ComfyUI updated. Restart ComfyUI to load the new nodes.",
+        );
+    });
+
+    Ok(serde_json::json!({"status": "installing"}))
+}
+
 // ── Shared helper: download a file with progress tracking ────────────────────
 
 fn download_file_blocking(

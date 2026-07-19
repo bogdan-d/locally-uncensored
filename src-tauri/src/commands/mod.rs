@@ -17,6 +17,7 @@ pub mod search;
 pub mod secret;
 pub mod shell;
 pub mod system;
+pub mod trainer;
 pub mod tts;
 pub mod waitlist;
 pub mod whisper;
