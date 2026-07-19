@@ -774,14 +774,24 @@ describe('createStore', () => {
       expect(after.source).not.toBeNull()
     })
 
-    it('keeps character — its local training lane arrived in 2.5.8 (musubi)', () => {
+    it('clears character — training is cloud-first (David 2026-07-19), no local lane in 2.5.8', () => {
       const s = useCreateStore.getState()
       s.setBackend('cloud')
       s.setIntent('character')
       useCreateStore.getState().setBackend('local')
       const after = useCreateStore.getState()
-      expect(after.cloudOp).toBe('character')
-      expect(after.intent()).toBe('character')
+      expect(after.cloudOp).toBeNull()
+      expect(after.intent()).not.toBe('character')
+    })
+
+    it('keeps motion — its DWPose + VACE local lane shipped in 2.5.8', () => {
+      const s = useCreateStore.getState()
+      s.setBackend('cloud')
+      s.setIntent('motion')
+      useCreateStore.getState().setBackend('local')
+      const after = useCreateStore.getState()
+      expect(after.cloudOp).toBe('motion')
+      expect(after.intent()).toBe('motion')
     })
 
     it('flipping to cloud never resets anything', () => {

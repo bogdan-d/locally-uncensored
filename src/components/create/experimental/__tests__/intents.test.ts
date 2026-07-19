@@ -5,14 +5,15 @@ import { LOCAL_LANE_OPS } from '../../../../stores/createStore'
 // David 2026-07-10 made the advanced ops cloud-only; David 2026-07-12 brought
 // Edit BACK to local as the 4th local tab (checkpoint mask inpaint —
 // VAEEncodeForInpaint / InpaintModelConditioning); David 2026-07-17 brought
-// Animate (local I2V) back as the 5th — the lu-labs port had regressed it to
-// cloud-only. 2.5.8 gives ALL five specialized categories REAL local lanes
-// (hasLocalLane): music / lipsync / extend / motion on core ComfyUI node
-// families, character training on the bundled musubi trainer. Only upscale
-// and eraser remain hosted-only.
+// Animate (local I2V) back as the 5th. 2.5.8 gives FOUR specialized categories
+// REAL local lanes (hasLocalLane): music / lipsync / extend / motion on core
+// ComfyUI node families (motion additionally needs the DWPose pack, which
+// loads fine on Windows via the OpenCV CPU fallback). Upscale, eraser AND
+// character stay hosted-only — character training is cloud-first (David
+// 2026-07-19) until a local trainer runtime ships.
 describe('intent cloud gating', () => {
-  it('upscale and eraser stay hosted-only (no local lane)', () => {
-    for (const id of ['upscale', 'eraser'] as const) {
+  it('upscale, eraser and character stay hosted-only (no local lane)', () => {
+    for (const id of ['upscale', 'eraser', 'character'] as const) {
       expect(INTENT_MAP[id].cloudOnly, id).toBe(true)
       expect(INTENT_MAP[id].hasLocalLane, id).toBeUndefined()
     }
@@ -25,7 +26,7 @@ describe('intent cloud gating', () => {
   })
 
   it('the 2.5.8 lanes are dual: hosted clip AND a local lane', () => {
-    for (const id of ['music', 'lipsync', 'extend', 'motion', 'character'] as const) {
+    for (const id of ['music', 'lipsync', 'extend', 'motion'] as const) {
       expect(INTENT_MAP[id].cloudOnly, id).toBe(true)
       expect(INTENT_MAP[id].hasLocalLane, id).toBe(true)
     }
@@ -36,9 +37,9 @@ describe('intent cloud gating', () => {
     expect(fromMeta).toEqual([...LOCAL_LANE_OPS].sort())
   })
 
-  it('the local IntentBar filter keeps the 5 classic tabs plus the 5 lanes selectable', () => {
+  it('the local IntentBar filter keeps the 5 classic tabs plus the 4 lanes selectable', () => {
     const selectable = INTENTS.filter((m) => !m.cloudOnly || m.hasLocalLane).map((m) => m.id)
-    expect(selectable).toEqual(['image', 'edit', 'removebg', 'video', 'animate', 'character', 'lipsync', 'music', 'extend', 'motion'])
+    expect(selectable).toEqual(['image', 'edit', 'removebg', 'video', 'animate', 'lipsync', 'music', 'extend', 'motion'])
   })
 
   it('local edit gates on the inpaint capability + image models', () => {
@@ -56,15 +57,15 @@ describe('intent cloud gating', () => {
     expect(INTENT_MAP.animate.requiresModels).toBe('video')
   })
 
-  it('the lanes gate on their own model kinds + the pose capability', () => {
+  it('the lanes gate on their own model kinds', () => {
     expect(INTENT_MAP.music.requiresModels).toBe('audio')
     expect(INTENT_MAP.lipsync.requiresModels).toBe('lipsync')
     // Extend rides the regular i2v-capable video list (last-frame continue).
     expect(INTENT_MAP.extend.requiresModels).toBe('video')
+    // Motion gates on the VACE/Animate model list AND the DWPose pack.
     expect(INTENT_MAP.motion.requiresModels).toBe('motion')
     expect(INTENT_MAP.motion.capability).toBe('dwpose')
-    // Character gates itself inside its panel (trainer env + base files),
-    // not on a ComfyUI model list.
+    // Character is hosted-only — no local model gate.
     expect(INTENT_MAP.character.requiresModels).toBeUndefined()
   })
 })

@@ -92,20 +92,20 @@ export const INTENTS: IntentMeta[] = [
   },
 
   // ── 2.5.8 specialized categories (2026-07-17 David). All have hosted
-  // endpoints (cloudOnly = cloud clip/teaser exists) and ALL run locally
-  // since 2.5.8 (hasLocalLane) — core ComfyUI node families (ACE audio,
-  // Wan S2V, I2V last-frame chain, Wan Animate/VACE) plus the bundled
-  // musubi trainer for characters. Their composer surfaces own the extra
-  // inputs (training set, audio, driving video, extend pick), so
-  // needsSource / needsPrompt describe only the shared composer scaffolding. ──
+  // endpoints (cloudOnly = cloud clip/teaser exists); music, lipsync, extend
+  // and motion ALSO run locally (hasLocalLane) on core ComfyUI node families
+  // (ACE audio, Wan S2V, I2V last-frame chain, Wan VACE/Animate). Their
+  // composer surfaces own the extra inputs (training set, audio, driving
+  // video, extend pick), so needsSource / needsPrompt describe only the
+  // shared composer scaffolding. ──
   {
-    // Local lane trains a Z-Image LoRA on the user's GPU (Rust-managed
-    // musubi-tuner venv); the panel gates itself on trainer env + base files,
-    // so no requiresModels here.
+    // Character training is CLOUD-FIRST (David 2026-07-19): the local lane
+    // needs a whole trainer runtime (musubi-tuner venv) that 2.5.8 does not
+    // ship, so no hasLocalLane until that exists.
     id: 'character', label: 'Character Studio', short: 'Character', icon: UserRound,
     placeholder: 'Describe the scene for your character…',
     needsSource: false, needsPrompt: false, allowsMask: false, isVideo: false,
-    cloudOnly: true, hasLocalLane: true,
+    cloudOnly: true,
     examples: [],
   },
   {
@@ -139,13 +139,15 @@ export const INTENTS: IntentMeta[] = [
     examples: [],
   },
   {
-    // Character image + driving video are composer chips (see lipsync note).
-    // Local lane needs the DWPose extractor (controlnet_aux pack) on top of
-    // the Animate/VACE model files.
+    // Local lane on Wan VACE/Animate + DWPose (comfyui_controlnet_aux).
+    // DWPose imports fine on Windows (falls back to OpenCV on CPU when
+    // onnxruntime-gpu is absent — slower, not broken); the pack only shows
+    // up after a ComfyUI restart, which installCapability performs.
     id: 'motion', label: 'Motion Control', short: 'Motion', icon: PersonStanding,
     placeholder: 'Optional: extra style/scene hints…',
     needsSource: false, needsPrompt: false, allowsMask: false, isVideo: true,
-    cloudOnly: true, hasLocalLane: true, requiresModels: 'motion', capability: 'dwpose',
+    capability: 'dwpose',
+    cloudOnly: true, hasLocalLane: true, requiresModels: 'motion',
     examples: [],
   },
 ]

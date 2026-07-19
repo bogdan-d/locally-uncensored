@@ -37,11 +37,13 @@ export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
 
 /** Which of the specialized categories ALSO run on the local ComfyUI backend
  *  (2.5.8 local lanes: ACE music, Wan S2V talking character, last-frame-chain
- *  extend, Wan Animate/VACE motion, musubi character training). Single source
- *  of truth for the intent metadata, the IntentBar lock state and the
- *  backend-flip cleanup below — lives here (lowest layer) so intents.ts can
- *  derive from it without a component→store import cycle. */
-export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character'])
+ *  extend, Wan VACE/Animate motion). Single source of truth for the intent
+ *  metadata, the IntentBar lock state and the backend-flip cleanup below —
+ *  lives here (lowest layer) so intents.ts can derive from it without a
+ *  component→store import cycle. */
+// Character stays cloud-first (David 2026-07-19): its local lane needs a
+// trainer runtime (musubi venv) that 2.5.8 does not ship.
+export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion'])
 
 /** An audio/video file (or training image) staged in the composer before
  *  upload. `blob` carries the bytes for the cloud upload; `url` is a local

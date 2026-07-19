@@ -1,6 +1,5 @@
 import { Cloud } from 'lucide-react'
 import { useCreateStore } from '../../../stores/createStore'
-import { useSettingsStore } from '../../../stores/settingsStore'
 import { useUIStore, type CloudTeaserTarget } from '../../../stores/uiStore'
 import { INTENTS } from './intents'
 import { cn } from '../ui/cn'
@@ -18,17 +17,14 @@ export function IntentBar() {
   const intent = useCreateStore((s) => s.intent())
   const setIntent = useCreateStore((s) => s.setIntent)
   const backend = useCreateStore((s) => s.backend)
-  const teasersEnabled = useSettingsStore((s) => s.settings.cloudTeasersEnabled)
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
-  // Hosted-ONLY intents (upscale/eraser + character training) are live on the
-  // cloud backend; on local they stay VISIBLE as locked teasers (cloud glyph,
-  // sheet on tap) while the discovery layer is on. The 2.5.8 lanes with
-  // hasLocalLane (music / lipsync / extend / motion) are REAL local tabs —
-  // always selectable, always visible; their cloud glyph becomes a small
-  // "Try cloud" affordance that opens the same teaser sheet.
-  const intents = INTENTS.filter(
-    (m) => !m.cloudOnly || m.hasLocalLane || backend === 'cloud' || teasersEnabled,
-  )
+  // Every tool is always in the bar. The 2.5.8 lanes with hasLocalLane
+  // (lipsync / music / extend / motion) are REAL local tabs — plain selectable
+  // pills with NO cloud glyph (David 2026-07-19: the top row only carries a
+  // cloud badge for the genuinely hosted-only tools). Only upscale, eraser and
+  // character training (cloudOnly, no local backend) render as locked,
+  // cloud-tagged pills in local mode; a tap opens the teaser sheet / plans gate.
+  const intents = INTENTS
 
   return (
     <div
@@ -41,10 +37,6 @@ export function IntentBar() {
     >
       {intents.map((meta) => {
         const locked = meta.cloudOnly === true && !meta.hasLocalLane && backend !== 'cloud'
-        // Local mode + a lane that also exists hosted: show the glyph as a
-        // real "Try cloud" button next to the (unlocked) pill.
-        const tryCloud = meta.cloudOnly === true && meta.hasLocalLane === true
-          && backend !== 'cloud' && teasersEnabled
         const selected = !locked && intent === meta.id
         const Icon = meta.icon
         return (
@@ -81,31 +73,6 @@ export function IntentBar() {
                 strokeWidth={2.4}
                 aria-hidden
               />
-            )}
-            {tryCloud && (
-              // Nested interactive element inside a radio is invalid — a
-              // keyboard-reachable span with a click handler keeps the pill
-              // itself the only button. Opens the cloud sheet for this lane.
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label={`Try ${meta.label} on LU Cloud`}
-                title={`Try ${meta.label} on LU Cloud`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setCloudTeaser({ surface: 'intent', intent: meta.id as TeaserIntent })
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    e.stopPropagation()
-                    setCloudTeaser({ surface: 'intent', intent: meta.id as TeaserIntent })
-                  }
-                }}
-                className="absolute top-0 right-0 p-0.5 rounded-full text-violet-500 dark:text-violet-200 hover:scale-125 transition-transform"
-              >
-                <Cloud size={11} strokeWidth={2.4} />
-              </span>
             )}
             <span
               className={cn(
