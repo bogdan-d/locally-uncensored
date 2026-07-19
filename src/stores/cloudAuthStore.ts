@@ -15,8 +15,9 @@ export interface CloudAccount {
   licenseActive: boolean
   /** Canonical tier slug from /api/me, null while signed out/unknown. */
   tier: string | null
-  /** Launch gate (Max-only closed beta). Licensed-but-gated users get the
-   *  closed-beta wall instead of the cloud. */
+  /** Server-driven access gate. Used by the 2.5.7 Max-only closed beta;
+   *  the beta is fully open since, so servers now send true for every
+   *  licensed account — kept as a kill-switch the server owns. */
   access: boolean
   quota: CloudQuota | null
 }

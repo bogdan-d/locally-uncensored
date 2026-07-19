@@ -51,7 +51,8 @@ async function probeAccount(): Promise<void> {
       return
     }
     const licenseActive = me.license?.status === 'active'
-    // Launch gate (Max-only closed beta): absent on older servers = allowed.
+    // Server-driven access gate (beta is fully open — servers send true for
+    // every licensed account): absent on older servers = allowed.
     const access = me.license?.access !== false
     const tier = me.license?.tier ?? null
     let quota: CloudQuota | null = null

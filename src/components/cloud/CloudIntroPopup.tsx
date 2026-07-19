@@ -1,14 +1,16 @@
-// One-time "LU Cloud is here" hello (David 2026-07-13, shipped with 2.5.7).
-// Every install sees this exactly once on its first launch after onboarding,
-// auto-updaters and fresh installs alike, then never again: any way of closing
-// it writes the localStorage flag, and that flag rides the store-backup list so
-// even an NSIS localStorage wipe can't resurrect it.
+// THE one Cloud popup at app start (David 2026-07-19, 2.5.8): every install
+// sees this exactly once on its first launch after onboarding, then never
+// again — any way of closing it writes the localStorage flag, and that flag
+// rides the store-backup list so even an NSIS localStorage wipe can't
+// resurrect it. Two choices only: "Sign in or create account" opens the
+// normal in-app gate (login / plans; payment leaves for the browser from
+// there), and an equally visible "I don't want an account" which ALSO retires
+// the whole Cloud discovery layer (picker teaser rows, tap-sheets) via
+// cloudTeasersEnabled — after that tap, nothing Cloud pitches you again.
+// Settings can re-enable the discovery layer later.
 //
-// It reads the founding-wave seat count LIVE from /api/launch/seats each time it
-// opens (the server sends no-store) — never a cached or guessed number. Copy
-// splits the spec's line into a bold title + gray detail (same words, no
-// em-dash). "Check out the Cloud" opens the normal in-app gate (Get LU Cloud /
-// Stay on Local); payment leaves for the browser from the plan buttons there.
+// It reads the founding-wave seat count LIVE from /api/launch/seats each time
+// it opens (the server sends no-store) — never a cached or guessed number.
 
 import { useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
@@ -31,6 +33,7 @@ type SeatState =
 
 export function CloudIntroPopup() {
   const appMode = useSettingsStore((s) => s.settings.appMode)
+  const updateSettings = useSettingsStore((s) => s.updateSettings)
   const setCloudGateOpen = useUIStore((s) => s.setCloudGateOpen)
   const [open, setOpen] = useState(false)
   const [seatState, setSeatState] = useState<SeatState>({ phase: 'loading' })
@@ -73,11 +76,20 @@ export function CloudIntroPopup() {
     setOpen(false)
   }
 
-  const checkOut = () => {
-    // Open the normal in-app onboarding gate (Get LU Cloud / Stay on Local),
-    // not the website directly — payment leaves for the browser from there.
+  const signIn = () => {
+    // Open the normal in-app onboarding gate (login / Get LU Cloud), not the
+    // website directly — payment leaves for the browser from there.
     close()
     setCloudGateOpen(true)
+  }
+
+  const decline = () => {
+    // "I don't want an account": beyond the once-ever close, retire the whole
+    // Cloud discovery layer so nothing pitches Cloud again (Settings can
+    // re-enable it). Cloud-only tools keep their tap-gate — that is feature
+    // access, not a pitch.
+    updateSettings({ cloudTeasersEnabled: false })
+    close()
   }
 
   // Loading shows the headline alone (no flash of wrong numbers); ready uses the
@@ -110,16 +122,16 @@ export function CloudIntroPopup() {
         )}
         <div className="w-full flex flex-col gap-1.5 pt-1">
           <button
-            onClick={checkOut}
+            onClick={signIn}
             className="w-full px-3 py-2 rounded-md text-[0.7rem] font-medium text-white bg-[#7c3aed] hover:bg-[#6d31d6] transition-colors"
           >
-            Check out the Cloud
+            Sign in or create account
           </button>
           <button
-            onClick={close}
-            className="w-full px-3 py-1.5 rounded-md text-[0.65rem] text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+            onClick={decline}
+            className="w-full px-3 py-2 rounded-md text-[0.7rem] font-medium text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-white/15 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
           >
-            Dismiss
+            I don't want an account
           </button>
         </div>
       </div>

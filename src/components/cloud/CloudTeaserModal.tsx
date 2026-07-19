@@ -55,8 +55,18 @@ export function CloudTeaserModal() {
   const setCloudExampleVideo = useUIStore((s) => s.setCloudExampleVideo)
   const setIntent = useCreateStore((s) => s.setIntent)
   const { updateSettings } = useSettingsStore()
+  const teasersEnabled = useSettingsStore((s) => s.settings.cloudTeasersEnabled)
 
-  const close = () => setCloudTeaser(null)
+  // One-time onboarding (David 2026-07-19): the Cloud discovery layer is meant
+  // to appear ONCE per user, never again — not after updates either. Any
+  // dismissal of this sheet (button, backdrop, X, Try local / Try cloud) retires
+  // the whole discovery layer permanently; the persisted flag survives updates,
+  // and Settings can re-enable it. Cloud-only *features* (upscale / eraser) stay
+  // accessible regardless — their sheet renders on tap, not on this flag.
+  const close = () => {
+    if (teasersEnabled) updateSettings({ cloudTeasersEnabled: false })
+    setCloudTeaser(null)
+  }
   // 2.5.8: the lanes that ALSO run locally get a "Try local" path — the sheet
   // stops being a pure upsell and becomes the fork between the two lanes.
   const localLane =
@@ -118,8 +128,8 @@ export function CloudTeaserModal() {
               <p className="text-[0.7rem] leading-relaxed text-gray-400">{copy.line}</p>
               <p className="text-[0.62rem] leading-relaxed text-gray-500">
                 {localLane
-                  ? 'Runs on your PC with downloaded models, or on LU Cloud where datacenter GPUs do the heavy lifting. Cloud is part of the Max plan (closed beta).'
-                  : 'Runs on LU Cloud. Your PC stays cool while datacenter GPUs do the heavy lifting. Part of the Max plan (closed beta).'}
+                  ? 'Runs on your PC with downloaded models, or on LU Cloud where datacenter GPUs do the heavy lifting.'
+                  : 'Runs on LU Cloud. Your PC stays cool while datacenter GPUs do the heavy lifting.'}
               </p>
               <div className="flex items-center gap-2 pt-1">
                 <button
@@ -151,12 +161,6 @@ export function CloudTeaserModal() {
                   Not now
                 </button>
               </div>
-              <button
-                onClick={() => { updateSettings({ cloudTeasersEnabled: false }); close() }}
-                className="w-full text-center text-[0.58rem] text-gray-600 hover:text-gray-400 transition-colors pt-0.5"
-              >
-                Hide Cloud features in Local mode
-              </button>
             </div>
           </motion.div>
         </motion.div>

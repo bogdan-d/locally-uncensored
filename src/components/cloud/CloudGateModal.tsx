@@ -109,7 +109,7 @@ export function CloudGateModal() {
   // gate opens, a fresh login, or a re-check after subscribing — flip the
   // global switch and get out of the way, via the one-time cloud onboarding on
   // the first successful flip. `open` MUST be a dependency (not the old wasOpen
-  // ref): the one-time intro popup's "Check out the Cloud" can open this gate
+  // ref): the one-time intro popup's "Sign in or create account" can open this gate
   // for a signed-in, fully provisioned user who's still in local mode. In that
   // case `available` was already true before the gate opened, so an effect
   // keyed only on `available` never re-runs — and the gate hangs forever on the
@@ -204,9 +204,9 @@ export function CloudGateModal() {
           <CloudHero />
           <div className="space-y-3 max-w-xs mx-auto">
             <p className="text-[0.72rem] text-center text-gray-600 dark:text-gray-400">
-              LU Cloud is in a closed beta right now (Max plan only). Your plan is
-              active, but the beta hasn't opened for it yet. You'll get in the
-              moment it does, nothing to reinstall.
+              Your plan is active, but the server hasn't switched Cloud on for
+              this account yet. Hit Check again in a moment, nothing to
+              reinstall.
             </p>
             <StayLocalButton onLocal={stayLocal} />
             <button className={ghostBtn} onClick={() => void refresh()}>

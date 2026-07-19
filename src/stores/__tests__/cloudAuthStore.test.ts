@@ -60,7 +60,7 @@ describe('deriveCloudAvailable', () => {
     expect(deriveCloudAvailable({ user: { id: 'u' }, ...account({ quota: null }) })).toBe(false)
     // self-host tier: licensed but 0 media credits
     expect(deriveCloudAvailable({ user: { id: 'u' }, ...account({ quota: quota(0) }) })).toBe(false)
-    // Max-only closed beta: licensed non-max account is gated out
+    // Server-driven access gate (legacy closed-beta wall): access false gates out
     expect(deriveCloudAvailable({ user: { id: 'u' }, ...account({ access: false, quota: quota(800) }) })).toBe(false)
     expect(deriveCloudAvailable({ user: { id: 'u' }, ...account({ quota: quota(800) }) })).toBe(true)
   })
