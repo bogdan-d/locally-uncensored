@@ -405,6 +405,7 @@ export async function backendCall<T = any>(
     download_model_to_path: { path: "/local-api/download-model-to-path", method: "POST" },
     detect_model_path: { path: "/local-api/detect-model-path", method: "POST" },
     check_model_sizes: { path: "/local-api/check-model-sizes", method: "POST" },
+    delete_comfy_model: { path: "/local-api/delete-comfy-model", method: "POST" },
     download_progress: { path: "/local-api/download-progress" },
     pause_download: { path: "/local-api/pause-download", method: "POST" },
     cancel_download: { path: "/local-api/cancel-download", method: "POST" },

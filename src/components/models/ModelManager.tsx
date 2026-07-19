@@ -13,7 +13,8 @@ import { DiscoverModels } from './DiscoverModels'
 import { Modal } from '../ui/Modal'
 import { GlowButton } from '../ui/GlowButton'
 import { showModel } from '../../api/ollama'
-import { checkComfyConnection } from '../../api/comfyui'
+import { checkComfyConnection, refreshComfyModels } from '../../api/comfyui'
+import { backendCall } from '../../api/backend'
 import type { ModelCategory, AIModel } from '../../types/models'
 
 // One category drives BOTH views (Discover + Installed) — the old split
@@ -72,9 +73,24 @@ export function ModelManager() {
     }
   }
 
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const handleDelete = async (name: string) => {
-    await removeModel(name)
-    setConfirmDelete(null)
+    try {
+      const model = models.find((m: AIModel) => m.name === name)
+      if (model && (model.type === 'image' || model.type === 'video')) {
+        // ComfyUI file model (cpl.sardinas7489, Discord): delete the file from
+        // the models tree, then rescan so the enum and the list drop it.
+        await backendCall('delete_comfy_model', { filename: name })
+        await refreshComfyModels().catch(() => { /* rescan is best-effort */ })
+        await fetchModels()
+      } else {
+        await removeModel(name)
+      }
+      setConfirmDelete(null)
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : String(e))
+      setConfirmDelete(null)
+    }
   }
 
   const filteredModels = models.filter((m: AIModel) => m.type === mode)
@@ -317,7 +333,12 @@ export function ModelManager() {
                               onSelect={() => setActiveModel(model.name)}
                               onDelete={() => setConfirmDelete(model.name)}
                               onInfo={() => handleInfo(model.name)}
-                              canDelete={ollamaEnabled && model.type === 'text' && (!('provider' in model) || model.provider === 'ollama')}
+                              canDelete={
+                                // Ollama text models via the Ollama API; image/video
+                                // models are ComfyUI files we can delete from disk.
+                                (ollamaEnabled && model.type === 'text' && (!('provider' in model) || model.provider === 'ollama'))
+                                || model.type === 'image' || model.type === 'video'
+                              }
                             />
                           </motion.div>
                         ))}
@@ -347,6 +368,7 @@ export function ModelManager() {
       <Modal open={!!confirmDelete} onClose={() => setConfirmDelete(null)} title="Delete Model">
         <p className="text-[0.7rem] text-gray-600 dark:text-gray-300 mb-3">
           Are you sure you want to delete <span className="text-gray-900 dark:text-white font-mono">{confirmDelete}</span>?
+          This removes the model file from your disk and frees the space.
         </p>
         <div className="flex gap-2">
           <GlowButton variant="secondary" onClick={() => setConfirmDelete(null)} className="flex-1">
@@ -356,6 +378,13 @@ export function ModelManager() {
             Delete
           </GlowButton>
         </div>
+      </Modal>
+
+      <Modal open={!!deleteError} onClose={() => setDeleteError(null)} title="Delete failed">
+        <p className="text-[0.7rem] text-red-500 dark:text-red-400 mb-3">{deleteError}</p>
+        <GlowButton variant="secondary" onClick={() => setDeleteError(null)} className="w-full">
+          Close
+        </GlowButton>
       </Modal>
 
       <Modal open={infoOpen} onClose={() => setInfoOpen(false)} title={modelInfo?.name || 'Model Info'}>

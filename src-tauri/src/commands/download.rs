@@ -64,6 +64,84 @@ mod download_security_tests {
         assert!(safe_subfolder("/abs/path").is_err());
         assert!(safe_subfolder("C:/x").is_err());
     }
+
+    #[test]
+    fn split_model_ref_handles_nested_and_plain_names() {
+        assert_eq!(super::split_model_ref("model.safetensors"), (String::new(), "model.safetensors".into()));
+        assert_eq!(super::split_model_ref("wan/model.gguf"), ("wan".into(), "model.gguf".into()));
+        assert_eq!(super::split_model_ref("a\\b\\m.pt"), ("a/b".into(), "m.pt".into()));
+        // Traversal segments survive the split and then die in safe_subfolder.
+        let (dir, _) = super::split_model_ref("../../evil.bin");
+        assert!(safe_subfolder(&dir).is_err());
+    }
+}
+
+/// Split a ComfyUI enum name ("wan/x.safetensors" or plain "x.safetensors")
+/// into its relative dir + basename so both halves can go through the same
+/// jail checks the downloader uses.
+fn split_model_ref(name: &str) -> (String, String) {
+    let norm = name.replace('\\', "/");
+    match norm.rsplit_once('/') {
+        Some((dir, base)) => (dir.to_string(), base.to_string()),
+        None => (String::new(), norm),
+    }
+}
+
+/// The model subdirs LU downloads into / ComfyUI enumerates from. Delete
+/// searches exactly these — never custom_nodes, never arbitrary paths.
+const MODEL_SUBDIRS: &[&str] = &[
+    "checkpoints", "diffusion_models", "unet", "vae", "loras",
+    "text_encoders", "clip", "clip_vision", "audio_encoders",
+    "controlnet", "upscale_models",
+];
+
+/// Delete one installed model file from the ComfyUI models tree (the Model
+/// Hub's trash action — cpl.sardinas7489, Discord 2026-07-19: a 27 GB video
+/// model his PC couldn't run had no in-app way back out). The name is the
+/// ComfyUI enum entry; we jail-check it and look for the single file match
+/// across the known model subdirs.
+#[tauri::command]
+pub fn delete_comfy_model(filename: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    let comfy_path = state
+        .comfy_path
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("ComfyUI path not set. Please set it in settings or install ComfyUI first.")?;
+    let (sub, base) = split_model_ref(&filename);
+    if !sub.is_empty() {
+        safe_subfolder(&sub)?;
+    }
+    let base = sanitize_filename(&base);
+    let models_root = PathBuf::from(&comfy_path).join("models");
+    let mut hits: Vec<PathBuf> = Vec::new();
+    for d in MODEL_SUBDIRS {
+        let cand = if sub.is_empty() {
+            models_root.join(d).join(&base)
+        } else {
+            models_root.join(d).join(&sub).join(&base)
+        };
+        if cand.is_file() {
+            hits.push(cand);
+        }
+    }
+    match hits.len() {
+        0 => Err(format!("{} was not found in the ComfyUI models folders", filename)),
+        1 => {
+            let f = &hits[0];
+            let bytes = fs::metadata(f).map(|m| m.len()).unwrap_or(0);
+            fs::remove_file(f).map_err(|e| format!("Delete failed: {}", e))?;
+            // Sweep a stale resume-partial next to it (the timeout/abort case
+            // leaves both the file and its .download twin behind).
+            let _ = fs::remove_file(f.with_extension("download"));
+            println!("[Models] Deleted {} ({} bytes)", f.display(), bytes);
+            Ok(serde_json::json!({"status": "deleted", "bytes": bytes}))
+        }
+        _ => Err(format!(
+            "{} exists in more than one models folder — remove it from the ComfyUI folder itself so the right copy goes",
+            filename
+        )),
+    }
 }
 
 fn models_dir(comfy_path: &Option<String>, subfolder: &str) -> Result<PathBuf, String> {
