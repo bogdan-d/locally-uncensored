@@ -21,6 +21,20 @@ Community fix release: works through every open GitHub issue plus the actionable
 - **Mainstream:** Ornith 1.0 9B + 35B (the coding-agent hit of June, 2M+ downloads), Agents-A1 35B + 4B, LFM 2.5 8B MoE, IBM Granite 4.1 8B, MiniCPM-V 4.6 (vision in 2 GB via Ollama), Nemotron 3 Nano 4B + Omni 30B, the Qwen 3.5 9B DeepSeek-V4 distill, Mistral Medium 3.5 128B, DeepSeek V4-Flash, Hunyuan 3 295B, GLM 5.2 and Kimi K2.7-Code (1T).
 - Every direct-download entry was verified against the live HuggingFace file listing (exact repo, filename, byte size) before shipping; multi-part monsters go through the existing part-count + total-size confirmation gate. Circulating "Llama 5" and "Qwen 4" release claims were checked against the live Meta/Qwen HF orgs and are fabrications — not added.
 
+### New — The five Create categories now run on your own GPU, not only LU Cloud
+
+- **Talking Character, Music, Extend Video, Motion Control and Character Studio each grew a full local lane.** In Local mode they build a ComfyUI graph from core node families (no proprietary endpoint) and run on your card; in Cloud mode they still submit to the hosted models. The pill for each is now selectable in Local mode instead of being a cloud-only teaser, and its popup offers "Try local" next to "Try cloud" (the example clip always shows the Cloud result).
+- **Music** runs ACE-Step in ComfyUI core (`TextEncodeAceStepAudio` → `EmptyAceStepLatentAudio` → `KSampler` → `VAEDecodeAudio` → `SaveAudio`), from ~4 GB. The result is a real audio tile with an inline player — audio outputs are now typed as audio (they used to inherit the tab's image/video type and refuse to play).
+- **Talking Character** runs Wan 2.2 S2V (`WanSoundImageToVideo` + a wav2vec2 audio encoder) from a portrait plus a voice — upload a clip or make one with the in-app TTS. The clip length follows your audio.
+- **Extend Video** continues a clip you already have: it extracts the last frame locally and feeds the regular image-to-video path, so it uses the same video models as Animate.
+- **Motion Control** drives a character image from a dance/pose video with Wan VACE / Animate. It needs the DWPose pose extractor (controlnet_aux); when that node pack is missing the lane says so plainly with a one-click "Download & install" card instead of shipping a broken graph.
+- **Character Studio** trains a Z-Image LoRA on your own GPU with a bundled, pinned `musubi-tuner` (its own managed venv — a one-time ~3 GB setup, plus the Z-Image base files). The trained character lands straight in your local LoRAs and is usable from the normal image path.
+- **Honest about hardware:** the audience is every tier, and the copy says so. The heavy 14B video lanes (S2V, Animate) are genuinely slow on a 12 GB card even at low step counts — the new per-lane Frame/Size/Step controls (below) let you trade quality for speed, and Character Studio's training floor is real. Where a lane needs a node pack the box lacks, it escalates with an actionable message rather than failing silently.
+
+### New — "Update ComfyUI" from inside the app
+
+- When a specialized lane needs core nodes a user-managed ComfyUI is too old to have, LU can `git pull` + reinstall requirements in place (the same streaming, cancellable, retrying installer the bundle downloads use) instead of leaving a cryptic ComfyUI rejection. Gating stays node-presence based (no brittle version-string parsing). LU-managed ComfyUI installs are always current; a user's own install gets the offer, never a forced update.
+
 ### Fixed — Voice: whisper/piper state detection, venv installs, PEP 668 (#77, #78 ElBiggus; joerack Discord)
 
 - **Whisper badge no longer resets to "not installed" after every relaunch.** `whisper_status` only reported a *running* server process; after a restart the process is gone, so the UI showed red even though the install was fine. It now also probes the installed `faster_whisper` package on disk.
@@ -56,6 +70,16 @@ Community fix release: works through every open GitHub issue plus the actionable
 - **Every video family core ComfyUI can animate is wired**, schema-driven from the live `/object_info`: WAN 2.1 i2v (`WanImageToVideo`), Hunyuan i2v (`HunyuanImageToVideo`), LTX (`LTXVImgToVideo`), Cosmos (`CosmosImageToVideoLatent`) on the main builder path — WAN 2.2 TI2V, SVD and FramePack already animated via their dedicated builders. Mochi (t2v-only) and a ComfyUI missing the family's node reject with an actionable message instead of silently ignoring the source image.
 - **The model picker only offers models that can actually do the op**: Animate lists i2v-capable models (explicit `i2v`/`ti2v` tags, SVD, FramePack, LTX, Cosmos Video2World), Video lists t2v-capable ones — SVD/FramePack drop out there, dual models (WAN 2.2 TI2V, LTX) stay in both. Same gating in the chat model-picker card.
 
+### Fixed — Local Create now frees the chat model from VRAM before rendering
+
+- On a single local GPU, a chat model sitting in VRAM (Ollama / LM Studio / the bundled engine) left ComfyUI fighting for the card — heavy CPU offload at best, a CUDA out-of-memory on the 14B video lanes (Talking Character, Motion) at worst. A local Create run now releases the chat backends first (they reload lazily on your next message), the same offload the Cloud switch already did, so the render gets the whole GPU. ComfyUI keeps its own checkpoint cached across consecutive Create runs, so back-to-back generations don't pay a reload. (On a large card where both would have fit, this trades a quick chat-model reload for guaranteed headroom — the conservative default for the common 8-12 GB tiers.)
+
+### New — Frame count, resolution and step controls on every Create lane
+
+- **You can finally set frames, resolution and steps in the app** — before, the Video tab only had a Draft/Standard/High quality toggle, and the specialized lanes (Talking Character, Music, Extend, Motion) had no generation knobs at all, so a local video ran at the model's full frame count and step count with no way to dial it down. The composer now shows the exact knobs each lane actually consumes: **Quality (steps) + Size + Frames** on every video lane, **Quality (steps)** on the local Music lane (Length was already there), and the existing Quality + Aspect on image lanes. This makes low-VRAM runs practical — drop the steps and frames and a clip that used to be a multi-hour render finishes in minutes.
+- **Nothing on screen is a dead control.** The knobs render only where the submit path reads them: locally every lane consumes them; the regular Video/Animate lanes honour them on LU Cloud too; the specialized hosted ops run at fixed server-side settings, so those sliders stay hidden on Cloud rather than pretending to work. On Talking Character the frame count is hidden entirely and labelled "clip length follows your voice", because the lane derives it from the audio.
+- **The Size tiers are video-native.** They read the lane's actual video model (Wan S2V / Animate / the picked video model), not the last image model, so a 480p video graph offers 320p/480p/720p rather than image-centric 1024p sizes; dimensions snap to the multiple of 16 the WAN/S2V/VACE VAEs require.
+
 ### New — ComfyUI install location is configurable (andy_38747, Discord)
 
 - The Settings → AI Backends → ComfyUI **Path** field now doubles as the install target: put e.g. `D:\ComfyUI` there before pressing **Install ComfyUI** and the multi-GB install (plus all image/video models, which live inside the ComfyUI folder) lands on that drive instead of filling `C:`. Empty field keeps the previous default (home folder). A completed custom-target install is persisted as the active path, so LU finds it after a restart.
@@ -83,8 +107,9 @@ Community fix release: works through every open GitHub issue plus the actionable
 
 ### Stability
 
-- `vitest`: **3300 tests** green. `cargo test`: **192 passed**. `cargo check`: clean (3 pre-existing dead-code warnings only). Frontend production build: clean.
+- `vitest`: **3356 tests** green. `cargo test`: **194 passed**. `cargo check`: clean (3 pre-existing dead-code warnings only). Frontend production build: clean.
 - New settings field `autoReadAloud` defaults to `false`; store migrations are additive — no breaking changes.
+- `offload_local_models` gained an optional `include_comfyui` flag (defaults true — the Cloud switch still releases everything); a local Create run passes `false` so it frees only the chat backends and keeps ComfyUI's checkpoint cached.
 
 ## [2.5.0] - 2026-05-28
 
