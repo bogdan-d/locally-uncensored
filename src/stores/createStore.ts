@@ -645,20 +645,22 @@ export const useCreateStore = create<CreateState>()(
       setMusicLyrics: (musicLyrics) => set({ musicLyrics: musicLyrics.slice(0, 2000) }),
       setSource: (source) => set({ source, sourceSetAt: source ? Date.now() : 0, ...(source ? {} : { mask: null }) }),
       setMask: (mask) => set({ mask }),
-      // Flipping to local clears the intents that STILL have no local lane
-      // (upscale/eraser hosted endpoints) so the surface never strands on a
-      // dead op the IntentBar no longer shows. Edit keeps its state since
-      // 2.5.7 (checkpoint mask inpaint), removebg keeps its RMBG lane, and
-      // animate keeps its i2v state since 2026-07-17 — the local I2V lane is
-      // back (buildDynamicWorkflow wires the family's image-to-video node).
+      // Flipping to local clears the intents that have no local lane
+      // (upscale/eraser plus character training — all hosted-only) so the
+      // surface never strands on a dead op the IntentBar no longer shows. Edit
+      // keeps its state since 2.5.7 (checkpoint mask inpaint), removebg keeps
+      // its RMBG lane, and animate keeps its i2v state since 2026-07-17 — the
+      // local I2V lane is back (buildDynamicWorkflow wires the family's
+      // image-to-video node).
       setBackend: (backend) =>
         set((s) => {
           if (backend !== 'local') return { backend }
           const patch: Record<string, unknown> = { backend }
           if (s.utilityOp) Object.assign(patch, { utilityOp: null, mask: null, error: null })
-          // 2.5.8: every specialized category runs locally now, so a backend
-          // flip keeps the selection. The guard stays for future cloud-only
-          // ops (LOCAL_LANE_OPS is the single source of truth).
+          // 2.5.8: music/lipsync/extend/motion run locally, so a backend flip
+          // keeps them selected; character stays cloud-only (its trainer
+          // runtime does not ship yet), so it drops on a flip to local just
+          // like upscale/eraser. LOCAL_LANE_OPS is the single source of truth.
           if (s.cloudOp && !LOCAL_LANE_OPS.has(s.cloudOp)) {
             Object.assign(patch, { cloudOp: null, error: null })
           }
