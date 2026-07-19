@@ -39,10 +39,13 @@ export const helpers = {
   },
 
   /** Type into a specific field found by its placeholder (voice maker,
-   *  trigger word) — .first() would hit the composer prompt instead. */
+   *  trigger word) — .first() would hit the composer prompt instead. Clears
+   *  first: the trigger word persists across app restarts, so take-02 typed
+   *  'lumi' onto the surviving 'lumi' and trained 'lumilumi'. */
   async typeInto(page, placeholderRe, text) {
     const field = page.locator(`textarea[placeholder*="${placeholderRe}"], input[placeholder*="${placeholderRe}"]`).first()
     await field.click()
+    await field.fill('')
     await field.pressSequentially(text, { delay: 18 })
     await page.waitForTimeout(300)
   },
@@ -133,7 +136,9 @@ export const helpers = {
           (b) => (b.textContent || '').trim() === 'Cancel',
         )
         const err = [...document.querySelectorAll('div,p,span')].find(
-          (n) => n.children.length === 0 && /failed|error/i.test(n.textContent || '') && (n.textContent || '').length < 220,
+          (n) => n.children.length === 0 &&
+            /failed|error|not supported|invalid|exceeded|too large|rejected|denied/i.test(n.textContent || '') &&
+            (n.textContent || '').length < 220,
         )
         return { cancel, err: err ? err.textContent.trim().slice(0, 200) : null }
       })
@@ -172,7 +177,9 @@ export const helpers = {
           .map((m) => m.currentSrc || m.src || '')
           .filter((u) => /^(https?|blob):/.test(u))
         const err = [...document.querySelectorAll('div,p,span')].find(
-          (n) => n.children.length === 0 && /failed|error/i.test(n.textContent || '') && (n.textContent || '').length < 220,
+          (n) => n.children.length === 0 &&
+            /failed|error|not supported|invalid|exceeded|too large|rejected|denied/i.test(n.textContent || '') &&
+            (n.textContent || '').length < 220,
         )
         return { cancel, srcs, err: err ? err.textContent.trim().slice(0, 200) : null }
       }, selector)
@@ -542,13 +549,20 @@ export const FLOWS = {
         const cancel = [...document.querySelectorAll('button')].some((b) => (b.textContent || '').trim() === 'Cancel')
         const chip = [...document.querySelectorAll('button')].some((b) => /lumi/.test(b.textContent || ''))
         const err = [...document.querySelectorAll('div,p,span')].find(
-          (n) => n.children.length === 0 && /failed|error/i.test(n.textContent || '') && (n.textContent || '').length < 220,
+          (n) => n.children.length === 0 &&
+            /failed|error|not supported|invalid|exceeded|too large|rejected|denied/i.test(n.textContent || '') &&
+            (n.textContent || '').length < 220,
         )
         return { cancel, chip, err: err ? err.textContent.trim().slice(0, 200) : null }
       })
       if (!st.cancel && st.chip) break
       if (!st.cancel && st.err && Date.now() - t0 > 30_000) throw new Error(`training failed: ${st.err}`)
-      if (Date.now() - t0 > 30 * 60_000) throw new Error('training timed out')
+      // 45 min: take-03 hit the 30 min cap while the render worker restarted
+      // mid-train (deploy window) — the job refunded, the client just waited.
+      if (Date.now() - t0 > 45 * 60_000) throw new Error('training timed out')
+      if (Math.floor((Date.now() - t0) / 120_000) !== Math.floor((Date.now() - t0 - 4000) / 120_000)) {
+        console.log(`[character] training wait ${Math.round((Date.now() - t0) / 60_000)}min, cancel=${st.cancel}`)
+      }
       await page.waitForTimeout(4000)
     }
     mark('trained')
