@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Ban, ChevronDown, Loader2, Power, PlayCircle, X, Cloud } from 'lucide-react'
+import { Ban, ChevronDown, Loader2, Power, PlayCircle, Wrench, X, Cloud } from 'lucide-react'
 import { useModels } from '../../hooks/useModels'
 import { useModelStore } from '../../stores/modelStore'
 import { useProviderStore } from '../../stores/providerStore'
@@ -764,17 +764,28 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
                               {providerBadge.label}
                             </span>
                           )}
-                          {/* 2.5.8 — a model we've seen reject tool calls (cloud
-                              405 / ollama "does not support tools") is flagged so
-                              the user doesn't re-pick it for Agent/Code and hit the
-                              same wall. Reactive: appears after the first failure. */}
-                          {model.type === 'text' && getToolCapability(model.name) === 'unsupported' && (
-                            <span
-                              className="inline-flex items-center shrink-0 text-amber-500/80"
-                              title="This model does not support tool calling, so Agent and Code mode cannot use it"
-                            >
-                              <Ban size={9} />
-                            </span>
+                          {/* 2.5.8 — tool-calling capability at a glance. Ban =
+                              a model we've SEEN reject tools (cloud 405 / ollama
+                              "does not support tools"), so it can't run Agent/Code.
+                              Wrench = tool-capable (optimistic for cloud/ollama the
+                              same way we already send tools; the ban corrects it if
+                              a run proves otherwise). Text models only. */}
+                          {model.type === 'text' && (
+                            getToolCapability(model.name) === 'unsupported' ? (
+                              <span
+                                className="inline-flex items-center shrink-0 text-amber-500/80"
+                                title="This model does not support tool calling, so Agent and Code mode cannot use it"
+                              >
+                                <Ban size={9} />
+                              </span>
+                            ) : model.supportsTools !== false ? (
+                              <span
+                                className="inline-flex items-center shrink-0 text-emerald-500/90"
+                                title="Supports tool calling (Agent, Code, and tools in Chat)"
+                              >
+                                <Wrench size={9} />
+                              </span>
+                            ) : null
                           )}
                           {/* §18 — inline load state while we auto-load this
                               LM Studio model on the way to selecting it. */}
