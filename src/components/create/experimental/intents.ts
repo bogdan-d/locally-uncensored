@@ -16,11 +16,15 @@ export interface IntentMeta {
   allowsMask: boolean
   isVideo: boolean
   /** Capability id (node probe) this intent depends on, if any. */
-  capability?: 'rmbg' | 'inpaint-nodes'
-  /** Single-purpose hosted endpoints — only offered on the cloud backend. */
+  capability?: 'rmbg' | 'inpaint-nodes' | 'dwpose'
+  /** Categories with a hosted endpoint (cloud clip/teaser exists). */
   cloudOnly?: true
+  /** 2.5.8: cloudOnly categories that ALSO run on the local ComfyUI backend
+   *  (mirrors createStore's LOCAL_LANE_OPS). The IntentBar unlocks these in
+   *  local mode; the cloud glyph becomes a "Try cloud" affordance. */
+  hasLocalLane?: true
   /** Local model files this intent needs (gates the Download & install card). */
-  requiresModels?: 'image' | 'video'
+  requiresModels?: 'image' | 'video' | 'audio' | 'lipsync' | 'motion'
   examples: string[]
 }
 
@@ -87,15 +91,21 @@ export const INTENTS: IntentMeta[] = [
     examples: ['slow zoom in, subtle parallax', 'hair and clothes moving in the wind'],
   },
 
-  // ── 2.5.8 hosted categories (WaveSpeed, 2026-07-17 David). All cloudOnly;
-  // their composer surfaces own the extra inputs (training set, audio, driving
-  // video, extend pick), so needsSource/needsPrompt describe only what the
-  // shared composer scaffolding should render. ────────────────────────────────
+  // ── 2.5.8 specialized categories (2026-07-17 David). All have hosted
+  // endpoints (cloudOnly = cloud clip/teaser exists) and ALL run locally
+  // since 2.5.8 (hasLocalLane) — core ComfyUI node families (ACE audio,
+  // Wan S2V, I2V last-frame chain, Wan Animate/VACE) plus the bundled
+  // musubi trainer for characters. Their composer surfaces own the extra
+  // inputs (training set, audio, driving video, extend pick), so
+  // needsSource / needsPrompt describe only the shared composer scaffolding. ──
   {
+    // Local lane trains a Z-Image LoRA on the user's GPU (Rust-managed
+    // musubi-tuner venv); the panel gates itself on trainer env + base files,
+    // so no requiresModels here.
     id: 'character', label: 'Character Studio', short: 'Character', icon: UserRound,
     placeholder: 'Describe the scene for your character…',
     needsSource: false, needsPrompt: false, allowsMask: false, isVideo: false,
-    cloudOnly: true,
+    cloudOnly: true, hasLocalLane: true,
     examples: [],
   },
   {
@@ -105,14 +115,14 @@ export const INTENTS: IntentMeta[] = [
     id: 'lipsync', label: 'Talking Character', short: 'Lipsync', icon: Mic,
     placeholder: '',
     needsSource: false, needsPrompt: false, allowsMask: false, isVideo: true,
-    cloudOnly: true,
+    cloudOnly: true, hasLocalLane: true, requiresModels: 'lipsync',
     examples: [],
   },
   {
     id: 'music', label: 'Music', short: 'Music', icon: Music,
     placeholder: 'Describe the track. Genre, mood, tempo, instruments…',
     needsSource: false, needsPrompt: true, allowsMask: false, isVideo: false,
-    cloudOnly: true,
+    cloudOnly: true, hasLocalLane: true, requiresModels: 'audio',
     examples: [
       'dreamy lofi hip hop, vinyl crackle, mellow keys',
       'epic orchestral trailer, driving percussion',
@@ -120,18 +130,22 @@ export const INTENTS: IntentMeta[] = [
     ],
   },
   {
+    // Local lane: the picked clip's LAST FRAME becomes the I2V start image,
+    // so it gates on the regular video models like animate does.
     id: 'extend', label: 'Extend Video', short: 'Extend', icon: FastForward,
     placeholder: 'Describe how the clip should continue…',
     needsSource: false, needsPrompt: true, allowsMask: false, isVideo: true,
-    cloudOnly: true,
+    cloudOnly: true, hasLocalLane: true, requiresModels: 'video',
     examples: [],
   },
   {
     // Character image + driving video are composer chips (see lipsync note).
+    // Local lane needs the DWPose extractor (controlnet_aux pack) on top of
+    // the Animate/VACE model files.
     id: 'motion', label: 'Motion Control', short: 'Motion', icon: PersonStanding,
     placeholder: 'Optional: extra style/scene hints…',
     needsSource: false, needsPrompt: false, allowsMask: false, isVideo: true,
-    cloudOnly: true,
+    cloudOnly: true, hasLocalLane: true, requiresModels: 'motion', capability: 'dwpose',
     examples: [],
   },
 ]

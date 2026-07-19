@@ -579,6 +579,43 @@ function ComfyUISettings() {
             {status?.complete === false ? 'Re-install ComfyUI' : 'Install ComfyUI'}
           </button>
         )}
+        {status?.found && status?.complete !== false && installPhase === 'idle' && (
+          // 2.5.8: the specialized local lanes (music / talking character /
+          // motion) need node families that ship with current cores — this is
+          // the one-click git pull + dependency refresh the lane errors point
+          // to. Reuses the installer's status channel and log panel.
+          <button
+            onClick={async () => {
+              setInstallPhase('comfyui')
+              setInstallErr(null)
+              setInstallLogs(['Updating ComfyUI…'])
+              try {
+                await backendCall('update_comfyui')
+                const poll = setInterval(async () => {
+                  try {
+                    const data: any = await backendCall('install_comfyui_status')
+                    setInstallLogs(data.logs || [])
+                    if (data.status === 'complete') {
+                      clearInterval(poll)
+                      setInstallPhase('idle')
+                    } else if (data.status === 'error') {
+                      clearInterval(poll)
+                      const lastLog = (data.logs?.length ? data.logs[data.logs.length - 1] : '') as string
+                      setInstallErr(lastLog || 'ComfyUI update failed')
+                      setInstallPhase('error')
+                    }
+                  } catch { /* keep polling */ }
+                }, 2000)
+              } catch (err) {
+                setInstallPhase('error')
+                setInstallErr(err instanceof Error ? err.message : 'Failed to start the update')
+              }
+            }}
+            className="px-2 py-1 rounded text-[0.6rem] bg-white/5 text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+          >
+            Update ComfyUI
+          </button>
+        )}
         {(!status?.found || status?.complete === false) && installPhase === 'idle' && (
           <p className="w-full text-[0.55rem] text-gray-600">
             Installs to your home folder by default. Set Path above (e.g. D:\ComfyUI) to install on another drive.
@@ -992,7 +1029,7 @@ export function SettingsPage() {
               <div className="min-w-0 pr-3">
                 <span className="text-[0.7rem] text-gray-700 dark:text-gray-400">Show Cloud features in Local mode</span>
                 <p className="text-[0.6rem] text-gray-500 dark:text-gray-600 leading-snug">
-                  Locked Create tools and hosted models appear as tappable previews. Never blocks a local flow.
+                  Cloud previews on Create tools and model lists, plus Try cloud tags on the tools that run both ways. Never blocks a local flow.
                 </p>
               </div>
               <button

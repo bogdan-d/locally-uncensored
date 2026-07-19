@@ -10,6 +10,8 @@ import {
   t2vModels,
   i2vModels,
   modelForOp,
+  opPickerModels,
+  resolveOpPick,
 } from '../cloudCatalogStore'
 import { CLOUD_MODEL_SEED } from '../../lib/render/cloud-models'
 import type { CloudCatalog } from '../../api/cloud/catalog'
@@ -179,6 +181,23 @@ describe('cloudCatalogStore', () => {
       useCloudCatalogStore.getState().setCatalog(mixed)
       expect(i2vModels().map((m) => m.id)).toEqual(['dual', 'legacy'])
       expect(t2vModels().map((m) => m.id)).toEqual(['dual', 't2v-only', 'legacy'])
+    })
+
+    it('op picker offers image trainers only and resolves stale picks (take-01 regression)', () => {
+      // No surface can provide a video training set (or use a video LoRA), so
+      // the LTX video trainer stays out of the Character-Studio picker.
+      const trainers = opPickerModels('lora-train')
+      expect(trainers.map((m) => m.id)).toContain('flux-lora-trainer')
+      expect(trainers.map((m) => m.id)).not.toContain('ltx-2-video-lora-trainer')
+      expect(trainers.every((m) => m.kind === 'image')).toBe(true)
+      // cloudOpModel still held the lipsync model when Character Studio opened:
+      // the chip displayed Flux but submit flipped kind to video and trained on
+      // the LTX video trainer ("No videos found in the zip file"). Chip, meter
+      // and submit now resolve through this one rule.
+      expect(resolveOpPick('lora-train', 'p-video-avatar')).toBe('flux-lora-trainer')
+      expect(resolveOpPick('lipsync', 'p-video-avatar')).toBe('p-video-avatar')
+      useCloudCatalogStore.setState({ models: [] })
+      expect(resolveOpPick('lora-train', 'p-video-avatar')).toBe('')
     })
 
     it('modelForOp coerces an incapable pick onto the op’s first valid model', () => {

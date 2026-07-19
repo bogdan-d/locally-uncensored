@@ -1,7 +1,7 @@
 import { useCreateStore } from '../../../stores/createStore'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
-import { defaultCloudModel, runCredits } from '../../../stores/cloudCatalogStore'
+import { defaultCloudModel, resolveOpPick, runCredits } from '../../../stores/cloudCatalogStore'
 import { Tooltip } from '../ui/Tooltip'
 import { openExternal } from '../../../api/backend'
 import { CLOUD_BASE } from '../../../api/cloud/config'
@@ -40,7 +40,7 @@ export function CreditsMeter() {
   const picked = characterUse
     ? 'flux-schnell-lora'
     : special
-      ? cloudOpModel
+      ? resolveOpPick(op, cloudOpModel)
       : (kind === 'video' ? cloudVideoModel : cloudImageModel) || defaultCloudModel(kind)?.id || ''
   const seconds =
     op === 'music'

@@ -78,6 +78,24 @@ export function modelsForOp(kind: RenderKind, op: RenderOp): CloudModel[] {
   )
 }
 
+/** Exactly the rows the specialized-op picker offers. Character training is
+ *  image trainers only for now: the LTX video trainer needs a video training
+ *  set (and a video use-lane) that no surface can provide yet. */
+export function opPickerModels(op: RenderOp): CloudModel[] {
+  return useCloudCatalogStore
+    .getState()
+    .models.filter((m) => m.ops?.includes(op) && (op !== 'lora-train' || m.kind === 'image'))
+}
+
+/** Chip, meter and submit all resolve the stored op pick through this one
+ *  rule — a pick left over from another intent (p-video-avatar surviving from
+ *  lipsync into character training) falls to the op's first model instead of
+ *  silently steering the submit to a different family than the chip shows. */
+export function resolveOpPick(op: RenderOp, pickedId: string): string {
+  const list = opPickerModels(op)
+  return list.some((m) => m.id === pickedId) ? pickedId : (list[0]?.id ?? '')
+}
+
 /** Character-Studio generation endpoints (accept `params.loras`). */
 export function loraGenModels(): CloudModel[] {
   return useCloudCatalogStore.getState().models.filter((m) => m.lora === true)

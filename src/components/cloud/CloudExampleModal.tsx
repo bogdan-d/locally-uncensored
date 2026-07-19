@@ -8,8 +8,9 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { X, Cloud, Sparkles, Volume2, VolumeX } from 'lucide-react'
+import { X, Cloud, Sparkles, Volume2, VolumeX, MonitorDown } from 'lucide-react'
 import { useUIStore, type CloudTeaserTarget } from '../../stores/uiStore'
+import { useCreateStore, LOCAL_LANE_OPS, type CloudOp } from '../../stores/createStore'
 
 type ExampleIntent = Extract<CloudTeaserTarget, { surface: 'intent' }>['intent']
 
@@ -27,6 +28,10 @@ export function CloudExampleModal() {
   const target = useUIStore((s) => s.cloudExampleVideo)
   const setTarget = useUIStore((s) => s.setCloudExampleVideo)
   const setCloudGateOpen = useUIStore((s) => s.setCloudGateOpen)
+  const setIntent = useCreateStore((s) => s.setIntent)
+  // Lanes that also run locally (2.5.8): the clip stays REAL CLOUD FOOTAGE
+  // (David's call — the example always shows cloud), but the CTAs fork.
+  const localLane = target && LOCAL_LANE_OPS.has(target.intent as CloudOp) ? target.intent : null
   // The music clip carries the generated track; it still starts muted
   // (autoplay policy + not startling anyone) with a tap-to-listen toggle.
   const [muted, setMuted] = useState(true)
@@ -102,15 +107,25 @@ export function CloudExampleModal() {
                 </span>
               </div>
               <p className="text-[0.68rem] leading-relaxed text-gray-400">
-                Real output, straight from LU Cloud. This is what the tool makes.
+                {localLane
+                  ? 'Real output, straight from LU Cloud. Run it there, or fully on your own PC.'
+                  : 'Real output, straight from LU Cloud. This is what the tool makes.'}
               </p>
               <div className="flex items-center gap-2 pt-1">
                 <button
                   onClick={toPlans}
                   className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg bg-white text-black text-[0.7rem] font-semibold hover:bg-gray-200 transition-colors"
                 >
-                  <Sparkles size={12} /> See plans
+                  <Sparkles size={12} /> {localLane ? 'Try cloud' : 'See plans'}
                 </button>
+                {localLane && (
+                  <button
+                    onClick={() => { close(); setIntent(localLane) }}
+                    className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg border border-white/15 text-gray-200 text-[0.7rem] font-semibold hover:bg-white/[0.06] transition-colors"
+                  >
+                    <MonitorDown size={12} /> Try local
+                  </button>
+                )}
                 <button
                   onClick={close}
                   className="px-3 h-8 rounded-lg text-[0.7rem] text-gray-400 hover:text-gray-200 hover:bg-white/[0.06] transition-colors"

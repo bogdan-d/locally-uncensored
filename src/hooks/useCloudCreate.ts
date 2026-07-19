@@ -25,6 +25,7 @@ import {
 import {
   defaultCloudModel,
   modelForOp,
+  resolveOpPick,
   cloudModelById,
   cloudMediaLive,
 } from '../stores/cloudCatalogStore'
@@ -122,13 +123,14 @@ export function useCloudCreate(opts: { onQuotaChange?: () => void } = {}) {
     if (characterUse) {
       picked = CHARACTER_GEN_DEFAULT[s.selectedCharacter?.family ?? ''] ?? 'flux-schnell-lora'
     } else if (specialOp) {
-      picked = s.cloudOpModel
+      // Same resolution rule as the chip's display — a pick left over from
+      // another intent must not survive into this op's submit (take-01: the
+      // lipsync model steered the training job onto the LTX video trainer
+      // while the chip showed Flux).
+      picked = resolveOpPick(op, s.cloudOpModel)
     } else {
       picked = (kind === 'video' ? s.cloudVideoModel : s.cloudImageModel) || defaultCloudModel(kind)?.id || ''
     }
-    // lora-train: the picked trainer decides the kind (LTX trains video
-    // characters) BEFORE coercion, so the video trainer isn't coerced away.
-    if (op === 'lora-train' && cloudModelById(picked)?.kind === 'video') kind = 'video'
     // Coerce a leftover/incapable pick onto a model that can run this op
     // (edit→i2i, animate→i2v, video→t2v, specialized ops→their family) so the
     // submit never 400s.

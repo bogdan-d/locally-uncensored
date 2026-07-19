@@ -6,10 +6,11 @@
 // footer link turns the whole discovery layer off (Settings can re-enable).
 
 import { AnimatePresence, motion } from 'framer-motion'
-import { X, Cloud, Sparkles } from 'lucide-react'
+import { X, Cloud, Sparkles, MonitorDown } from 'lucide-react'
 import { useUIStore, type CloudTeaserTarget } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { cloudModelById } from '../../stores/cloudCatalogStore'
+import { useCreateStore, LOCAL_LANE_OPS, type CloudOp } from '../../stores/createStore'
 
 interface TeaserCopy {
   title: string
@@ -52,9 +53,16 @@ export function CloudTeaserModal() {
   const setCloudTeaser = useUIStore((s) => s.setCloudTeaser)
   const setCloudGateOpen = useUIStore((s) => s.setCloudGateOpen)
   const setCloudExampleVideo = useUIStore((s) => s.setCloudExampleVideo)
+  const setIntent = useCreateStore((s) => s.setIntent)
   const { updateSettings } = useSettingsStore()
 
   const close = () => setCloudTeaser(null)
+  // 2.5.8: the lanes that ALSO run locally get a "Try local" path — the sheet
+  // stops being a pure upsell and becomes the fork between the two lanes.
+  const localLane =
+    target?.surface === 'intent' && LOCAL_LANE_OPS.has(target.intent as CloudOp)
+      ? target.intent
+      : null
   const copy: TeaserCopy | null =
     target?.surface === 'intent'
       ? INTENT_COPY[target.intent]
@@ -109,8 +117,9 @@ export function CloudTeaserModal() {
               </div>
               <p className="text-[0.7rem] leading-relaxed text-gray-400">{copy.line}</p>
               <p className="text-[0.62rem] leading-relaxed text-gray-500">
-                Runs on LU Cloud. Your PC stays cool while datacenter GPUs do the
-                heavy lifting. Part of the Max plan (closed beta).
+                {localLane
+                  ? 'Runs on your PC with downloaded models, or on LU Cloud where datacenter GPUs do the heavy lifting. Cloud is part of the Max plan (closed beta).'
+                  : 'Runs on LU Cloud. Your PC stays cool while datacenter GPUs do the heavy lifting. Part of the Max plan (closed beta).'}
               </p>
               <div className="flex items-center gap-2 pt-1">
                 <button
@@ -125,8 +134,16 @@ export function CloudTeaserModal() {
                   }}
                   className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg bg-white text-black text-[0.7rem] font-semibold hover:bg-gray-200 transition-colors"
                 >
-                  <Sparkles size={12} /> See plans
+                  <Sparkles size={12} /> {localLane ? 'Try cloud' : 'See plans'}
                 </button>
+                {localLane && (
+                  <button
+                    onClick={() => { close(); setIntent(localLane) }}
+                    className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg border border-white/15 text-gray-200 text-[0.7rem] font-semibold hover:bg-white/[0.06] transition-colors"
+                  >
+                    <MonitorDown size={12} /> Try local
+                  </button>
+                )}
                 <button
                   onClick={close}
                   className="px-3 h-8 rounded-lg text-[0.7rem] text-gray-400 hover:text-gray-200 hover:bg-white/[0.06] transition-colors"
