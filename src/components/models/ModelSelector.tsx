@@ -163,28 +163,28 @@ function LmStudioServerHint({ onStarted }: { onStarted: () => void }) {
   }
 
   return (
-    <div className="relative px-2.5 py-2 border-b border-white/[0.04] bg-white/[0.03]">
+    <div className="relative px-2.5 py-2 border-b border-black/[0.06] dark:border-white/[0.04] bg-black/[0.03] dark:bg-white/[0.03]">
       <button
         onClick={(e) => { e.stopPropagation(); LM_HINT_DISMISSED_THIS_SESSION = true; setDismissed(true) }}
         aria-label="Dismiss (returns on next launch)"
         title="Dismiss (returns on next launch)"
-        className="absolute top-1 right-1 p-1 rounded text-gray-500 hover:text-gray-200 hover:bg-white/[0.08] transition-colors"
+        className="absolute top-1 right-1 p-1 rounded text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors"
       >
         <X size={10} />
       </button>
-      <p className="text-[0.6rem] text-gray-300 leading-snug mb-1.5 pr-5">
+      <p className="text-[0.6rem] text-gray-600 dark:text-gray-300 leading-snug mb-1.5 pr-5">
         LM Studio is installed ({status.model_count} model{status.model_count === 1 ? '' : 's'} on disk) but its server isn't running. Start it to pick LM Studio models here.
       </p>
       <button
         onClick={handleStart}
         disabled={starting}
-        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded text-[0.62rem] bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 transition-colors disabled:opacity-50"
+        className="w-full flex items-center justify-center gap-1.5 px-2 py-1 rounded text-[0.62rem] bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-50"
       >
         {starting ? <Loader2 size={10} className="animate-spin" /> : <PlayCircle size={10} />}
         <span>{starting ? 'Starting LM Studio server…' : 'Start LM Studio Server'}</span>
       </button>
       {startError && (
-        <p className="text-[0.55rem] text-red-300/70 mt-1 leading-snug">{startError}</p>
+        <p className="text-[0.55rem] text-red-600/80 dark:text-red-300/70 mt-1 leading-snug">{startError}</p>
       )}
     </div>
   )
@@ -661,7 +661,7 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
       <AnimatePresence>
         {open && (
           <motion.div
-            className={`absolute w-72 rounded-lg overflow-hidden z-50 bg-[#363636] border border-white/[0.08] shadow-2xl shadow-black/50 ${
+            className={`absolute w-72 rounded-lg overflow-hidden z-50 bg-white dark:bg-[#363636] border border-black/10 dark:border-white/[0.08] shadow-2xl shadow-black/20 dark:shadow-black/50 ${
               openUpward ? 'bottom-full mb-1.5 right-0' : 'top-full mt-1.5 left-1/2 -translate-x-1/2'
             }`}
             initial={{ opacity: 0, y: openUpward ? 6 : -6, scale: 0.98 }}
@@ -677,7 +677,7 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
             {/* §18 — surfaced when an LM Studio auto-load (on select) failed,
                 so the user isn't left wondering why the model didn't switch. */}
             {selectError && (
-              <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 text-[0.6rem] text-red-300/90 leading-snug">
+              <div className="mx-2 mt-2 px-2 py-1.5 rounded bg-red-500/10 border border-red-500/20 text-[0.6rem] text-red-600/90 dark:text-red-300/90 leading-snug">
                 {selectError}
               </div>
             )}
@@ -735,8 +735,8 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
                         className={`
                           w-full flex items-center gap-2 px-2.5 py-[5px] mx-1 rounded text-left transition-colors
                           ${isActive
-                            ? 'bg-white/[0.06] text-white'
-                            : 'text-gray-400 hover:bg-white/[0.03] hover:text-gray-200'
+                            ? 'bg-black/[0.06] dark:bg-white/[0.06] text-gray-900 dark:text-white'
+                            : 'text-gray-500 dark:text-gray-400 hover:bg-black/[0.04] dark:hover:bg-white/[0.03] hover:text-gray-900 dark:hover:text-gray-200'
                           }
                           ${rowDisabled ? 'cursor-default' : 'cursor-pointer'}
                         `}
@@ -749,7 +749,7 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
 
                         {/* Model info */}
                         <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                          <span className={`text-[0.7rem] truncate ${isActive ? 'text-white' : ''}`}>
+                          <span className={`text-[0.7rem] truncate ${isActive ? 'text-gray-900 dark:text-white' : ''}`}>
                             {modelDisplayName}
                           </span>
 
@@ -840,7 +840,7 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
 
             {/* Sticky footer: Unload */}
             {hasOllamaModels && (
-              <div className="border-t border-white/[0.04] px-1 py-1">
+              <div className="border-t border-black/[0.06] dark:border-white/[0.04] px-1 py-1">
                 <button
                   onClick={async (e) => {
                     e.stopPropagation()
@@ -855,7 +855,7 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
                     finally { setUnloading(false) }
                   }}
                   disabled={unloading}
-                  className="w-full flex items-center justify-center gap-1.5 px-2 py-[5px] rounded text-[0.6rem] text-red-500/60 hover:text-red-400 hover:bg-red-500/[0.06] transition-colors disabled:opacity-40"
+                  className="w-full flex items-center justify-center gap-1.5 px-2 py-[5px] rounded text-[0.6rem] text-red-600/70 dark:text-red-500/60 hover:text-red-500 dark:hover:text-red-400 hover:bg-red-500/[0.06] transition-colors disabled:opacity-40"
                 >
                   {unloading ? <Loader2 size={10} className="animate-spin" /> : <Power size={10} />}
                   <span>{unloadDone ? 'Unloaded' : unloading ? 'Unloading...' : 'Unload all models'}</span>

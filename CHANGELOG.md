@@ -4,7 +4,7 @@ All notable changes to Locally Uncensored are documented here.
 
 ## [Unreleased]
 
-## [2.5.8] - 2026-07-16
+## [2.5.8] - 2026-07-19
 
 Community fix release: works through every open GitHub issue plus the actionable Discord reports since 2.5.7. (Releases 2.5.1–2.5.7 were documented in their GitHub release notes and are not backfilled here.)
 
@@ -110,6 +110,10 @@ Community fix release: works through every open GitHub issue plus the actionable
 ### Fixed — Flash-Attention parity on auto-start (#74 follow-up)
 
 - `--use-flash-attention` was only applied when ComfyUI was started manually from the UI; the boot auto-start path ignored the (positive) flash-attn probe. Both paths now behave identically. The orphaned `check_flash_attention` command (its UI nudge was removed in 2.5.7) is deleted.
+
+### Fixed — Chat model dropdown was unreadable in light mode
+
+- The model picker popover kept a hardcoded dark panel in both themes, but the light theme remaps text colours to dark — so in light mode the model names, section headers and the LM Studio hint rendered as dark text on the dark panel and were effectively invisible. The panel, its borders, the active/hover tints and the error/hint colours are now theme-aware, so the dropdown is a clean light surface in light mode and unchanged in dark. (Missed during the Model Hub redesign.)
 
 ### Stability
 
