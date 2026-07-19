@@ -10,6 +10,30 @@ import { backendCall } from '../../../api/backend'
 import { ensureLocalFilename } from './loadImage'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
 
+/** Restart ComfyUI so a freshly installed node pack registers (packs only load
+ *  on startup). stop_comfyui can only kill the ComfyUI that LU itself spawned:
+ *  if the engine was started outside LU (user's own terminal/script), the old
+ *  process keeps the port and keeps serving the stale node list — the pack
+ *  would look installed but never show up, and the register-poll would burn
+ *  40s to end in a misleading error. Detect that case and state the real fix. */
+async function restartComfyForNewNodes(): Promise<void> {
+  try { await backendCall('stop_comfyui') } catch { /* may already be stopped */ }
+  // stop_comfyui reaps its child before returning, so LU's own engine is down
+  // by now — poll a few extra rounds anyway instead of trusting one sleep.
+  // Whatever still answers after that is an engine LU does not own.
+  let stillUp = await checkComfyConnection()
+  for (let i = 0; stillUp && i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    stillUp = await checkComfyConnection()
+  }
+  if (stillUp) {
+    throw new Error(
+      'Your ComfyUI is running outside LU, so LU cannot restart it. New node packs only load on startup: restart your ComfyUI yourself, then come back here.',
+    )
+  }
+  await backendCall('start_comfyui')
+}
+
 /**
  * The seam between the redesigned Create surface and the live backend. Replaces
  * the sandbox mockStore's non-persisted actions (generate/cancel) and mockComfy
@@ -223,9 +247,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
       : 'Downloading & installing the background removal node. This can take a minute…')
     await installCustomNodes([pack])
     onProgress?.('Restarting ComfyUI to register the node…')
-    try { await backendCall('stop_comfyui') } catch { /* may already be stopped */ }
-    await new Promise((r) => setTimeout(r, 2000))
-    await backendCall('start_comfyui')
+    await restartComfyForNewNodes()
     onProgress?.('Waiting for ComfyUI to come back…')
     for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 2000))
@@ -266,9 +288,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
       onProgress?.('Installing the required node packs…')
       await installCustomNodes(bundle.customNodes)
       onProgress?.('Restarting ComfyUI to register the new nodes…')
-      try { await backendCall('stop_comfyui') } catch { /* may already be stopped */ }
-      await new Promise((r) => setTimeout(r, 2000))
-      await backendCall('start_comfyui')
+      await restartComfyForNewNodes()
       for (let i = 0; i < 20; i++) {
         await new Promise((r) => setTimeout(r, 2000))
         if (await checkComfyConnection()) break

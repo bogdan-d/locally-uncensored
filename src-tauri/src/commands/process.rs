@@ -1035,6 +1035,23 @@ pub fn start_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, St
         return Ok(serde_json::json!({"status": "already_running"}));
     }
 
+    // The port probe alone misses a ComfyUI that is STARTING: it imports for
+    // 20-60s before it binds the port. Spawning a second copy in that window
+    // overwrites the tracked child handle — the first child keeps running
+    // untracked, wins the port bind, and every later stop/restart kills only
+    // the tracked twin while the zombie keeps serving the stale node list
+    // (the "install spinner never ends" chain). Report 'starting' instead;
+    // callers already poll the connection afterwards.
+    {
+        let mut proc = state.comfy_process.lock().unwrap();
+        if let Some(child) = proc.as_mut() {
+            match child.try_wait() {
+                Ok(None) => return Ok(serde_json::json!({"status": "starting"})),
+                _ => *proc = None, // exited or unreapable — clear and start fresh
+            }
+        }
+    }
+
     let comfy_path = {
         let path = state.comfy_path.lock().unwrap();
         path.clone()
@@ -1225,6 +1242,10 @@ pub fn stop_comfyui(state: State<'_, AppState>) -> Result<serde_json::Value, Str
         } else {
             let _ = child.kill();
         }
+        // Reap before returning: guarantees the listen socket is released, so
+        // a start_comfyui right after us cannot lose the port bind (10048) to
+        // the dying process and silently leave the OLD node list being served.
+        let _ = child.wait();
         *proc = None;
         println!("[ComfyUI] Stopped");
         info!(pid = pid, "comfyui stopped");
