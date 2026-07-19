@@ -701,5 +701,69 @@ describe('OpenAIProvider', () => {
       }
       vi.restoreAllMocks()
     })
+
+    // LU Cloud proxy (2.5.8 server): 400 with a structured top-level `code` and
+    // an honest `error` line. The proxy answers 400 now (was 502). The message
+    // ("... can't run tools ...") has no standalone "tool" word for the regex,
+    // so the structured code is what must tag it.
+    it('tags the structured model_no_tools 400 body as tools_unsupported', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LU Cloud' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          error: "Hermes 3 70B can't run tools or Agent/Code mode. Switch to a tool-capable model like Qwen3 30B.",
+          code: 'model_no_tools',
+          model: 'hermes-3-70b',
+        }), { status: 400 })
+      )
+      try {
+        await provider.chatWithTools('hermes-3-70b', [{ role: 'user', content: 'hi' }], toolDef)
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).toBe('tools_unsupported')
+        expect(e.message).toMatch(/can't run tools/)
+      }
+      vi.restoreAllMocks()
+    })
+
+    it('tags the structured model_no_vision 400 body as vision_unsupported', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LU Cloud' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          error: "MythoMax L2 13B can't read images. Switch to a vision model.",
+          code: 'model_no_vision',
+          model: 'mythomax-l2-13b',
+        }), { status: 400 })
+      )
+      try {
+        await provider.chatWithTools('mythomax-l2-13b', [{ role: 'user', content: 'hi' }], toolDef)
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).toBe('vision_unsupported')
+        expect(e.message).toMatch(/can't read images/)
+      }
+      vi.restoreAllMocks()
+    })
+  })
+
+  // 2.5.8 — the /models list now declares per-model tool capability. Parsing it
+  // is what lets Agent/Code gate the 6 tool-less cloud models up front.
+  describe('listModels supports_tools', () => {
+    it('parses supports_tools:false and defaults missing to true', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LU Cloud' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            { id: 'qwen3-30b', object: 'model', supports_tools: true },
+            { id: 'hermes-3-70b', object: 'model', supports_tools: false },
+            { id: 'legacy-no-field', object: 'model' },
+          ],
+        }), { status: 200 })
+      )
+      const models = await provider.listModels()
+      expect(models.find(m => m.id === 'qwen3-30b')?.supportsTools).toBe(true)
+      expect(models.find(m => m.id === 'hermes-3-70b')?.supportsTools).toBe(false)
+      expect(models.find(m => m.id === 'legacy-no-field')?.supportsTools).toBe(true)
+      vi.restoreAllMocks()
+    })
   })
 })

@@ -7,6 +7,7 @@ import { useChatStore } from '../../stores/chatStore'
 import { useModelStore } from '../../stores/modelStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { isAgentCompatible } from '../../lib/model-compatibility'
+import { getToolCapability } from '../../api/tool-capability'
 import { FEATURE_FLAGS } from '../../lib/constants'
 import { AgentTutorial } from './AgentTutorial'
 import { AgentWorkspaceDialog } from './AgentWorkspaceDialog'
@@ -26,12 +27,25 @@ export function AgentModeToggle() {
   const conversations = useChatStore((s) => s.conversations)
   const createConversation = useChatStore((s) => s.createConversation)
   const activeModel = useModelStore((s) => s.activeModel)
+  const activeModelMeta = useModelStore((s) => s.models.find((m) => m.name === s.activeModel))
   const { agentModeActive, toggleAgentMode, tutorialCompleted, newChatHintDismissed } = useAgentModeStore()
 
   if (!FEATURE_FLAGS.AGENT_MODE || !activeConversationId) return null
 
   const isActive = agentModeActive[activeConversationId] ?? false
-  const isCompatible = activeModel ? isAgentCompatible(activeModel) : false
+  // Tool-capability precedence, same order the dropdown icon uses so the toggle
+  // and the marker never disagree:
+  //   1. a run PROVED it rejects tools (reactive cache, cloud 405 / ollama
+  //      "does not support tools") → disabled, even if the name looks capable
+  //   2. server-declared capability (LU Cloud /models → supports_tools): false
+  //      keeps Agent disabled up front so the user never eats a mid-run 400 on
+  //      the cloud models without function calling (Hermes 3, Euryale, …)
+  //   3. otherwise the family name heuristic, unchanged for every local model
+  const serverTools = activeModelMeta && 'supportsTools' in activeModelMeta ? activeModelMeta.supportsTools : undefined
+  const isCompatible =
+    (activeModel && getToolCapability(activeModel) === 'unsupported') ? false
+    : serverTools !== undefined ? serverTools
+    : (activeModel ? isAgentCompatible(activeModel) : false)
 
   const conversation = conversations.find((c) => c.id === activeConversationId)
   const hasMessages = (conversation?.messages?.length ?? 0) > 0

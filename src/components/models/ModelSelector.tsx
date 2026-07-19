@@ -765,13 +765,15 @@ export function ModelSelector({ openUpward = false }: { openUpward?: boolean } =
                             </span>
                           )}
                           {/* 2.5.8 — tool-calling capability at a glance. Ban =
-                              a model we've SEEN reject tools (cloud 405 / ollama
-                              "does not support tools"), so it can't run Agent/Code.
-                              Wrench = tool-capable (optimistic for cloud/ollama the
-                              same way we already send tools; the ban corrects it if
-                              a run proves otherwise). Text models only. */}
+                              no function calling, so Agent/Code can't use it:
+                              either the server declared it (LU Cloud
+                              supports_tools === false — Hermes 3, Euryale,
+                              MythoMax, Llama-4-Maverick, …) or we've SEEN it
+                              reject tools at runtime (cloud 405 / ollama "does
+                              not support tools"). Wrench = tool-capable. Text
+                              models only. */}
                           {model.type === 'text' && (
-                            getToolCapability(model.name) === 'unsupported' ? (
+                            (getToolCapability(model.name) === 'unsupported' || model.supportsTools === false) ? (
                               <span
                                 className="inline-flex items-center shrink-0 text-amber-500/80"
                                 title="This model does not support tool calling, so Agent and Code mode cannot use it"

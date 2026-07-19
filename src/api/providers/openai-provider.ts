@@ -73,6 +73,12 @@ interface OpenAIModelEntry {
   name?: string
   context_length?: number
   input_modalities?: string[]
+  // LU Cloud /models declares per-model tool-calling support. Some cloud chat
+  // models (Hermes 3, Euryale, MythoMax, Llama-4-Maverick, …) can't do function
+  // calling; the server marks them false so Agent/Code mode can gate them up
+  // front instead of eating a mid-run 400. Absent on backends that don't send
+  // it → the mapping falls back to `true` (optimistic, corrected at runtime).
+  supports_tools?: boolean
   think?: 'toggle' | 'always' | 'never'
 }
 
@@ -481,7 +487,7 @@ export class OpenAIProvider implements ProviderClient {
           KNOWN_CONTEXT[m.id] ??
           (await this.probeContextFromServer(m.id)) ??
           guessContextFromName(m.id),
-        supportsTools: true,
+        supportsTools: m.supports_tools ?? true,
       })))
     }
 
@@ -498,7 +504,11 @@ export class OpenAIProvider implements ProviderClient {
         provider: 'openai' as const,
         providerName: this.config.name,
         contextLength: m.context_length ?? KNOWN_CONTEXT[m.id] ?? guessContextFromName(m.id),
-        supportsTools: true,
+        // Server-authoritative tool capability. `false` for the cloud chat
+        // models that can't do function calling → the whole chain (Agent
+        // toggle, dropdown icon, Code mode) gates them without a failed run.
+        // Fallback `true` keeps older deployments (no field) optimistic.
+        supportsTools: m.supports_tools ?? true,
         supportsVision: m.input_modalities?.includes('image') || undefined,
         thinkMode: m.think,
       }
@@ -657,10 +667,17 @@ export class OpenAIProvider implements ProviderClient {
     let message = `${this.config.name}: Request failed`
     let code: string = 'network'
     let hasServerMessage = false
+    // LU Cloud proxy tags impossible requests with a structured top-level code
+    // (sibling of `error`): "model_no_tools" (tools sent to a model without
+    // function calling) / "model_no_vision" (image sent to a text-only model).
+    // Mapped to our kinds after the status switch so the honest `error` line
+    // surfaces and Agent/Code can remember the model.
+    let serverCode: string | undefined
 
     try {
-      const data = await res.json() as { error?: unknown; message?: string }
+      const data = await res.json() as { error?: unknown; message?: string; code?: string }
       const err = data.error
+      if (typeof data.code === 'string' && data.code.trim()) serverCode = data.code
       // OpenAI & most servers: { error: { message, code } }. But LM Studio and
       // llama.cpp commonly send a BARE string ({ error: "..." }) or a top-level
       // { message: "..." }. The old object-only read missed both → the real
@@ -703,10 +720,16 @@ export class OpenAIProvider implements ProviderClient {
     // the chat layer shows a clean "this model can't do tool calling" note (and
     // remembers the model) instead of a raw status error. Guarded on toolsSent
     // so a plain 405 on a tool-less request is never mislabelled.
-    if (toolsSent && (res.status === 405 || ((res.status === 400 || res.status === 404 || res.status === 422) && /\btool\b|function[_ ]?call/i.test(message)))) {
+    if (toolsSent && (res.status === 405 || ((res.status === 400 || res.status === 404 || res.status === 422) && /\btools?\b|function[_ ]?call/i.test(message)))) {
       code = 'tools_unsupported'
       if (!hasServerMessage) message = `${this.config.name}: this model does not support tools (function calling).`
     }
+
+    // Server-authoritative capability rejection (LU Cloud proxy, HTTP 400).
+    // Wins over the heuristic above: it names the exact reason and ships an
+    // honest, user-facing `error` line (already captured as `message`).
+    if (serverCode === 'model_no_tools') code = 'tools_unsupported'
+    else if (serverCode === 'model_no_vision') code = 'vision_unsupported'
 
     // LM Studio: model load fails when there's no inference runtime for the
     // model's format installed. The raw API error reads "No LM Runtime found
