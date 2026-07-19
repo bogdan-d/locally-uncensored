@@ -3035,17 +3035,42 @@ fn install_node_requirements(
         ));
     }
     println!("[Install] Installing requirements for {} via {}", node_name, python_bin);
-    let mut pip = Command::new(&python_bin);
-    pip.args(["-m", "pip", "install", "--no-input", "-r"]).arg(&reqs)
-        .stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(target_os = "windows")]
-    pip.creation_flags(CREATE_NO_WINDOW);
-    let pip_out = pip.output()
-        .map_err(|e| format!("Failed to spawn pip for {} requirements: {}", node_name, e))?;
+    let run_pip = |extra: &[&str]| -> Result<std::process::Output, String> {
+        let mut pip = Command::new(&python_bin);
+        pip.args(["-m", "pip", "install", "--no-input"]);
+        pip.args(extra);
+        pip.arg("-r").arg(&reqs);
+        pip.stdout(Stdio::piped()).stderr(Stdio::piped());
+        #[cfg(target_os = "windows")]
+        pip.creation_flags(CREATE_NO_WINDOW);
+        pip.output()
+            .map_err(|e| format!("Failed to spawn pip for {} requirements: {}", node_name, e))
+    };
+    let pip_out = run_pip(&[])?;
     if !pip_out.status.success() {
         let stderr = String::from_utf8_lossy(&pip_out.stderr);
         let stdout = String::from_utf8_lossy(&pip_out.stdout);
         let combined = format!("{}{}", stdout, stderr);
+        // python.org installs under Program Files have an admin-only
+        // site-packages: the first node pack whose requirements pull a NEW
+        // wheel dies with a permission error, while packs whose deps are
+        // already present sail through (why RMBG/VHS installs passed and
+        // controlnet_aux stranded the Motion install card, 2026-07-19).
+        // Retry into the per-user site — the same interpreter imports from
+        // there, no admin needed. The Windows twin of the PEP 668 --user
+        // escape above; a venv Python never hits a permission error here,
+        // and if the retry fails too we surface the original diagnosis.
+        if is_permission_denied_pip_error(&combined) {
+            println!(
+                "[Install] {} requirements hit a permission error — retrying into the user site (--user)",
+                node_name
+            );
+            if let Ok(user_out) = run_pip(&["--user"]) {
+                if user_out.status.success() {
+                    return Ok(());
+                }
+            }
+        }
         // Reuse the install_comfyui diagnose path so PEP 668 +
         // friends produce actionable messages here too.
         let diagnosis = diagnose_pip_error(&combined);
@@ -3056,6 +3081,17 @@ fn install_node_requirements(
         ));
     }
     Ok(())
+}
+
+/// True iff a failed pip run died on filesystem permissions (admin-only
+/// site-packages, e.g. python.org installs under Program Files on Windows).
+/// Those are fixable by re-running the same install with `--user`.
+fn is_permission_denied_pip_error(output: &str) -> bool {
+    let lower = output.to_lowercase();
+    lower.contains("permission denied")
+        || lower.contains("errno 13")
+        || lower.contains("access is denied")
+        || lower.contains("winerror 5")
 }
 
 // ── tests (issue #32: PyTorch / ComfyUI install reliability) ────────────────
@@ -3214,6 +3250,32 @@ mod tests {
     fn transient_rejects_permission_error() {
         assert!(!is_transient_pip_error(
             "PermissionError: [Errno 13] Permission denied: 'C:\\\\Python\\\\Lib\\\\site-packages\\\\torch'"
+        ));
+    }
+
+    // ── permission-denied → --user retry (Motion install card, 2026-07-19) ──
+
+    #[test]
+    fn permission_predicate_matches_windows_and_unix_denials() {
+        assert!(is_permission_denied_pip_error(
+            "ERROR: Could not install packages due to an OSError: [Errno 13] Permission denied: 'C:\\\\Program Files\\\\Python311\\\\Lib\\\\site-packages\\\\onnxruntime'"
+        ));
+        assert!(is_permission_denied_pip_error(
+            "PermissionError: [WinError 5] Access is denied"
+        ));
+        assert!(is_permission_denied_pip_error("EACCES: permission denied"));
+    }
+
+    #[test]
+    fn permission_predicate_rejects_other_pip_failures() {
+        assert!(!is_permission_denied_pip_error(
+            "error: externally-managed-environment"
+        ));
+        assert!(!is_permission_denied_pip_error(
+            "ReadTimeoutError: HTTPSConnectionPool(host='pypi.org')"
+        ));
+        assert!(!is_permission_denied_pip_error(
+            "ERROR: Could not find a version that satisfies the requirement onnxruntime-gpu"
         ));
     }
 
