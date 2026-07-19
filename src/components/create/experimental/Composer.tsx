@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sparkles, X, History, SlidersHorizontal, Square } from 'lucide-react'
 import { useCreateStore, MODEL_TYPE_DEFAULTS, type CreateIntent } from '../../../stores/createStore'
+import { classifyModel } from '../../../api/comfyui'
 import { useCreateExp } from './CreateContext'
 import { intentToJob } from '../../../lib/render/cloud-jobs'
 import {
@@ -118,18 +119,22 @@ export function Composer({ onOpenAdvanced }: Props) {
   // hide the toggle (and the collapsed field) where it would be silently
   // dropped, like the other dead knobs on cloud.
   const negSupported = backend !== 'cloud' || cloudModelById(runModel)?.negative_prompt === true
-  // Per-intent readiness for the 2.5.8 categories (mirrors useCloudCreate's
-  // submit-time checks so the button never invites a doomed run).
+  // Per-intent readiness for the 2.5.8 categories (mirrors the submit-time
+  // checks of BOTH lanes so the button never invites a doomed run). The
+  // local lanes always speak from a portrait (no hosted resync endpoints)
+  // and extend continues from the picked clip's extracted last frame, which
+  // lives in `source`.
   const lipsyncNeedsClip =
+    backend === 'cloud' &&
     intent === 'lipsync' &&
     cloudModelById(modelForOp('video', 'lipsync', cloudOpModel))?.lipsync_source === 'video'
   const specialReady =
     intent === 'character'
       ? (characterUse ? !!selectedCharacter : trainImages.length >= 4)
       : intent === 'lipsync'
-        ? (!!audioInput || !!voiceFromJob) && (lipsyncNeedsClip ? !!videoInput : !!source)
+        ? (!!audioInput || (backend === 'cloud' && !!voiceFromJob)) && (lipsyncNeedsClip ? !!videoInput : !!source)
         : intent === 'extend'
-          ? !!extendSource
+          ? (backend === 'cloud' ? !!extendSource : !!source)
           : intent === 'motion'
             ? !!source && !!videoInput
             : true
@@ -141,13 +146,13 @@ export function Composer({ onOpenAdvanced }: Props) {
 
   return (
     // A stable min-height (bottom-anchored) so the prompt window occupies the
-    // same vertical space on every tab — utility modes (no QuickControls / no
+    // same vertical space on every tab — utility modes (no LaneControls / no
     // prompt) don't shrink it. That keeps the viewer + gallery row above it the
     // exact SAME height across all tabs, not just within one.
     <div className="shrink-0 px-4 pb-4 pt-2 min-h-[192px] flex flex-col justify-end">
       <div className="mx-auto w-full max-w-[760px] space-y-2.5">
-        {!isUtility && !special && <QuickControls />}
         {special && <SpecialControls intent={intent} />}
+        {!isUtility && <LaneControls />}
 
         <div className="rounded-[var(--radius-panel)] bg-white/[0.03] border border-white/[0.06] focus-within:border-white/15 transition-colors">
           {needPrompt && (
@@ -257,9 +262,21 @@ function noPromptHint(id: CreateIntent): string {
 }
 
 // Quality (proxy over steps) + Aspect (image) + Edit strength (edit).
-function QuickControls() {
+// The tuning row above the prompt. It renders exactly the knobs the lane's
+// submit path actually consumes, so nothing on screen is a dead control:
+//   • image (generate / edit / character-use): quality + aspect (+ edit str)
+//   • video LOCAL (any lane): steps + size + frames (frames follow the voice
+//     on lipsync, so it's hidden there — useCreate derives it from the audio)
+//   • video CLOUD regular (video / animate): same, cloud honours w/h/steps/frames
+//   • video CLOUD specialized (lipsync / extend / motion): hidden — those ops
+//     submit "bare" (fixed server-side), so the sliders would do nothing
+//   • audio LOCAL (music): steps (Length lives in MusicControls)
+//   • audio CLOUD (music): hidden — bare submit carries only duration + lyrics
+function LaneControls() {
   const intent = useCreateStore((s) => s.intent())
   const meta = INTENT_MAP[intent]
+  const backend = useCreateStore((s) => s.backend)
+  const characterTab = useCreateStore((s) => s.characterTab)
   const steps = useCreateStore((s) => s.steps)
   const setSteps = useCreateStore((s) => s.setSteps)
   const denoise = useCreateStore((s) => s.denoise)
@@ -268,50 +285,131 @@ function QuickControls() {
   const width = useCreateStore((s) => s.width)
   const height = useCreateStore((s) => s.height)
   const setSize = useCreateStore((s) => s.setSize)
+  const frames = useCreateStore((s) => s.frames)
+  const setFrames = useCreateStore((s) => s.setFrames)
+  const fps = useCreateStore((s) => s.fps)
+  const videoModel = useCreateStore((s) => s.videoModel)
 
   const base = MODEL_TYPE_DEFAULTS[imageModelType]?.steps ?? 25
   const qSteps = { Draft: Math.round(base * 0.6), Standard: base, High: Math.round(base * 1.5) }
   const activeQ = nearestKey(qSteps, steps)
 
+  // Character-Studio forks: the Train surface owns its own step control
+  // (trainSteps in SpecialControls); Use is a plain image generate with the
+  // trained LoRA attached, so it takes the image knobs below.
+  const characterTrain = intent === 'character' && characterTab === 'train'
+  const characterUse = intent === 'character' && characterTab === 'use'
+  if (characterTrain) return null
+
+  // The 2.5.8 specialized ops that submit "bare" on cloud (fixed server-side)
+  // but consume the sliders locally — mirrors useCloudCreate's specialOp set.
+  const specialOp = intent === 'lipsync' || intent === 'music' || intent === 'extend' || intent === 'motion'
+  const kind: 'image' | 'video' | 'audio' =
+    characterUse ? 'image' : intent === 'music' ? 'audio' : meta.isVideo ? 'video' : 'image'
+
+  // ── Image lanes: quality + aspect (+ edit strength) ──
+  if (kind === 'image') {
+    return (
+      <div className="flex items-center justify-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2" style={{ transform: 'scale(0.7)', transformOrigin: 'center' }}>
+          <LabeledControl label="Quality">
+            <Segmented
+              size="sm"
+              layoutId="quality"
+              value={activeQ}
+              onChange={(k) => setSteps(qSteps[k as keyof typeof qSteps])}
+              options={[{ value: 'Draft', label: 'Draft' }, { value: 'Standard', label: 'Standard' }, { value: 'High', label: 'High' }]}
+            />
+          </LabeledControl>
+
+          {/* Aspect only where the output size is actually user-chosen — a pure
+              from-scratch image. Edit/mask ops force the output to the source
+              image's dimensions (useCloudCreate overrides w/h from the source),
+              so the control was dead there. */}
+          {!meta.needsSource && (
+            <LabeledControl label="Aspect">
+              <Segmented
+                size="sm"
+                layoutId="aspect"
+                value={aspectKey(width, height)}
+                onChange={(k) => { const p = aspectPresets(imageModelType)[k as AspectKey]; setSize(p.w, p.h) }}
+                options={[
+                  { value: '1:1', label: '1:1', icon: Square },
+                  { value: '3:4', label: '3:4' },
+                  { value: '4:3', label: '4:3' },
+                  { value: '16:9', label: '16:9' },
+                ]}
+              />
+            </LabeledControl>
+          )}
+        </div>
+
+        {meta.id === 'edit' && (
+          <div className="w-44">
+            <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={denoise} onChange={setDenoise} format={(v) => v.toFixed(2)} />
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Below here it's video/audio. The sliders only drive a render where the
+  // submit path reads them — hide the whole row on the cloud specialized ops.
+  const knobsLive = backend !== 'cloud' || !specialOp
+  if (!knobsLive) return null
+
+  // ── Audio (music) LOCAL: steps only — Length lives in MusicControls. ──
+  if (kind === 'audio') {
+    return (
+      <div className="flex items-center justify-center">
+        <div className="w-56">
+          <Slider label="Quality (steps)" min={1} max={Math.max(60, base)} step={1} value={steps} onChange={setSteps} format={(v) => `${v}`} />
+        </div>
+      </div>
+    )
+  }
+
+  // ── Video: steps + size + frames. Anchor the Size tiers + step ceiling to
+  //    the lane's ACTUAL video-model type — imageModelType doesn't track the
+  //    video model (setVideoModel/setIntent set width/height but leave it), so
+  //    keying off it would show image-centric sizes (1024p) on a 480p video
+  //    graph. Mirror the store's per-intent typing (setIntent). ──
+  const laneType = intent === 'lipsync' ? 'wans2v' : intent === 'motion' ? 'wananimate' : classifyModel(videoModel)
+  const vdef = MODEL_TYPE_DEFAULTS[laneType] ?? MODEL_TYPE_DEFAULTS.unknown
+  const nativeShort = Math.min(vdef.width, vdef.height) || 480
+  const nativeLong = Math.max(vdef.width, vdef.height) || 832
+  const scale = Math.min(width, height) / nativeShort
+  const resTiers = [0.66, 1, 1.5]
+  const activeRes = String(resTiers.reduce((b, m) => Math.abs(m - scale) < Math.abs(b - scale) ? m : b, 1))
+  const applyRes = (mult: number) => {
+    const landscape = vdef.width >= vdef.height
+    const short = snap16(nativeShort * mult)
+    const long = snap16(nativeLong * mult)
+    setSize(landscape ? long : short, landscape ? short : long)
+  }
+  const stepMax = Math.max(40, Math.round((vdef.steps ?? 25) * 1.5))
+  const showFrames = intent !== 'lipsync' // lipsync frames follow the voice length
+
   return (
-    <div className="flex items-center justify-center gap-3 flex-wrap">
-      <div className="flex items-center gap-2" style={{ transform: 'scale(0.7)', transformOrigin: 'center' }}>
-      <LabeledControl label="Quality">
+    <div className="flex items-center justify-center gap-4 flex-wrap">
+      <div className="w-40">
+        <Slider label="Quality (steps)" min={1} max={stepMax} step={1} value={steps} onChange={setSteps} format={(v) => `${v}`} />
+      </div>
+      <LabeledControl label="Size">
         <Segmented
           size="sm"
-          layoutId="quality"
-          value={activeQ}
-          onChange={(k) => setSteps(qSteps[k as keyof typeof qSteps])}
-          options={[{ value: 'Draft', label: 'Draft' }, { value: 'Standard', label: 'Standard' }, { value: 'High', label: 'High' }]}
+          layoutId="lane-res"
+          value={activeRes}
+          onChange={(k) => applyRes(Number(k))}
+          options={resTiers.map((m) => ({ value: String(m), label: `${snap16(nativeShort * m)}p` }))}
         />
       </LabeledControl>
-
-      {/* Aspect only where the output size is actually user-chosen — a pure
-          from-scratch image. Edit/mask ops force the output to the source
-          image's dimensions (useCloudCreate overrides w/h from the source), so
-          the control was dead there; video has no aspect knob at all. */}
-      {!meta.isVideo && !meta.needsSource && (
-        <LabeledControl label="Aspect">
-          <Segmented
-            size="sm"
-            layoutId="aspect"
-            value={aspectKey(width, height)}
-            onChange={(k) => { const p = aspectPresets(imageModelType)[k as AspectKey]; setSize(p.w, p.h) }}
-            options={[
-              { value: '1:1', label: '1:1', icon: Square },
-              { value: '3:4', label: '3:4' },
-              { value: '4:3', label: '4:3' },
-              { value: '16:9', label: '16:9' },
-            ]}
-          />
-        </LabeledControl>
-      )}
-      </div>
-
-      {meta.id === 'edit' && (
+      {showFrames ? (
         <div className="w-44">
-          <Slider label="Edit strength" min={0.05} max={1} step={0.05} value={denoise} onChange={setDenoise} format={(v) => v.toFixed(2)} />
+          <Slider label="Frames" min={9} max={121} step={4} value={frames} onChange={setFrames} format={(v) => `${v}f · ${(v / (fps || 16)).toFixed(1)}s`} />
         </div>
+      ) : (
+        <span className="t-label text-gray-600">clip length follows your voice</span>
       )}
     </div>
   )
@@ -359,6 +457,9 @@ type AspectKey = '1:1' | '3:4' | '4:3' | '16:9'
 const RATIO: Record<AspectKey, number> = { '1:1': 1, '3:4': 3 / 4, '4:3': 4 / 3, '16:9': 16 / 9 }
 
 function snap64(n: number): number { return Math.max(64, Math.round(n / 64) * 64) }
+// Video dims want a multiple of 16 (the VAE/latent grid of the WAN/S2V/VACE
+// families) — snap the resolution tiers to it so the graph never rejects them.
+function snap16(n: number): number { return Math.max(128, Math.round(n / 16) * 16) }
 
 function aspectPresets(modelType: string): Record<AspectKey, { w: number; h: number }> {
   const def = MODEL_TYPE_DEFAULTS[modelType as keyof typeof MODEL_TYPE_DEFAULTS] ?? MODEL_TYPE_DEFAULTS.sdxl
