@@ -30,6 +30,7 @@ import { useMemoryStore } from '../stores/memoryStore'
 import { useVoiceStore } from '../stores/voiceStore'
 import { autoSpeak } from '../lib/ttsBridge'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
+import { markToolsUnsupported } from '../api/tool-capability'
 import { buildExtractionPrompt, parseExtractionResponse } from '../lib/memory-extraction'
 import { useAgentWorkflowStore } from '../stores/agentWorkflowStore'
 import { WorkflowEngine } from '../lib/workflow-engine'
@@ -1382,10 +1383,11 @@ export function useAgentChat() {
             convId!, assistantMessage.id,
             MULTIMODAL_UNSUPPORTED_MESSAGE
           )
-        } else if (errorMsg.includes('does not support tools')) {
+        } else if ((err as { code?: string })?.code === 'tools_unsupported' || errorMsg.includes('does not support tools')) {
+          markToolsUnsupported(modelToUse)
           useChatStore.getState().updateMessageContent(
             convId!, assistantMessage.id,
-            `This model does not support tool calling.\n\nThe auto-fix could not be applied. Try pulling a standard model like:\n• qwen2.5:7b\n• llama3.1:8b\n• mistral:7b`
+            `This model does not support tool calling, so it can't run in Agent or Code mode (and Chat has tools on).\n\nTurn tools off, or switch to a model that supports tool calling:\n• local (Ollama / LM Studio): qwen2.5:7b, llama3.1:8b, mistral:7b\n• LU Cloud: pick a model shown with the tools badge`
           )
         } else if (errorMsg.includes('does not support thinking')) {
           // Graceful message for thinking errors (shouldn't reach here after retry, but just in case)

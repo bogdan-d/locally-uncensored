@@ -5,6 +5,7 @@ import { useModelStore } from '../stores/modelStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useChatStore } from '../stores/chatStore'
 import { getProviderForModel, getProviderIdFromModel } from '../api/providers'
+import { markToolsUnsupported } from '../api/tool-capability'
 import { toolRegistry } from '../api/mcp'
 import { usePermissionStore } from '../stores/permissionStore'
 import { getToolCallingStrategy } from '../lib/model-compatibility'
@@ -1440,8 +1441,9 @@ export function useCodex() {
         let hint = ''
         if (/Failed to fetch|NetworkError|net::ERR/i.test(msg)) {
           hint = '\n\nHint: the Ollama server is unreachable. Is `ollama serve` running on localhost:11434?'
-        } else if (/does not support tools|tool.*not.*support/i.test(msg)) {
-          hint = '\n\nHint: this model does not support native tool calling. Pick a tool-capable model (Qwen 3, Llama 3.1+, Gemma 4) or switch to a model without the coder-only restriction.'
+        } else if (e?.code === 'tools_unsupported' || /does not support tools|tool.*not.*support/i.test(msg)) {
+          markToolsUnsupported(modelToUse)
+          hint = '\n\nHint: this model does not support tool calling, so Code mode cannot use it. Pick a model that supports tool calling (Qwen 3, Llama 3.1+, Gemma 4) or an LU Cloud model shown with the tools badge.'
         } else if (/timed out/i.test(msg)) {
           hint = '\n\nHint: a tool call exceeded its time budget. For long builds, raise the command timeout, split the work, or run it via shell_execute_background.'
         }

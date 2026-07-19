@@ -636,4 +636,70 @@ describe('OpenAIProvider', () => {
       vi.restoreAllMocks()
     })
   })
+
+  // 2.5.8 — a model without function calling that gets a tool-augmented request
+  // makes DeepInfra / LU Cloud answer 405 (some servers 400/422 with a
+  // tool/function message). parseError must tag that 'tools_unsupported' so the
+  // chat layer shows a clean note instead of a raw status error / AbortError.
+  describe('tools_unsupported (model without function calling)', () => {
+    const toolDef = [{
+      type: 'function' as const,
+      function: { name: 'web_search', description: 'x', parameters: { type: 'object', properties: {} } },
+    }]
+
+    it('tags a 405 on a tool request as tools_unsupported', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LU Cloud' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('', { status: 405 }))
+      try {
+        await provider.chatWithTools('some-model', [{ role: 'user', content: 'hi' }], toolDef)
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e).toBeInstanceOf(ProviderError)
+        expect(e.code).toBe('tools_unsupported')
+        expect(e.message).toMatch(/tool/i)
+      }
+      vi.restoreAllMocks()
+    })
+
+    it('keeps an honest server message but still tags tools_unsupported', async () => {
+      const provider = new OpenAIProvider(makeConfig({ name: 'LU Cloud' }))
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'Function calling is not supported for this model' } }), { status: 400 })
+      )
+      try {
+        await provider.chatWithTools('some-model', [{ role: 'user', content: 'hi' }], toolDef)
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).toBe('tools_unsupported')
+        expect(e.message).toMatch(/Function calling is not supported/)
+      }
+      vi.restoreAllMocks()
+    })
+
+    it('does NOT tag a 405 when no tools were sent', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('', { status: 405 }))
+      try {
+        await provider.listModels()
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).not.toBe('tools_unsupported')
+      }
+      vi.restoreAllMocks()
+    })
+
+    it('does NOT tag an unrelated 400 that happens to carry tools', async () => {
+      const provider = new OpenAIProvider(makeConfig())
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'context length exceeded' } }), { status: 400 })
+      )
+      try {
+        await provider.chatWithTools('some-model', [{ role: 'user', content: 'hi' }], toolDef)
+        expect.fail('Should have thrown')
+      } catch (e: any) {
+        expect(e.code).not.toBe('tools_unsupported')
+      }
+      vi.restoreAllMocks()
+    })
+  })
 })

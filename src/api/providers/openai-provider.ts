@@ -428,7 +428,7 @@ export class OpenAIProvider implements ProviderClient {
     }
 
     if (!res.ok) {
-      throw await this.parseError(res)
+      throw await this.parseError(res, tools.length > 0)
     }
 
     const data: OpenAIResponse = await res.json()
@@ -653,7 +653,7 @@ export class OpenAIProvider implements ProviderClient {
 
   // ── Error parsing ────────────────────────────────────────────
 
-  private async parseError(res: Response): Promise<ProviderError> {
+  private async parseError(res: Response, toolsSent = false): Promise<ProviderError> {
     let message = `${this.config.name}: Request failed`
     let code: string = 'network'
     let hasServerMessage = false
@@ -695,6 +695,17 @@ export class OpenAIProvider implements ProviderClient {
       if (!hasServerMessage) message = `Rate limited by ${this.config.name}. Wait a moment and try again.`
     } else if (res.status === 404) {
       code = 'not_found'
+    }
+
+    // A tool-augmented request rejected for the tools themselves. DeepInfra /
+    // LU Cloud answer 405 for a model without function calling; some servers
+    // 400/404/422 with a tool/function message. Tag it 'tools_unsupported' so
+    // the chat layer shows a clean "this model can't do tool calling" note (and
+    // remembers the model) instead of a raw status error. Guarded on toolsSent
+    // so a plain 405 on a tool-less request is never mislabelled.
+    if (toolsSent && (res.status === 405 || ((res.status === 400 || res.status === 404 || res.status === 422) && /\btool\b|function[_ ]?call/i.test(message)))) {
+      code = 'tools_unsupported'
+      if (!hasServerMessage) message = `${this.config.name}: this model does not support tools (function calling).`
     }
 
     // LM Studio: model load fails when there's no inference runtime for the
