@@ -866,8 +866,8 @@ export async function startModelDownloadToPath(url: string, destDir: string, fil
 
 /** Look up download URL + subfolder for a file by filename · searches all bundles + text models */
 export function lookupFileMeta(filename: string): { url: string; subfolder: string } | null {
-  // Search image + video bundles
-  for (const bundle of [...getImageBundles(), ...getVideoBundles()]) {
+  // Search image + video + 2.5.8 specialized-lane bundles
+  for (const bundle of [...getImageBundles(), ...getVideoBundles(), ...getAudioBundles(), ...getLipsyncBundles(), ...getMotionBundles()]) {
     for (const f of bundle.files) {
       if (f.filename === filename && f.downloadUrl && f.subfolder) {
         return { url: f.downloadUrl, subfolder: f.subfolder }
@@ -1321,6 +1321,24 @@ export const CUSTOM_NODE_REGISTRY: Record<string, { repo: string; name: string; 
     repo: 'https://github.com/1038lab/ComfyUI-RMBG',
     name: 'ComfyUI-RMBG',
     requiredNodes: ['RMBG'],
+  },
+  // GGUF quant loader (city96). Lets the 2.5.8 lanes offer Q4 quants of the
+  // 14B Wan models (S2V / Animate / NSFW finetunes) — the difference between
+  // "needs 16 GB on disk and heavy offload" and "runs comfortably on 12 GB".
+  // requirements.txt is just the gguf package, no exotic wheels.
+  'gguf': {
+    repo: 'https://github.com/city96/ComfyUI-GGUF',
+    name: 'ComfyUI-GGUF',
+    requiredNodes: ['UnetLoaderGGUF'],
+  },
+  // Pose extraction for the local Motion Control lane (DWPose skeletons feed
+  // WanAnimateToVideo / WanVaceToVideo). Its requirements pull the CPU
+  // onnxruntime wheel — works on every Windows box, no GPU wheel roulette;
+  // the DWPose onnx models auto-download on first run.
+  'controlnet-aux': {
+    repo: 'https://github.com/Fannovel16/comfyui_controlnet_aux',
+    name: 'comfyui_controlnet_aux',
+    requiredNodes: ['DWPreprocessor'],
   },
 }
 
@@ -1797,6 +1815,253 @@ export function getVideoBundles(): ModelBundle[] {
           downloadUrl: 'https://huggingface.co/comfyanonymous/cosmos_1.0_text_encoder_and_VAE_ComfyUI/resolve/main/vae/cosmos_cv8x8x8_1.0.safetensors',
           filename: 'cosmos_cv8x8x8_1.0.safetensors', subfolder: 'vae', sizeGB: 0.2,
         },
+      ],
+    },
+    {
+      name: 'NSFW Wan 14B (Uncensored, GGUF)',
+      description: 'Full uncensored finetune of Wan 2.1 14B. Text to video, motion trained in, no helper LoRA needed.',
+      tags: ['Wan 2.1', 'Uncensored', 'GGUF', '480p'],
+      uncensored: true,
+      totalSizeGB: 15.5,
+      vramRequired: '10-12 GB',
+      workflow: 'wan',
+      customNodes: ['gguf'],
+      url: 'https://huggingface.co/NSFW-API/NSFW_Wan_14b',
+      files: [
+        {
+          name: 'NSFW Wan 14B Q4 (GGUF)',
+          description: 'The finetuned video model, final e15 epoch, Q4 quant.',
+          pulls: '', tags: ['Model', '9 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/NSFW-API/NSFW_Wan_14b/resolve/main/nsfw_wan_14b_e15_q4_k.gguf',
+          filename: 'nsfw_wan_14b_e15_q4_k.gguf', subfolder: 'diffusion_models', sizeGB: 9.0,
+        },
+        {
+          name: 'Wan 2.1 VAE',
+          description: 'Required video encoder/decoder.',
+          pulls: '', tags: ['VAE', '250 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
+          filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
+        },
+        {
+          name: 'Wan CLIP (UMT5-XXL FP8)',
+          description: 'Required text encoder.',
+          pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.27,
+        },
+      ],
+    },
+    {
+      name: 'Wan 2.2 Rapid AIO (Uncensored I2V, GGUF)',
+      description: 'Uncensored Wan 2.2 image to video, lightning merged for few step renders. Great for Animate and Extend.',
+      tags: ['Wan 2.2', 'Uncensored', 'I2V', 'GGUF', 'Fast'],
+      uncensored: true,
+      i2v: true,
+      totalSizeGB: 16.6,
+      vramRequired: '10-12 GB',
+      workflow: 'wan',
+      customNodes: ['gguf'],
+      url: 'https://huggingface.co/desirel/WAN2.2-14B-Rapid-AllInOne-GGUF-NSFW-v10',
+      files: [
+        {
+          name: 'Wan 2.2 Rapid AIO v10 Q4 (GGUF)',
+          description: 'The merged uncensored i2v model, Q4 quant.',
+          pulls: '', tags: ['Model', '10.1 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/desirel/WAN2.2-14B-Rapid-AllInOne-GGUF-NSFW-v10/resolve/main/wan2.2-i2v-rapid-aio-v10-nsfw-Q4_K_M.gguf',
+          filename: 'wan2.2-i2v-rapid-aio-v10-nsfw-Q4_K_M.gguf', subfolder: 'diffusion_models', sizeGB: 10.1,
+        },
+        {
+          name: 'Wan 2.1 VAE',
+          description: 'Required video encoder/decoder.',
+          pulls: '', tags: ['VAE', '250 MB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
+          filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
+        },
+        {
+          name: 'Wan CLIP (UMT5-XXL FP8)',
+          description: 'Required text encoder.',
+          pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+          filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.27,
+        },
+      ],
+    },
+  ]
+}
+
+// ─── 2.5.8 specialized local-lane bundles (music / talking character / motion) ───
+//
+// Every URL below was HEAD-verified against HuggingFace on 2026-07-18 (status
+// 200 + content-length; sizes in GiB from the actual response). Music and
+// talking character have no censored/uncensored axis — local rendering runs
+// unfiltered by nature, so no red badge games; the honest split lives in the
+// video list above (real uncensored finetunes) instead.
+
+export function getAudioBundles(): ModelBundle[] {
+  return [
+    {
+      name: 'ACE Step 1.5 Turbo (Music)',
+      description: 'Newest full song generator, MIT licensed. Vocals, lyrics and instruments from a text description. One file.',
+      tags: ['Music', 'Vocals', 'MIT'],
+      totalSizeGB: 9.4,
+      vramRequired: '6-8 GB',
+      workflow: 'ace',
+      url: 'https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files',
+      files: [
+        {
+          name: 'ACE Step 1.5 Turbo (all in one)',
+          description: 'Complete music model. Includes its text encoder and audio VAE.',
+          pulls: '', tags: ['Checkpoint', '9.3 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ace_step_1.5_ComfyUI_files/resolve/main/checkpoints/ace_step_1.5_turbo_aio.safetensors',
+          filename: 'ace_step_1.5_turbo_aio.safetensors', subfolder: 'checkpoints', sizeGB: 9.34,
+        },
+      ],
+    },
+    {
+      name: 'ACE Step v1 3.5B (Music, lighter)',
+      description: 'The proven full song generator. Smaller download, runs from 4 GB VRAM.',
+      tags: ['Music', 'Vocals', 'Light'],
+      totalSizeGB: 7.2,
+      vramRequired: '4-6 GB',
+      workflow: 'ace',
+      url: 'https://huggingface.co/Comfy-Org/ACE-Step_ComfyUI_repackaged',
+      files: [
+        {
+          name: 'ACE Step v1 3.5B (all in one)',
+          description: 'Complete music model. Includes its text encoder and audio VAE.',
+          pulls: '', tags: ['Checkpoint', '7.2 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/ACE-Step_ComfyUI_repackaged/resolve/main/all_in_one/ace_step_v1_3.5b.safetensors',
+          filename: 'ace_step_v1_3.5b.safetensors', subfolder: 'checkpoints', sizeGB: 7.17,
+        },
+      ],
+    },
+  ]
+}
+
+export function getLipsyncBundles(): ModelBundle[] {
+  // Shared support files for the S2V graph (text encoder, VAE, audio encoder).
+  const s2vSupport: DiscoverModel[] = [
+    {
+      name: 'Wan CLIP (UMT5-XXL FP8)',
+      description: 'Required text encoder.',
+      pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+      filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.27,
+    },
+    {
+      name: 'Wan 2.1 VAE',
+      description: 'Required video encoder/decoder.',
+      pulls: '', tags: ['VAE', '250 MB'], updated: '',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
+      filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
+    },
+    {
+      name: 'Wav2Vec2 Audio Encoder',
+      description: 'Turns the speech audio into the embeddings the model lip reads from.',
+      pulls: '', tags: ['Audio Encoder', '600 MB'], updated: '',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/audio_encoders/wav2vec2_large_english_fp16.safetensors',
+      filename: 'wav2vec2_large_english_fp16.safetensors', subfolder: 'audio_encoders', sizeGB: 0.59,
+    },
+  ]
+  return [
+    {
+      name: 'Wan 2.2 S2V Q4 (Talking Character, GGUF)',
+      description: 'A portrait plus any voice becomes a talking video. Q4 quant, the comfortable pick for 12 GB cards.',
+      tags: ['Wan 2.2', 'S2V', 'GGUF'],
+      totalSizeGB: 20.0,
+      vramRequired: '10-12 GB',
+      workflow: 'wans2v',
+      customNodes: ['gguf'],
+      url: 'https://huggingface.co/QuantStack/Wan2.2-S2V-14B-GGUF',
+      files: [
+        {
+          name: 'Wan 2.2 S2V 14B Q4 (GGUF)',
+          description: 'The sound to video model, Q4 quant.',
+          pulls: '', tags: ['Model', '12.9 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/QuantStack/Wan2.2-S2V-14B-GGUF/resolve/main/Wan2.2-S2V-14B-Q4_K_M.gguf',
+          filename: 'Wan2.2-S2V-14B-Q4_K_M.gguf', subfolder: 'diffusion_models', sizeGB: 12.91,
+        },
+        ...s2vSupport,
+      ],
+    },
+    {
+      name: 'Wan 2.2 S2V FP8 (Talking Character)',
+      description: 'The full precision friendly variant. Bigger file; offloads below 16 GB VRAM, so renders take longer there.',
+      tags: ['Wan 2.2', 'S2V', 'FP8'],
+      totalSizeGB: 22.4,
+      vramRequired: '16 GB best, offloads on less',
+      workflow: 'wans2v',
+      url: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged',
+      files: [
+        {
+          name: 'Wan 2.2 S2V 14B (FP8)',
+          description: 'The sound to video model.',
+          pulls: '', tags: ['Model', '15.3 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_s2v_14B_fp8_scaled.safetensors',
+          filename: 'wan2.2_s2v_14B_fp8_scaled.safetensors', subfolder: 'diffusion_models', sizeGB: 15.27,
+        },
+        ...s2vSupport,
+      ],
+    },
+  ]
+}
+
+export function getMotionBundles(): ModelBundle[] {
+  const wanSupport: DiscoverModel[] = [
+    {
+      name: 'Wan CLIP (UMT5-XXL FP8)',
+      description: 'Required text encoder.',
+      pulls: '', tags: ['CLIP', '6.3 GB'], updated: '',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors',
+      filename: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', subfolder: 'text_encoders', sizeGB: 6.27,
+    },
+    {
+      name: 'Wan 2.1 VAE',
+      description: 'Required video encoder/decoder.',
+      pulls: '', tags: ['VAE', '250 MB'], updated: '',
+      downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors',
+      filename: 'wan_2.1_vae.safetensors', subfolder: 'vae', sizeGB: 0.24,
+    },
+  ]
+  return [
+    {
+      name: 'Wan VACE 1.3B (Motion Control, light)',
+      description: 'Your character copies the moves from any dance or pose video. The light pick, runs from 8 GB VRAM.',
+      tags: ['VACE', 'Motion', 'Light'],
+      totalSizeGB: 10.5,
+      vramRequired: '8-10 GB',
+      workflow: 'wanvace',
+      customNodes: ['controlnet-aux'],
+      url: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged',
+      files: [
+        {
+          name: 'Wan 2.1 VACE 1.3B',
+          description: 'The motion control model.',
+          pulls: '', tags: ['Model', '4 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/diffusion_models/wan2.1_vace_1.3B_fp16.safetensors',
+          filename: 'wan2.1_vace_1.3B_fp16.safetensors', subfolder: 'diffusion_models', sizeGB: 4.01,
+        },
+        ...wanSupport,
+      ],
+    },
+    {
+      name: 'Wan 2.2 Animate Q4 (Motion Control, GGUF)',
+      description: 'The bigger, better motion transfer model. Q4 quant for 12 GB cards.',
+      tags: ['Wan 2.2', 'Animate', 'GGUF'],
+      totalSizeGB: 17.3,
+      vramRequired: '10-12 GB',
+      workflow: 'wananimate',
+      customNodes: ['gguf', 'controlnet-aux'],
+      url: 'https://huggingface.co/QuantStack/Wan2.2-Animate-14B-GGUF',
+      files: [
+        {
+          name: 'Wan 2.2 Animate 14B Q4 (GGUF)',
+          description: 'The motion transfer model, Q4 quant.',
+          pulls: '', tags: ['Model', '10.7 GB'], updated: '',
+          downloadUrl: 'https://huggingface.co/QuantStack/Wan2.2-Animate-14B-GGUF/resolve/main/Wan2.2-Animate-14B-Q4_K_M.gguf',
+          filename: 'Wan2.2-Animate-14B-Q4_K_M.gguf', subfolder: 'diffusion_models', sizeGB: 10.71,
+        },
+        ...wanSupport,
       ],
     },
   ]

@@ -5,7 +5,7 @@ import { useCloudSession } from '../../../hooks/useCloudSession'
 import { useCreateStore, type GalleryItem } from '../../../stores/createStore'
 import { getLoraModels, getVAEModels, checkComfyConnection, refreshComfyModels } from '../../../api/comfyui'
 import { getAllNodeInfo, clearNodeCache } from '../../../api/comfyui-nodes'
-import { installCustomNodes, getImageBundles, getVideoBundles, startModelDownload, getDownloadProgress } from '../../../api/discover'
+import { installCustomNodes, getImageBundles, getVideoBundles, getAudioBundles, getLipsyncBundles, getMotionBundles, startModelDownload, getDownloadProgress } from '../../../api/discover'
 import { backendCall } from '../../../api/backend'
 import { ensureLocalFilename } from './loadImage'
 import type { CloudQuota } from '../../../lib/render/cloud-jobs'
@@ -48,13 +48,14 @@ interface CreateExpValue {
    *  and throws on failure. 'rmbg' = the RMBG cutout node; 'inpaint-nodes' =
    *  ComfyUI's core inpaint nodes (nothing to clone — present on any current
    *  install once ComfyUI is up). */
-  installCapability: (cap: 'rmbg' | 'inpaint-nodes', onProgress?: (msg: string) => void) => Promise<void>
+  installCapability: (cap: 'rmbg' | 'inpaint-nodes' | 'dwpose', onProgress?: (msg: string) => void) => Promise<void>
   /** One-click "everything you need" for a fresh PC: ensure ComfyUI runs
    *  (installing it first if needed), then download the default starter
-   *  bundle for the intent kind (image → SDXL checkpoint, video → Wan 2.1)
+   *  bundle for the intent kind (image → SDXL checkpoint, video → Wan 2.1,
+   *  2.5.8 lanes → ACE / S2V / VACE starters incl. their node packs)
    *  with streamed progress, refresh ComfyUI's model enums and re-fetch the
    *  model lists. Throws on failure. */
-  installModelBundle: (kind: 'image' | 'video', onProgress?: (msg: string) => void) => Promise<void>
+  installModelBundle: (kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion', onProgress?: (msg: string) => void) => Promise<void>
   /** Runtime backend axis: hosted rendering offered for this session? */
   cloudAvailable: boolean
   quota: CloudQuota | null
@@ -145,6 +146,7 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         setCaps({
           rmbg: names.has('RMBG'),
           'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
+          dwpose: names.has('DWPreprocessor'),
         })
       } catch { /* node probe is best-effort */ }
     })()
@@ -192,24 +194,34 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
   // the node cache each round so we don't read the stale pre-install
   // catalogue) until the node shows up. The BiRefNet / RMBG-2.0 cutout model
   // is fetched by the node itself on the first run.
-  const installCapability = useCallback(async (cap: 'rmbg' | 'inpaint-nodes', onProgress?: (msg: string) => void) => {
+  const installCapability = useCallback(async (cap: 'rmbg' | 'inpaint-nodes' | 'dwpose', onProgress?: (msg: string) => void) => {
     await ensureComfyRunning(onProgress)
+    const capsFrom = (names: Set<string>) => ({
+      rmbg: names.has('RMBG'),
+      'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
+      dwpose: names.has('DWPreprocessor'),
+    })
     if (cap === 'inpaint-nodes') {
       // Core ComfyUI nodes — nothing to clone. If they're still missing after
       // ComfyUI is up, the install is ancient; re-probe and say so honestly.
       const nodes = await getAllNodeInfo()
       const names = new Set(Object.keys(nodes))
-      const ok = names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning')
-      setCaps({ rmbg: names.has('RMBG'), 'inpaint-nodes': ok })
-      if (!ok) {
+      setCaps(capsFrom(names))
+      if (!names.has('VAEEncodeForInpaint') && !names.has('InpaintModelConditioning')) {
         throw new Error(
           'This ComfyUI is missing its core inpaint nodes (VAEEncodeForInpaint) — update ComfyUI to a current version.',
         )
       }
       return
     }
-    onProgress?.('Downloading & installing the background-removal node — this can take a minute…')
-    await installCustomNodes(['rmbg'])
+    // Clone-and-pip capabilities share one flow: install the pack, restart
+    // ComfyUI, poll /object_info (cache-cleared) until the node registers.
+    const pack = cap === 'dwpose' ? 'controlnet-aux' : 'rmbg'
+    const nodeClass = cap === 'dwpose' ? 'DWPreprocessor' : 'RMBG'
+    onProgress?.(cap === 'dwpose'
+      ? 'Downloading & installing the pose extractor (controlnet aux). This can take a minute…'
+      : 'Downloading & installing the background removal node. This can take a minute…')
+    await installCustomNodes([pack])
     onProgress?.('Restarting ComfyUI to register the node…')
     try { await backendCall('stop_comfyui') } catch { /* may already be stopped */ }
     await new Promise((r) => setTimeout(r, 2000))
@@ -221,30 +233,48 @@ export function CreateExpProvider({ children }: { children: ReactNode }) {
         clearNodeCache()
         const nodes = await getAllNodeInfo()
         const names = new Set(Object.keys(nodes))
-        if (names.has('RMBG')) {
-          setCaps({
-            rmbg: true,
-            'inpaint-nodes': names.has('VAEEncodeForInpaint') || names.has('InpaintModelConditioning'),
-          })
+        if (names.has(nodeClass)) {
+          setCaps(capsFrom(names))
           return
         }
       } catch { /* ComfyUI still restarting — keep polling */ }
     }
     throw new Error(
-      "Installed ComfyUI-RMBG and restarted ComfyUI, but it still isn't listing the RMBG node. " +
+      `Installed ${pack} and restarted ComfyUI, but it still isn't listing the ${nodeClass} node. ` +
       'Open the Model Manager to finish the install, or check the ComfyUI console for a pip error.',
     )
   }, [setCaps, ensureComfyRunning])
 
   // One-click starter models for a fresh PC: ensure ComfyUI, then pull the
   // default bundle for the intent kind (image → SDXL checkpoint, video →
-  // Wan 2.1 files) through the existing resumable downloader, streaming
-  // percent progress into the card, then refresh ComfyUI's model enums so the
-  // new files are pickable without a restart.
-  const installModelBundle = useCallback(async (kind: 'image' | 'video', onProgress?: (msg: string) => void) => {
+  // Wan 2.1 files, 2.5.8 lanes → their own starter bundles) through the
+  // existing resumable downloader, streaming percent progress into the card,
+  // then refresh ComfyUI's model enums so the new files are pickable without
+  // a restart. Bundles that need a custom node pack (GGUF loader, pose
+  // extractor) install + register it first — one click really means one click.
+  const installModelBundle = useCallback(async (kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion', onProgress?: (msg: string) => void) => {
     await ensureComfyRunning(onProgress)
-    const bundle = (kind === 'image' ? getImageBundles() : getVideoBundles())[0]
+    const bundle = (
+      kind === 'image' ? getImageBundles()
+      : kind === 'video' ? getVideoBundles()
+      : kind === 'audio' ? getAudioBundles()
+      : kind === 'lipsync' ? getLipsyncBundles()
+      : getMotionBundles()
+    )[0]
     if (!bundle) throw new Error('No starter bundle available for this intent.')
+    if (bundle.customNodes?.length) {
+      onProgress?.('Installing the required node packs…')
+      await installCustomNodes(bundle.customNodes)
+      onProgress?.('Restarting ComfyUI to register the new nodes…')
+      try { await backendCall('stop_comfyui') } catch { /* may already be stopped */ }
+      await new Promise((r) => setTimeout(r, 2000))
+      await backendCall('start_comfyui')
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 2000))
+        if (await checkComfyConnection()) break
+      }
+      clearNodeCache()
+    }
     for (const file of bundle.files) {
       if (!file.downloadUrl || !file.filename || !file.subfolder) continue
       const size = file.sizeGB ? ` (${file.sizeGB} GB)` : ''

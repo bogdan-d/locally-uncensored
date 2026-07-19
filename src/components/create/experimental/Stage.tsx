@@ -31,6 +31,9 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
   const backend = useCreateStore((s) => s.backend)
   const imageModelList = useCreateStore((s) => s.imageModelList)
   const videoModelList = useCreateStore((s) => s.videoModelList)
+  const audioModelList = useCreateStore((s) => s.audioModelList)
+  const lipsyncModelList = useCreateStore((s) => s.lipsyncModelList)
+  const motionModelList = useCreateStore((s) => s.motionModelList)
   const { connected, modelsLoaded } = useCreateExp()
   // On the cloud backend the utility ops (background removal, …) run on
   // WaveSpeed's hosted endpoints — there's no local ComfyUI node to install,
@@ -42,10 +45,16 @@ export function Stage({ displayed, onOpenMaskEditor, onEditResult, onFullscreen 
   // one-click starter-bundle card. connected === false also gates — the same
   // button installs ComfyUI itself first. connected === null (still probing)
   // gates nothing, so the card never flashes during startup.
+  const listForKind: Record<NonNullable<typeof meta.requiresModels>, unknown[]> = {
+    image: imageModelList,
+    video: videoModelList,
+    audio: audioModelList,
+    lipsync: lipsyncModelList,
+    motion: motionModelList,
+  }
   const modelsMissing = backend === 'local' && !!meta.requiresModels && (
     connected === false ||
-    (connected === true && modelsLoaded &&
-      (meta.requiresModels === 'image' ? imageModelList.length === 0 : videoModelList.length === 0))
+    (connected === true && modelsLoaded && listForKind[meta.requiresModels].length === 0)
   )
 
   // A result counts for the current source only if it was generated after the
@@ -352,9 +361,14 @@ const CAP_COPY = {
     title: 'Image editing needs ComfyUI up and running',
     description: 'Local Edit repaints the masked area with ComfyUI’s built-in inpaint nodes. This starts ComfyUI (installing it first if needed) and verifies the nodes.',
   },
+  dwpose: {
+    icon: Film,
+    title: 'Motion control needs the pose extractor',
+    description: 'DWPose reads the skeleton out of your driving video so the character can copy it. This installs the controlnet aux node pack; the pose models download automatically on your first run.',
+  },
 } as const
 
-function CapabilityCard({ cap }: { cap: 'rmbg' | 'inpaint-nodes' }) {
+function CapabilityCard({ cap }: { cap: 'rmbg' | 'inpaint-nodes' | 'dwpose' }) {
   const { installCapability } = useCreateExp()
   const [installing, setInstalling] = useState(false)
   const [status, setStatus] = useState('')
@@ -392,9 +406,24 @@ const BUNDLE_COPY = {
     title: 'Local video generation needs a one-time download',
     description: 'This sets up everything for a fully local run: ComfyUI itself if it’s missing, plus the Wan 2.1 starter model files (~9.2 GB, 480p, light on VRAM).',
   },
+  audio: {
+    icon: ImageIcon,
+    title: 'Local music needs a one-time download',
+    description: 'This sets up everything for fully local music: ComfyUI itself if it’s missing, plus the ACE Step 1.5 music model (~9.3 GB, runs from 6 GB VRAM). Local music is never filtered.',
+  },
+  lipsync: {
+    icon: Film,
+    title: 'Local talking characters need a one-time download',
+    description: 'This sets up the Wan 2.2 S2V model plus its audio encoder (~20 GB total). Comfortable on 12 GB VRAM; smaller cards offload and render slower.',
+  },
+  motion: {
+    icon: Film,
+    title: 'Local motion control needs a one-time download',
+    description: 'This sets up the Wan VACE motion model plus its support files (~10.5 GB, runs from 8 GB VRAM). The bigger Wan Animate variant is in the Model Manager.',
+  },
 } as const
 
-function ModelInstallCard({ kind }: { kind: 'image' | 'video' }) {
+function ModelInstallCard({ kind }: { kind: 'image' | 'video' | 'audio' | 'lipsync' | 'motion' }) {
   const { installModelBundle } = useCreateExp()
   const [installing, setInstalling] = useState(false)
   const [status, setStatus] = useState('')
@@ -427,6 +456,7 @@ function TrainSetBoard() {
   const trainImages = useCreateStore((s) => s.trainImages)
   const addTrainImages = useCreateStore((s) => s.addTrainImages)
   const removeTrainImage = useCreateStore((s) => s.removeTrainImage)
+  const backend = useCreateStore((s) => s.backend)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const addFiles = (files: FileList | File[]) => {
@@ -489,7 +519,9 @@ function TrainSetBoard() {
             </div>
           </div>
           <div className="t-label text-gray-500 text-center shrink-0">
-            {trainImages.length}/30 photos. Training runs in the cloud and lands the character on your shelf.
+            {trainImages.length}/30 photos. {backend === 'cloud'
+              ? 'Training runs in the cloud and lands the character on your shelf.'
+              : 'Training runs on your GPU and lands the character in your local LoRAs.'}
           </div>
         </>
       )}

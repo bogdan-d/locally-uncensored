@@ -118,7 +118,25 @@ export function extractComfyOutputFiles(nodeOutput: unknown): ComfyUIOutput[] {
   return found
 }
 
-export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'unknown'
+/** Gallery media type for a finished output file. The render mode alone
+ *  mistagged audio outputs (SaveAudio & friends post .flac/.mp3/.wav) as
+ *  image/video, so their tiles rendered as broken <img>/<video>. Only the
+ *  audio axis is decided by extension — everything else keeps the mode, so
+ *  the long-standing image/video tagging (incl. the animated-webp fallback)
+ *  is untouched. */
+const AUDIO_OUTPUT_EXTS = new Set(['mp3', 'wav', 'flac', 'ogg', 'opus', 'm4a'])
+export function galleryTypeForFile(
+  filename: string,
+  mode: 'image' | 'video',
+): 'image' | 'video' | 'audio' {
+  const ext = (filename.split('.').pop() || '').toLowerCase()
+  return AUDIO_OUTPUT_EXTS.has(ext) ? 'audio' : mode
+}
+
+// 2.5.8: ace / wans2v / wananimate / wanvace are the specialized local-lane
+// architectures (music, talking character, motion control). They are neither
+// image nor video picker material — each lane has its own model list.
+export type ModelType = 'flux' | 'flux2' | 'zimage' | 'ernie_image' | 'sdxl' | 'sd15' | 'wan' | 'wan22' | 'hunyuan' | 'ltx' | 'mochi' | 'cosmos' | 'cogvideo' | 'svd' | 'framepack' | 'pyramidflow' | 'allegro' | 'ace' | 'wans2v' | 'wananimate' | 'wanvace' | 'unknown'
 export type VideoBackend = 'wan' | 'animatediff' | 'none'
 
 export interface ClassifiedModel {
@@ -153,6 +171,18 @@ export function classifyModel(name: string | null | undefined): ModelType {
   // stale model strings that no longer exist; callers should not crash on those.
   if (!name || typeof name !== 'string') return 'unknown'
   const lower = name.toLowerCase()
+
+  // 2.5.8 specialized lanes — must beat the generic wan/ace substrings below.
+  // 'vace' before 'ace' (contains it), s2v/animate before the wan2.2 match
+  // (wan2.2_s2v / wan2.2_animate carry the wan2.2 tag too).
+  if (lower.includes('vace')) return 'wanvace'
+  if (lower.includes('s2v')) return 'wans2v'
+  if (lower.includes('animate') && lower.includes('wan') && !lower.includes('animatediff')) return 'wananimate'
+  if (lower.includes('ace_step') || lower.includes('ace-step') || lower.includes('acestep')) return 'ace'
+  // Merged 14B "rapid AIO" builds (e.g. wan2.2-i2v-rapid-aio) are Wan 14B
+  // architecture: classic WanImageToVideo graph + wan_2.1_vae — NOT the
+  // TI2V-5B path the wan2.2 tag would otherwise route them onto.
+  if (lower.includes('rapid') && lower.includes('aio')) return 'wan'
 
   // Video models — most specific first (order matters: specific before generic)
   if (lower.includes('cogvideo')) return 'cogvideo'
@@ -230,6 +260,9 @@ export function isI2VModel(name: string): boolean {
  */
 export function isT2VCapable(name: string): boolean {
   const lower = name.toLowerCase()
+  // Merged i2v-only builds (rapid AIO) carry the wan2.2 tag but cannot run a
+  // T2V graph — check before the generic wan2.2 pass-through.
+  if (lower.includes('rapid') && lower.includes('i2v')) return false
   if (lower.includes('ti2v') || lower.includes('wan2.2') || lower.includes('wan2_2') || lower.includes('wan22')) return true
   if (lower.includes('svd') || lower.includes('framepack')) return false
   if (lower.includes('video2world')) return false
@@ -281,6 +314,16 @@ export const MODEL_TYPE_DEFAULTS: Record<string, ModelTypeDefaults> = {
   animatediff_lightning: { steps: 4, cfg: 1.0, sampler: 'euler', scheduler: 'sgm_uniform', width: 512, height: 512, frames: 16, fps: 8 },
   // ERNIE-Image Turbo (Baidu 8B DiT)
   ernie_image: { steps: 8, cfg: 1, sampler: 'euler', scheduler: 'simple', width: 1024, height: 1024, frames: 1, fps: 1 },
+  // ── 2.5.8 specialized local lanes (core-node defaults, July 2026) ──
+  // ACE-Step music: width/height are unused by the audio graph but keep the
+  // shared param scaffolding happy; track length lives in musicDuration.
+  ace: { steps: 50, cfg: 5.0, sampler: 'euler', scheduler: 'simple', width: 1024, height: 1024, frames: 1, fps: 1 },
+  // Wan 2.2 S2V — node defaults 832×480, length 77 @ 16 fps.
+  wans2v: { steps: 20, cfg: 6.0, sampler: 'euler', scheduler: 'simple', width: 832, height: 480, frames: 77, fps: 16 },
+  // Wan 2.2 Animate — node defaults 832×480, length 77 @ 16 fps.
+  wananimate: { steps: 20, cfg: 5.0, sampler: 'euler', scheduler: 'simple', width: 832, height: 480, frames: 77, fps: 16 },
+  // Wan 2.1 VACE — node defaults 832×480, length 81 @ 16 fps.
+  wanvace: { steps: 25, cfg: 5.0, sampler: 'euler', scheduler: 'simple', width: 832, height: 480, frames: 81, fps: 16 },
 }
 
 // ─── Component Requirements per model type ───
@@ -643,6 +686,70 @@ export async function getVideoModels(): Promise<ClassifiedModel[]> {
   return result
 }
 
+// ── 2.5.8 specialized local-lane model lists ─────────────────────────────────
+// Each lane owns its picker: an ACE checkpoint in the Image list (or a 14B S2V
+// in the Video list) would build a graph that ComfyUI rejects, so these
+// architectures are excluded from isImage/isVideo above and surfaced here.
+
+/** GGUF-quantized UNets (city96 ComfyUI-GGUF pack). Empty when the pack is not
+ *  installed — callers merge these into their lane list and the builder swaps
+ *  UNETLoader for UnetLoaderGGUF by extension. */
+export async function getGgufUnetModels(): Promise<string[]> {
+  try {
+    const res = await localFetch(comfyuiUrl('/object_info/UnetLoaderGGUF'), { timeoutMs: COMFY_LIST_TIMEOUT_MS })
+    if (!res.ok) return []
+    const data = await res.json()
+    return data?.UnetLoaderGGUF?.input?.required?.unet_name?.[0] ?? []
+  } catch {
+    return []
+  }
+}
+
+/** Music lane: ACE-Step all-in-one checkpoints (model + text encoder + VAE). */
+export async function getAudioModels(): Promise<ClassifiedModel[]> {
+  const checkpoints = await getCheckpoints()
+  const complete = await filterPartialFiles(checkpoints)
+  return checkpoints
+    .filter((name) => complete.has(name) && classifyModel(name) === 'ace')
+    .map((name) => ({ name, type: 'ace' as ModelType, source: 'checkpoint' as const }))
+}
+
+/** Talking-character lane: Wan 2.2 S2V UNets (safetensors via UNETLoader,
+ *  .gguf via the GGUF pack when installed). */
+export async function getLipsyncModels(): Promise<ClassifiedModel[]> {
+  const [diffModels, ggufModels] = await Promise.all([getDiffusionModels(), getGgufUnetModels()])
+  const complete = await filterPartialFiles(diffModels)
+  const fromUnet = diffModels
+    .filter((name) => complete.has(name) && classifyModel(name) === 'wans2v')
+    .map((name) => ({ name, type: 'wans2v' as ModelType, source: 'diffusion_model' as const }))
+  const fromGguf = ggufModels
+    .filter((name) => classifyModel(name) === 'wans2v')
+    .map((name) => ({ name, type: 'wans2v' as ModelType, source: 'diffusion_model' as const }))
+  return [...fromUnet, ...fromGguf]
+}
+
+/** One rule for the specialized-lane picker AND submit: a pick that is not on
+ *  the lane's list (stale cross-lane selection, deleted file) resolves to the
+ *  list's first entry — the same guard the cloud op picker got after the
+ *  take-01 wrong-trainer incident. */
+export function resolveLocalOpPick(picked: string, list: ClassifiedModel[]): string {
+  return list.some((m) => m.name === picked) ? picked : (list[0]?.name ?? '')
+}
+
+/** Motion-control lane: Wan 2.2 Animate UNets + Wan VACE UNets. */
+export async function getMotionModels(): Promise<ClassifiedModel[]> {
+  const [diffModels, ggufModels] = await Promise.all([getDiffusionModels(), getGgufUnetModels()])
+  const complete = await filterPartialFiles(diffModels)
+  const wanted = (t: ModelType) => t === 'wananimate' || t === 'wanvace'
+  const fromUnet = diffModels
+    .filter((name) => complete.has(name) && wanted(classifyModel(name)))
+    .map((name) => ({ name, type: classifyModel(name), source: 'diffusion_model' as const }))
+  const fromGguf = ggufModels
+    .filter((name) => wanted(classifyModel(name)))
+    .map((name) => ({ name, type: classifyModel(name), source: 'diffusion_model' as const }))
+  return [...fromUnet, ...fromGguf]
+}
+
 // ─── Detect Video Backend (checks individual nodes + models — no full object_info fetch) ───
 
 export async function detectVideoBackend(): Promise<VideoBackend> {
@@ -994,6 +1101,23 @@ export async function getHistory(promptId: string): Promise<any> {
   }
 }
 
+/** Is this prompt still alive inside ComfyUI (running or pending)? Used by
+ *  the generation watchdog: a slow render that is still queued is progress,
+ *  not a stall — only silence from BOTH the socket and the queue aborts.
+ *  Queue entries are `[number, prompt_id, ...]` tuples. */
+export async function isPromptQueued(promptId: string): Promise<boolean> {
+  try {
+    const res = await localFetch(comfyuiUrl('/queue'), { timeoutMs: COMFY_POLL_TIMEOUT_MS })
+    if (!res.ok) return false
+    const q = await res.json()
+    const inList = (list: unknown) => Array.isArray(list)
+      && list.some((e) => Array.isArray(e) && e[1] === promptId)
+    return inList(q.queue_running) || inList(q.queue_pending)
+  } catch {
+    return false
+  }
+}
+
 // ─── Upload image to ComfyUI (for I2V models like SVD, FramePack) ───
 
 export async function uploadImage(file: File): Promise<string> {
@@ -1077,6 +1201,47 @@ export function ensureImageFilename(name: string | undefined, mime: string | und
   const stem = (base ? base.replace(/\.[^.]*$/, '') : 'lu_input') || 'lu_input'
   const safeStem = stem.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 64) || 'lu_input'
   return `${safeStem}.${ext}`
+}
+
+/** Upload a NON-image media file (speech audio, driving video) into ComfyUI's
+ *  input dir. Same /upload/image endpoint — it stores any file; LoadAudio /
+ *  LoadVideo then list it by extension. The image uploader forces an image
+ *  extension (PIL constraint), which would break these, so this variant keeps
+ *  the file's own extension and only sanitizes the stem. */
+export async function uploadMediaFile(blob: Blob, name: string): Promise<string> {
+  if (!blob || blob.size === 0) {
+    throw new Error('Failed to upload media: the file is empty (0 bytes).')
+  }
+  const base = (name || '').replace(/^.*[\\/]/, '').trim() || 'lu_media'
+  const dot = base.lastIndexOf('.')
+  const stem = (dot > 0 ? base.slice(0, dot) : base).replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 64) || 'lu_media'
+  const ext = (dot > 0 ? base.slice(dot + 1) : '').replace(/[^A-Za-z0-9]+/g, '').toLowerCase() || 'bin'
+  const safeName = `${stem}.${ext}`
+
+  if (isTauri()) {
+    const bytes = Array.from(new Uint8Array(await blob.arrayBuffer()))
+    let body: string
+    try {
+      body = await backendCall<string>('comfy_upload_image', {
+        url: comfyuiUrl('/upload/image'),
+        filename: safeName,
+        contentType: blob.type || 'application/octet-stream',
+        fileBytes: bytes,
+      })
+    } catch (e) {
+      throw new Error(`Failed to upload media: ${e instanceof Error ? e.message : String(e)}`)
+    }
+    const data = JSON.parse(body)
+    return data.name
+  }
+
+  const formData = new FormData()
+  formData.append('image', blob, safeName)
+  formData.append('overwrite', 'true')
+  const res = await fetch(comfyuiUrl('/upload/image'), { method: 'POST', body: formData })
+  if (!res.ok) throw new Error(`Failed to upload media: HTTP ${res.status}`)
+  const data = await res.json()
+  return data.name
 }
 
 export function getImageUrl(filename: string, subfolder: string = '', type: string = 'output', cacheBust?: string | number): string {

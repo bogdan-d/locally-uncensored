@@ -774,6 +774,16 @@ describe('createStore', () => {
       expect(after.source).not.toBeNull()
     })
 
+    it('keeps character — its local training lane arrived in 2.5.8 (musubi)', () => {
+      const s = useCreateStore.getState()
+      s.setBackend('cloud')
+      s.setIntent('character')
+      useCreateStore.getState().setBackend('local')
+      const after = useCreateStore.getState()
+      expect(after.cloudOp).toBe('character')
+      expect(after.intent()).toBe('character')
+    })
+
     it('flipping to cloud never resets anything', () => {
       const s = useCreateStore.getState()
       s.setBackend('local')

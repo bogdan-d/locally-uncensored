@@ -1236,6 +1236,352 @@ function buildWan22Workflow(params: VideoParams, seed: number, nodes: Categorize
   return workflow
 }
 
+// ─── 2.5.8 specialized local lanes (music / talking character / motion) ─────
+//
+// These intents run on node families that ship with CURRENT ComfyUI cores
+// (ACE audio, Wan 2.2 S2V, Wan 2.2 Animate, Wan VACE — verified against the
+// July 2026 core). Every builder gates on live node presence and throws
+// WorkflowUnavailableError with an "Update ComfyUI" message when the install
+// predates the family — REJECT-AND-REPORT, never a broken graph.
+
+export interface LocalOpParams {
+  op: 'music' | 'lipsync' | 'motion'
+  model: string
+  prompt: string
+  negativePrompt?: string
+  seed: number
+  steps: number
+  cfgScale: number
+  sampler: string
+  scheduler: string
+  width: number
+  height: number
+  frames: number
+  fps: number
+  /** music: track length in seconds + optional lyrics. */
+  seconds?: number
+  lyrics?: string
+  /** lipsync: speech audio staged in ComfyUI's input dir + the portrait. */
+  audioFile?: string
+  refImage?: string
+  /** motion: driving video staged in ComfyUI's input dir. */
+  drivingVideo?: string
+}
+
+const UPDATE_COMFY_HINT =
+  'Update ComfyUI (Settings, AI Backends, Update ComfyUI), restart it, then generate again.'
+
+function requireNodes(allNodes: Record<string, any>, needed: string[], lane: string): void {
+  const missing = needed.filter((n) => !allNodes[n])
+  if (missing.length > 0) {
+    throw new WorkflowUnavailableError(
+      `${lane} needs ComfyUI nodes this install does not have yet (${missing.join(', ')}). ${UPDATE_COMFY_HINT}`,
+      'unavailable',
+    )
+  }
+}
+
+/** UNET loader that understands GGUF quants: .gguf files load through the
+ *  city96 GGUF pack's UnetLoaderGGUF, everything else through core UNETLoader. */
+function addUnetLoader(workflow: Record<string, any>, id: string, model: string, allNodes: Record<string, any>): void {
+  if (model.toLowerCase().endsWith('.gguf')) {
+    if (!allNodes['UnetLoaderGGUF']) {
+      throw new WorkflowUnavailableError(
+        'This model is a GGUF quant, which needs the ComfyUI-GGUF node pack. Install it from the model card, or pick the safetensors variant.',
+        'unavailable',
+        { pack: 'ComfyUI-GGUF', url: 'https://github.com/city96/ComfyUI-GGUF' },
+      )
+    }
+    workflow[id] = { class_type: 'UnetLoaderGGUF', inputs: { unet_name: model } }
+  } else {
+    workflow[id] = { class_type: 'UNETLoader', inputs: { unet_name: model, weight_dtype: 'default' } }
+  }
+}
+
+/** Sound-carrying video output: core CreateVideo muxes the audio track into
+ *  the frames, SaveVideo writes an mp4. The talking-character / motion clips
+ *  are pointless without their sound, so this path requires the core video
+ *  nodes (same family as the lanes themselves — present on any core new
+ *  enough to run them). */
+function addVideoWithAudioOutput(
+  workflow: Record<string, any>,
+  n: number,
+  decodeId: string,
+  fps: number,
+  audioSrc: [string, number] | null,
+  allNodes: Record<string, any>,
+  prompt?: string,
+): number {
+  requireNodes(allNodes, ['CreateVideo', 'SaveVideo'], 'This video output')
+  const createId = String(n++)
+  const inputs: Record<string, any> = { images: [decodeId, 0], fps }
+  if (audioSrc) inputs.audio = audioSrc
+  workflow[createId] = { class_type: 'CreateVideo', inputs }
+  const saveId = String(n++)
+  workflow[saveId] = {
+    class_type: 'SaveVideo',
+    inputs: { video: [createId, 0], filename_prefix: promptFilenamePrefix(prompt, true), format: 'auto', codec: 'auto' },
+  }
+  return n
+}
+
+/**
+ * Music (ACE-Step). All-in-one checkpoint → ACE text encode (tags + lyrics) →
+ * KSampler → VAEDecodeAudio → SaveAudioMP3. ACE-Step 1.5 checkpoints route
+ * through the 1.5 encoder/latent pair (different node ids AND different latent
+ * shape); everything else uses the v1 pair. Negative conditioning: v1 encodes
+ * the negative prompt (cheap), 1.5 zero-outs the positive instead — its
+ * encoder runs an LLM pass that would double the cost for no benefit.
+ */
+export function buildMusicWorkflow(params: LocalOpParams, seed: number, allNodes: Record<string, any>): Record<string, any> {
+  const workflow: Record<string, any> = {}
+  let n = 1
+  const isAce15 = /1[._-]?5/.test(params.model.toLowerCase().replace(/\.safetensors$/, '').replace(/^.*ace[_-]?step/, ''))
+  const encodeNode = isAce15 ? 'TextEncodeAceStepAudio1.5' : 'TextEncodeAceStepAudio'
+  const latentNode = isAce15 ? 'EmptyAceStep1.5LatentAudio' : 'EmptyAceStepLatentAudio'
+  requireNodes(allNodes, [encodeNode, latentNode, 'VAEDecodeAudio', 'SaveAudioMP3'], 'Local music')
+
+  const seconds = Math.max(5, Math.min(600, params.seconds || 120))
+  const ckptId = String(n++)
+  workflow[ckptId] = { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: params.model } }
+
+  const posId = String(n++)
+  if (isAce15) {
+    workflow[posId] = {
+      class_type: encodeNode,
+      inputs: {
+        clip: [ckptId, 1], tags: params.prompt, lyrics: params.lyrics || '',
+        seed, bpm: 120, duration: seconds, timesignature: '4', language: 'en',
+        keyscale: 'C major', generate_audio_codes: true, cfg_scale: 2.0,
+        temperature: 0.85, top_p: 0.9, top_k: 0, min_p: 0.0,
+      },
+    }
+  } else {
+    workflow[posId] = {
+      class_type: encodeNode,
+      inputs: { clip: [ckptId, 1], tags: params.prompt, lyrics: params.lyrics || '', lyrics_strength: 1.0 },
+    }
+  }
+  const negId = String(n++)
+  if (isAce15) {
+    workflow[negId] = { class_type: 'ConditioningZeroOut', inputs: { conditioning: [posId, 0] } }
+  } else {
+    workflow[negId] = {
+      class_type: encodeNode,
+      inputs: { clip: [ckptId, 1], tags: params.negativePrompt || '', lyrics: '', lyrics_strength: 1.0 },
+    }
+  }
+
+  const shiftId = String(n++)
+  workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [ckptId, 0], shift: 5.0 } }
+  const latentId = String(n++)
+  workflow[latentId] = { class_type: latentNode, inputs: { seconds, batch_size: 1 } }
+  const samplerId = String(n++)
+  workflow[samplerId] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: [shiftId, 0], positive: [posId, 0], negative: [negId, 0], latent_image: [latentId, 0],
+      seed, steps: params.steps, cfg: params.cfgScale, sampler_name: params.sampler, scheduler: params.scheduler, denoise: 1.0,
+    },
+  }
+  const decodeId = String(n++)
+  workflow[decodeId] = { class_type: 'VAEDecodeAudio', inputs: { samples: [samplerId, 0], vae: [ckptId, 2] } }
+  const saveId = String(n++)
+  workflow[saveId] = {
+    class_type: 'SaveAudioMP3',
+    inputs: { audio: [decodeId, 0], filename_prefix: promptFilenamePrefix(params.prompt, false), quality: 'V0' },
+  }
+  return workflow
+}
+
+/**
+ * Talking character (Wan 2.2 S2V, core). Portrait + speech audio → the
+ * character speaks it. wav2vec2 audio embeddings feed WanSoundImageToVideo;
+ * the finished frames are muxed WITH the speech track (CreateVideo), because
+ * a silent talking-head clip is useless. Uses the Wan 2.1 VAE + UMT5 encoder
+ * (the S2V-14B pairing from the official release).
+ */
+export function buildS2VWorkflow(params: LocalOpParams, seed: number, allNodes: Record<string, any>): Record<string, any> {
+  const workflow: Record<string, any> = {}
+  let n = 1
+  requireNodes(
+    allNodes,
+    ['WanSoundImageToVideo', 'AudioEncoderLoader', 'AudioEncoderEncode', 'LoadAudio'],
+    'Talking character',
+  )
+  if (!params.audioFile) throw new Error('Add a voice first. Record, upload or pick an audio track.')
+  if (!params.refImage) throw new Error('Add the portrait the character should speak from.')
+
+  const snap16 = (v: number, def: number) => Math.max(16, Math.round(((v && v > 0) ? v : def) / 16) * 16)
+  const width = snap16(params.width, 832)
+  const height = snap16(params.height, 480)
+  const length = snapWanLength(params.frames || 77)
+
+  const unetId = String(n++)
+  addUnetLoader(workflow, unetId, params.model, allNodes)
+  const clipId = String(n++)
+  workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', type: 'wan', device: 'default' } }
+  const vaeId = String(n++)
+  workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: 'wan_2.1_vae.safetensors' } }
+  const posId = String(n++)
+  workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { text: params.prompt || 'a person talking naturally, natural expression', clip: [clipId, 0] } }
+  const negId = String(n++)
+  workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { text: params.negativePrompt || '', clip: [clipId, 0] } }
+
+  const audioLoadId = String(n++)
+  workflow[audioLoadId] = { class_type: 'LoadAudio', inputs: { audio: params.audioFile } }
+  const audioEncLoadId = String(n++)
+  workflow[audioEncLoadId] = { class_type: 'AudioEncoderLoader', inputs: { audio_encoder_name: 'wav2vec2_large_english_fp16.safetensors' } }
+  const audioEncId = String(n++)
+  workflow[audioEncId] = { class_type: 'AudioEncoderEncode', inputs: { audio_encoder: [audioEncLoadId, 0], audio: [audioLoadId, 0] } }
+
+  const imageId = String(n++)
+  workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.refImage } }
+  const scaleId = String(n++)
+  workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: [imageId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+
+  const s2vId = String(n++)
+  workflow[s2vId] = {
+    class_type: 'WanSoundImageToVideo',
+    inputs: {
+      positive: [posId, 0], negative: [negId, 0], vae: [vaeId, 0],
+      width, height, length, batch_size: 1,
+      audio_encoder_output: [audioEncId, 0], ref_image: [scaleId, 0],
+    },
+  }
+
+  const shiftId = String(n++)
+  workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [unetId, 0], shift: 8.0 } }
+  const samplerId = String(n++)
+  workflow[samplerId] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: [shiftId, 0], positive: [s2vId, 0], negative: [s2vId, 1], latent_image: [s2vId, 2],
+      seed, steps: params.steps, cfg: params.cfgScale, sampler_name: params.sampler, scheduler: params.scheduler, denoise: 1.0,
+    },
+  }
+  const decodeId = String(n++)
+  workflow[decodeId] = { class_type: 'VAEDecode', inputs: { samples: [samplerId, 0], vae: [vaeId, 0] } }
+
+  addVideoWithAudioOutput(workflow, n, decodeId, params.fps || 16, [audioLoadId, 0], allNodes, params.prompt)
+  return workflow
+}
+
+/**
+ * Motion control. A character image copies the moves of a driving video.
+ * Wan 2.2 Animate models take a DWPose skeleton video (pose_video); Wan VACE
+ * models take the same skeleton as their control_video — both need the
+ * DWPreprocessor from comfyui_controlnet_aux (one-click install; its CPU
+ * onnxruntime path works on every Windows box, no GPU wheel roulette).
+ * The driving clip's own audio is carried over into the result.
+ */
+export function buildMotionWorkflow(params: LocalOpParams, seed: number, allNodes: Record<string, any>): Record<string, any> {
+  const workflow: Record<string, any> = {}
+  let n = 1
+  requireNodes(allNodes, ['LoadVideo', 'GetVideoComponents'], 'Motion control')
+  if (!allNodes['DWPreprocessor']) {
+    throw new WorkflowUnavailableError(
+      'Motion control needs the pose extractor (DWPose) from the controlnet_aux node pack. Install it from the card above, then generate again.',
+      'unavailable',
+      { pack: 'comfyui_controlnet_aux', url: 'https://github.com/Fannovel16/comfyui_controlnet_aux' },
+    )
+  }
+  if (!params.drivingVideo) throw new Error('Add the driving video whose motion the character should copy.')
+  if (!params.refImage) throw new Error('Add the character image that should perform the motion.')
+
+  const isVace = classifyModel(params.model) === 'wanvace'
+  requireNodes(allNodes, isVace ? ['WanVaceToVideo', 'TrimVideoLatent'] : ['WanAnimateToVideo', 'TrimVideoLatent'], 'Motion control')
+
+  const snap16 = (v: number, def: number) => Math.max(16, Math.round(((v && v > 0) ? v : def) / 16) * 16)
+  const width = snap16(params.width, 832)
+  const height = snap16(params.height, 480)
+  const length = snapWanLength(params.frames || 77)
+
+  const unetId = String(n++)
+  addUnetLoader(workflow, unetId, params.model, allNodes)
+  const clipId = String(n++)
+  workflow[clipId] = { class_type: 'CLIPLoader', inputs: { clip_name: 'umt5_xxl_fp8_e4m3fn_scaled.safetensors', type: 'wan', device: 'default' } }
+  const vaeId = String(n++)
+  workflow[vaeId] = { class_type: 'VAELoader', inputs: { vae_name: 'wan_2.1_vae.safetensors' } }
+  const posId = String(n++)
+  workflow[posId] = { class_type: 'CLIPTextEncode', inputs: { text: params.prompt || 'a person moving naturally, high quality', clip: [clipId, 0] } }
+  const negId = String(n++)
+  workflow[negId] = { class_type: 'CLIPTextEncode', inputs: { text: params.negativePrompt || '', clip: [clipId, 0] } }
+
+  const videoId = String(n++)
+  workflow[videoId] = { class_type: 'LoadVideo', inputs: { file: params.drivingVideo } }
+  const componentsId = String(n++)
+  workflow[componentsId] = { class_type: 'GetVideoComponents', inputs: { video: [videoId, 0] } }
+  const poseId = String(n++)
+  workflow[poseId] = {
+    class_type: 'DWPreprocessor',
+    inputs: {
+      image: [componentsId, 0], detect_hand: 'enable', detect_body: 'enable', detect_face: 'enable',
+      resolution: Math.min(width, height),
+      bbox_detector: 'yolox_l.onnx', pose_estimator: 'dw-ll_ucoco_384.onnx',
+    },
+  }
+
+  const imageId = String(n++)
+  workflow[imageId] = { class_type: 'LoadImage', inputs: { image: params.refImage } }
+  const scaleId = String(n++)
+  workflow[scaleId] = { class_type: 'ImageScale', inputs: { image: [imageId, 0], upscale_method: 'lanczos', width, height, crop: 'center' } }
+
+  const condId = String(n++)
+  if (isVace) {
+    workflow[condId] = {
+      class_type: 'WanVaceToVideo',
+      inputs: {
+        positive: [posId, 0], negative: [negId, 0], vae: [vaeId, 0],
+        width, height, length, batch_size: 1, strength: 1.0,
+        control_video: [poseId, 0], reference_image: [scaleId, 0],
+      },
+    }
+  } else {
+    workflow[condId] = {
+      class_type: 'WanAnimateToVideo',
+      inputs: {
+        positive: [posId, 0], negative: [negId, 0], vae: [vaeId, 0],
+        width, height, length, batch_size: 1,
+        reference_image: [scaleId, 0], pose_video: [poseId, 0],
+        continue_motion_max_frames: 5, video_frame_offset: 0,
+      },
+    }
+  }
+
+  const shiftId = String(n++)
+  workflow[shiftId] = { class_type: 'ModelSamplingSD3', inputs: { model: [unetId, 0], shift: 8.0 } }
+  const samplerId = String(n++)
+  workflow[samplerId] = {
+    class_type: 'KSampler',
+    inputs: {
+      model: [shiftId, 0], positive: [condId, 0], negative: [condId, 1], latent_image: [condId, 2],
+      seed, steps: params.steps, cfg: params.cfgScale, sampler_name: params.sampler, scheduler: params.scheduler, denoise: 1.0,
+    },
+  }
+  // Both conditioners prepend reference latents — trim them back out so the
+  // decoded clip starts on the motion, not on a frozen reference frame.
+  const trimId = String(n++)
+  workflow[trimId] = { class_type: 'TrimVideoLatent', inputs: { samples: [samplerId, 0], trim_amount: [condId, 3] } }
+  const decodeId = String(n++)
+  workflow[decodeId] = { class_type: 'VAEDecode', inputs: { samples: [trimId, 0], vae: [vaeId, 0] } }
+
+  addVideoWithAudioOutput(workflow, n, decodeId, params.fps || 16, [componentsId, 1], allNodes, params.prompt)
+  return workflow
+}
+
+/** Entry point for the specialized local lanes — fetches the live node
+ *  catalogue once and dispatches to the lane's builder. */
+export async function buildLocalOpWorkflow(params: LocalOpParams): Promise<Record<string, any>> {
+  const allNodes = await getAllNodeInfo()
+  const seed = params.seed === -1 ? Math.floor(Math.random() * 2147483647) : params.seed
+  switch (params.op) {
+    case 'music': return buildMusicWorkflow(params, seed, allNodes)
+    case 'lipsync': return buildS2VWorkflow(params, seed, allNodes)
+    case 'motion': return buildMotionWorkflow(params, seed, allNodes)
+  }
+}
+
 function buildFramePackWorkflow(params: VideoParams, seed: number, nodes: CategorizedNodes): Record<string, any> {
   const workflow: Record<string, any> = {}
   let n = 1

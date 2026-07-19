@@ -29,11 +29,19 @@ export type CreateIntent =
  *  IntentBar only offers these while the cloud backend is active. */
 export type UtilityOp = 'upscale' | 'eraser'
 
-/** 2.5.8 cloud-only Create categories (WaveSpeed, 2026-07-17 David):
+/** 2.5.8 specialized Create categories (2026-07-17 David):
  *  Character-Studio (LoRA training + generation), talking character (lipsync),
  *  music, video extend and motion control. Like `utilityOp`, an escape hatch
  *  over the image/video mode axis: when set it wins the intent derivation. */
 export type CloudOp = 'character' | 'lipsync' | 'music' | 'extend' | 'motion'
+
+/** Which of the specialized categories ALSO run on the local ComfyUI backend
+ *  (2.5.8 local lanes: ACE music, Wan S2V talking character, last-frame-chain
+ *  extend, Wan Animate/VACE motion, musubi character training). Single source
+ *  of truth for the intent metadata, the IntentBar lock state and the
+ *  backend-flip cleanup below — lives here (lowest layer) so intents.ts can
+ *  derive from it without a component→store import cycle. */
+export const LOCAL_LANE_OPS: ReadonlySet<CloudOp> = new Set(['music', 'lipsync', 'extend', 'motion', 'character'])
 
 /** An audio/video file (or training image) staged in the composer before
  *  upload. `blob` carries the bytes for the cloud upload; `url` is a local
@@ -104,6 +112,12 @@ export const MODEL_TYPE_DEFAULTS: Record<ModelType, {
   framepack:   { steps: 30, cfgScale: 5.0, sampler: 'euler',           scheduler: 'normal', width: 832,  height: 480, frames: 33, fps: 16 },
   pyramidflow: { steps: 20, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1280, height: 768, frames: 121, fps: 24 },
   allegro:     { steps: 100, cfgScale: 7.5, sampler: 'euler',          scheduler: 'normal', width: 1280, height: 720, frames: 88, fps: 15 },
+  // 2.5.8 specialized local lanes (see comfyui.ts MODEL_TYPE_DEFAULTS for the
+  // node-default provenance). ACE width/height are unused by the audio graph.
+  ace:         { steps: 50, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 1024, height: 1024 },
+  wans2v:      { steps: 20, cfgScale: 6.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 77, fps: 16 },
+  wananimate:  { steps: 20, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 77, fps: 16 },
+  wanvace:     { steps: 25, cfgScale: 5.0, sampler: 'euler',           scheduler: 'simple', width: 832,  height: 480, frames: 81, fps: 16 },
   unknown:     { steps: 20, cfgScale: 7.0, sampler: 'euler',           scheduler: 'normal', width: 1024, height: 1024 },
 }
 
@@ -189,6 +203,8 @@ interface CreateState {
   trainImages: MediaRef[]
   /** Character-Studio trigger word — the token that summons the character. */
   triggerWord: string
+  /** Local training length (musubi steps). Quality/time tradeoff, persisted. */
+  trainSteps: number
   /** The shelf character selected for use-mode generation. Runtime-only. */
   selectedCharacter: CharacterRef | null
   /** Lipsync speech / voice-clone reference audio. Runtime-only (blob). */
@@ -227,11 +243,16 @@ interface CreateState {
    *  (trainer/lipsync/music/extend/motion). One slot for all — modelForOp
    *  coerces a stale cross-intent pick onto the op's own list. */
   cloudOpModel: string
+  /** Runtime-only: the LOCAL model picked inside a specialized lane (ACE
+   *  checkpoint / S2V UNet / Animate-VACE UNet). One slot for all lanes —
+   *  resolveLocalOpPick coerces a stale cross-lane pick onto the lane's list
+   *  (the same one-rule guard the cloud picker got after take-01). */
+  localOpModel: string
   /** Bumped when the character shelf changed (training delivered / deleted)
    *  so the Character-Studio surface refetches /api/loras. */
   charactersVersion: number
   /** Runtime-only: which local custom-node capabilities are installed. */
-  caps: Record<'rmbg' | 'inpaint-nodes', boolean>
+  caps: Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>
 
   isGenerating: boolean
   /** Runtime-only: the user-managed ComfyUI (0.19+) blocked the WebView's
@@ -255,6 +276,12 @@ interface CreateState {
    * without hosting its own ComfyUI fetching. */
   imageModelList: ClassifiedModel[]
   videoModelList: ClassifiedModel[]
+  /** 2.5.8 local lanes: installed specialized models, mirrored by fetchModels
+   *  like the image/video lists (music ACE checkpoints, S2V UNets,
+   *  Animate/VACE UNets). Runtime-only. */
+  audioModelList: ClassifiedModel[]
+  lipsyncModelList: ClassifiedModel[]
+  motionModelList: ClassifiedModel[]
   comfyRunning: boolean
   /** Bug A (v2.4.5) + #72 (bob): resolver for the VHS_VideoCombine install
    *  prompt. Runtime-only — useCreate sets it when a video gen would fall
@@ -298,12 +325,17 @@ interface CreateState {
   removeTrainImage: (name: string) => void
   clearTrainImages: () => void
   setTriggerWord: (w: string) => void
+  setTrainSteps: (n: number) => void
   setSelectedCharacter: (c: CharacterRef | null) => void
   setAudioInput: (m: MediaRef | null) => void
   setVoiceFromJob: (v: { jobId: string; label: string } | null) => void
   setVideoInput: (m: MediaRef | null) => void
   bumpCharactersVersion: () => void
   setCloudOpModel: (id: string) => void
+  setLocalOpModel: (name: string) => void
+  setAudioModelList: (list: ClassifiedModel[]) => void
+  setLipsyncModelList: (list: ClassifiedModel[]) => void
+  setMotionModelList: (list: ClassifiedModel[]) => void
   setExtendSource: (s: { jobId: string; url: string; label: string } | null) => void
   setMusicDuration: (s: number) => void
   setMusicLyrics: (l: string) => void
@@ -312,7 +344,7 @@ interface CreateState {
   setBackend: (backend: CreateBackend) => void
   setCloudImageModel: (id: string) => void
   setCloudVideoModel: (id: string) => void
-  setCaps: (caps: Record<'rmbg' | 'inpaint-nodes', boolean>) => void
+  setCaps: (caps: Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>) => void
   resetParamsToModelDefaults: () => void
 
   setIsGenerating: (generating: boolean) => void
@@ -378,6 +410,7 @@ export const useCreateStore = create<CreateState>()(
       characterTab: 'train' as 'train' | 'use',
       trainImages: [] as MediaRef[],
       triggerWord: '',
+      trainSteps: 1200,
       selectedCharacter: null as CharacterRef | null,
       audioInput: null as MediaRef | null,
       voiceFromJob: null as { jobId: string; label: string } | null,
@@ -398,8 +431,9 @@ export const useCreateStore = create<CreateState>()(
       cloudImageModel: '',
       cloudVideoModel: '',
       cloudOpModel: '',
+      localOpModel: '',
       charactersVersion: 0,
-      caps: { rmbg: false, 'inpaint-nodes': false } as Record<'rmbg' | 'inpaint-nodes', boolean>,
+      caps: { rmbg: false, 'inpaint-nodes': false, dwpose: false } as Record<'rmbg' | 'inpaint-nodes' | 'dwpose', boolean>,
 
       isGenerating: false,
       comfyCorsBlocked: false,
@@ -416,6 +450,9 @@ export const useCreateStore = create<CreateState>()(
       promptHistory: [],
       imageModelList: [],
       videoModelList: [],
+      audioModelList: [],
+      lipsyncModelList: [],
+      motionModelList: [],
       comfyRunning: false,
       vhsInstallPrompt: null,
 
@@ -462,9 +499,12 @@ export const useCreateStore = create<CreateState>()(
       setVideoModel: (model) => {
         const type = classifyModel(model)
         const defaults = MODEL_TYPE_DEFAULTS[type] || MODEL_TYPE_DEFAULTS.unknown
+        // Lightning/rapid merges are distilled to few steps at cfg 1 — the
+        // architecture defaults (30 steps, cfg 5+) render them to mush.
+        const lightning = /rapid|lightning|lightx2v/i.test(model)
         set({
           videoModel: model,
-          steps: defaults.steps, cfgScale: defaults.cfgScale,
+          steps: lightning ? 6 : defaults.steps, cfgScale: lightning ? 1.0 : defaults.cfgScale,
           sampler: defaults.sampler, scheduler: defaults.scheduler,
           width: defaults.width, height: defaults.height,
           ...(defaults.frames ? { frames: defaults.frames } : {}),
@@ -502,16 +542,37 @@ export const useCreateStore = create<CreateState>()(
           // only read by their own intent — no cross-intent bleed to clear.
           case 'character':
             return { ...base, cloudOp: 'character' as const, mode: 'image' as const, imageSubMode: 'text2img' as const, ...dropAll }
-          case 'lipsync':
+          case 'lipsync': {
             // Keeps the source slot (the portrait a photo-avatar model speaks).
-            return { ...base, cloudOp: 'lipsync' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null }
-          case 'music':
-            return { ...base, cloudOp: 'music' as const, ...dropAll }
-          case 'extend':
-            return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll }
-          case 'motion':
+            // Adopts the S2V architecture defaults so the local lane never
+            // inherits an Image-tab 1024×1024 into a 14B video graph.
+            const d = MODEL_TYPE_DEFAULTS.wans2v
+            return { ...base, cloudOp: 'lipsync' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null,
+              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
+              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+          }
+          case 'music': {
+            // Pin the underlying mode: an inherited img2img mode would trip
+            // the local flow's "add a source image" guard for a prompt-only op.
+            const d = MODEL_TYPE_DEFAULTS.ace
+            return { ...base, cloudOp: 'music' as const, mode: 'image' as const, imageSubMode: 'text2img' as const, ...dropAll,
+              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler }
+          }
+          case 'extend': {
+            // The local lane continues from the picked clip's last frame —
+            // regular I2V models, regular video defaults.
+            const d = MODEL_TYPE_DEFAULTS[classifyModel(s.videoModel)] || MODEL_TYPE_DEFAULTS.unknown
+            return { ...base, cloudOp: 'extend' as const, mode: 'video' as const, videoSubMode: 't2v' as const, ...dropAll,
+              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
+              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+          }
+          case 'motion': {
             // Keeps the source slot (the character image the video drives).
-            return { ...base, cloudOp: 'motion' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null }
+            const d = MODEL_TYPE_DEFAULTS.wananimate
+            return { ...base, cloudOp: 'motion' as const, mode: 'video' as const, videoSubMode: 'i2v' as const, mask: null,
+              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
+              width: d.width, height: d.height, ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}) }
+          }
           case 'image':    return { ...base, mode: 'image' as const, imageSubMode: 'text2img' as const, ...dropAll }
           case 'edit':     return { ...base, mode: 'image' as const, imageSubMode: 'img2img' as const }
           case 'removebg': return { ...base, removebg: true, mode: 'image' as const, imageSubMode: 'img2img' as const, mask: null }
@@ -551,6 +612,8 @@ export const useCreateStore = create<CreateState>()(
       removeTrainImage: (name) => set((s) => ({ trainImages: s.trainImages.filter((i) => i.name !== name) })),
       clearTrainImages: () => set({ trainImages: [] }),
       setTriggerWord: (w) => set({ triggerWord: w.replace(/\s+/g, '').slice(0, 30) }),
+      // Same clamp as the Rust command so the UI can never book a rejected run.
+      setTrainSteps: (n) => set({ trainSteps: Math.max(100, Math.min(4000, Math.floor(n))) }),
       setSelectedCharacter: (selectedCharacter) => set({ selectedCharacter }),
       // Upload and voice-pick are mutually exclusive speech sources.
       setAudioInput: (audioInput) => set({ audioInput, ...(audioInput ? { voiceFromJob: null } : {}) }),
@@ -558,6 +621,23 @@ export const useCreateStore = create<CreateState>()(
       setVideoInput: (videoInput) => set({ videoInput }),
       bumpCharactersVersion: () => set((s) => ({ charactersVersion: s.charactersVersion + 1 })),
       setCloudOpModel: (cloudOpModel) => set({ cloudOpModel }),
+      // Picking a lane model adopts its architecture defaults (like
+      // setVideoModel does) — an inherited 1024×1024 from the Image tab would
+      // OOM a 14B S2V run on consumer VRAM.
+      setLocalOpModel: (localOpModel) => {
+        const d = MODEL_TYPE_DEFAULTS[classifyModel(localOpModel)]
+        set(d
+          ? {
+              localOpModel,
+              steps: d.steps, cfgScale: d.cfgScale, sampler: d.sampler, scheduler: d.scheduler,
+              width: d.width, height: d.height,
+              ...(d.frames ? { frames: d.frames } : {}), ...(d.fps ? { fps: d.fps } : {}),
+            }
+          : { localOpModel })
+      },
+      setAudioModelList: (audioModelList) => set({ audioModelList }),
+      setLipsyncModelList: (lipsyncModelList) => set({ lipsyncModelList }),
+      setMotionModelList: (motionModelList) => set({ motionModelList }),
       setExtendSource: (extendSource) => set({ extendSource }),
       setMusicDuration: (s2) => set({ musicDuration: Math.max(5, Math.min(240, Math.floor(s2))) }),
       setMusicLyrics: (musicLyrics) => set({ musicLyrics: musicLyrics.slice(0, 2000) }),
@@ -574,8 +654,12 @@ export const useCreateStore = create<CreateState>()(
           if (backend !== 'local') return { backend }
           const patch: Record<string, unknown> = { backend }
           if (s.utilityOp) Object.assign(patch, { utilityOp: null, mask: null, error: null })
-          // The 2.5.8 categories are hosted-only too — never strand on one.
-          if (s.cloudOp) Object.assign(patch, { cloudOp: null, error: null })
+          // 2.5.8: every specialized category runs locally now, so a backend
+          // flip keeps the selection. The guard stays for future cloud-only
+          // ops (LOCAL_LANE_OPS is the single source of truth).
+          if (s.cloudOp && !LOCAL_LANE_OPS.has(s.cloudOp)) {
+            Object.assign(patch, { cloudOp: null, error: null })
+          }
           return patch
         }),
       setCloudImageModel: (cloudImageModel) => set({ cloudImageModel }),
@@ -647,6 +731,7 @@ export const useCreateStore = create<CreateState>()(
         // staged media (blobs / object URLs) and cloudOp are runtime-only.
         musicDuration: state.musicDuration,
         triggerWord: state.triggerWord,
+        trainSteps: state.trainSteps,
       }),
       // Future schema bumps hook into migrate. NOTE: zustand only invokes it
       // when the stored blob carries a NUMERIC version that differs — legacy

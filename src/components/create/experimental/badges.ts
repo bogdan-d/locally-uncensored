@@ -20,6 +20,11 @@ export const TYPE_BADGE: Record<ModelType, { label: string; color: string }> = {
   framepack: { label: 'FramePack', color: 'bg-teal-500/15 text-teal-300' },
   pyramidflow: { label: 'PyramidFlow', color: 'bg-violet-500/15 text-violet-300' },
   allegro: { label: 'Allegro', color: 'bg-rose-500/15 text-rose-300' },
+  // 2.5.8 specialized local lanes
+  ace: { label: 'ACE Step', color: 'bg-fuchsia-500/15 text-fuchsia-300' },
+  wans2v: { label: 'Wan S2V', color: 'bg-orange-500/15 text-orange-300' },
+  wananimate: { label: 'Wan Animate', color: 'bg-orange-500/15 text-orange-300' },
+  wanvace: { label: 'VACE', color: 'bg-lime-500/15 text-lime-300' },
   unknown: { label: 'Model', color: 'bg-white/10 text-gray-400' },
 }
 
