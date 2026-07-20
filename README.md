@@ -60,7 +60,7 @@ Grab the latest release from [**Releases**](https://github.com/PurpleDoubleD/loc
 
 > **Antivirus warning?** Some engines flag unsigned NSIS installers that download other binaries — a **false positive**. The installer is built by GitHub Actions from the public source on `master`, and the auto-update channel is signed against a public minisign key. Verification steps: [SECURITY.md](SECURITY.md#antivirus--browser-false-positives).
 
-**Current release: v2.5.7** (July 2026) — portable-friendly installers for Windows and Linux (no admin rights required), now under the short in-app name **LU** by LU Labs. Full history in [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) and [CHANGELOG.md](CHANGELOG.md).
+**Current release: v2.5.8** (July 2026) — portable-friendly installers for Windows and Linux (no admin rights required), under the short in-app name **LU** by LU Labs. 2.5.8 rebuilds the Model Manager from scratch (the "Model Hub"), refreshes the catalog with 27 verified models, and adds local GPU lanes for four Create categories (talking character, music, extend video, motion control). Full history in [Releases](https://github.com/PurpleDoubleD/locally-uncensored/releases) and [CHANGELOG.md](CHANGELOG.md).
 
 ---
 

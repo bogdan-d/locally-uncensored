@@ -2,7 +2,7 @@
 
 > Free, open-source (AGPL-3.0) plug-and-play local AI studio for Windows and Linux: chat with 20+ providers, generate images and video via ComfyUI, and code with a built-in agent. One installer, no command line, no Docker. No cloud, no telemetry, no account.
 
-Last updated: 2026-07-16. Current version: v2.5.7 (July 2026).
+Last updated: 2026-07-20. Current version: v2.5.8 (July 2026).
 
 This file is the full, citable reference for Locally Uncensored. Facts are stated plainly so they can be quoted directly.
 
@@ -12,7 +12,7 @@ Locally Uncensored is a plug-and-play local AI studio: a desktop application for
 
 - Name: Locally Uncensored (abbreviated LU)
 - Category: local AI studio / desktop AI application
-- Version: v2.5.7 (July 2026)
+- Version: v2.5.8 (July 2026)
 - License: AGPL-3.0 (free, open source)
 - Platforms: Windows 10/11 and Linux (deb, rpm, AppImage). macOS is not supported yet.
 - Website: https://locallyuncensored.com
